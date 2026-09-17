@@ -1,0 +1,102 @@
+# Sistema de Control — Residencial "EQUIZ"
+
+Aplicación web (Streamlit) con base de datos en la nube (Supabase) para gestionar
+los apartamentos del residencial: datos de inquilinos, control de pagos de
+alquiler y un dashboard general del edificio.
+
+## 1. Crear el proyecto en Supabase (base de datos en la nube)
+
+1. Entra a https://supabase.com y crea una cuenta (gratis) o inicia sesión.
+2. Clic en **New Project**. Ponle un nombre, ej. `residencial-equiz`, elige una
+   contraseña para la base de datos (guárdala) y la región más cercana.
+3. Espera 1-2 minutos a que se cree el proyecto.
+4. Ve a **SQL Editor** (menú lateral) → **New query**, pega todo el contenido
+   del archivo `schema.sql` de este proyecto y ejecútalo (botón *Run*). Esto
+   crea las tablas `apartamentos` y `pagos_alquiler`.
+5. Ve a **Project Settings → API**. Copia:
+   - **Project URL** → lo usarás como `SUPABASE_URL`
+   - **anon public key** → lo usarás como `SUPABASE_KEY`
+
+## 2. Configurar la aplicación
+
+1. Copia `.streamlit/secrets.toml.example` a `.streamlit/secrets.toml`.
+2. Completa `SUPABASE_URL`, `SUPABASE_KEY` y elige un `APP_PASSWORD` (la clave
+   que usarán tú y tu personal para entrar a la app).
+
+## 3. Ejecutar localmente
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+Se abrirá en tu navegador (normalmente `http://localhost:8501`).
+
+## 4. Publicar en internet (opcional, gratis)
+
+1. Sube esta carpeta a un repositorio de GitHub.
+2. Entra a https://share.streamlit.io con tu cuenta de GitHub.
+3. Clic en **New app**, elige el repositorio y el archivo `app.py`.
+4. En **Advanced settings → Secrets**, pega el contenido de tu
+   `secrets.toml` (con tus datos reales).
+5. Deploy. Obtendrás un link para acceder desde cualquier celular o
+   computadora.
+
+## 5. Importar los datos de tu Excel
+
+Se incluye `apartamentos_plantilla.csv`, generado a partir de tu archivo
+`Control_de_Edificio_30-12-2023.xlsx`, con los 20 apartamentos y los datos que
+se pudieron extraer automáticamente (inquilino, alquiler mensual, garantía,
+etc.).
+
+**Importante:** el Excel original tiene datos escritos de forma poco uniforme
+(fechas en texto, celdas combinadas, campos vacíos), así que **revisa y
+corrige el CSV antes de importarlo** — ábrelo en Excel o Google Sheets y
+verifica sobre todo: nombre del inquilino, monto de alquiler y estado
+(Ocupado/Desocupado).
+
+Para importar:
+1. Abre la app → **Apartamentos** → pestaña **📥 Importar CSV**.
+2. Sube el archivo `apartamentos_plantilla.csv` (ya corregido).
+3. Revisa la vista previa y presiona **Importar estos apartamentos**.
+
+## 6. Funcionalidades incluidas
+
+- **Dashboard**: resumen general del edificio — unidades ocupadas/desocupadas,
+  total esperado, total recaudado y deuda del mes seleccionado, y estado de
+  pago por apartamento.
+- **Apartamentos**: ver, editar, crear y eliminar apartamentos e inquilinos.
+- **Pagos de Alquiler**: para cada apartamento y mes puedes registrar varios
+  abonos (pagos parciales) por separado — ej. Bs 200 el día 5 y Bs 300 el
+  día 20 — y el sistema suma automáticamente cuánto se pagó y cuánto queda
+  de deuda. Tú decides cuándo agregar cada mes, no es automático. Incluye
+  historial filtrable por apartamento, año y mes, con el detalle de cada
+  abono.
+- **Electricidad**: registras la lectura del medidor (Kwh anterior y
+  actual) y la tarifa por Kwh; el sistema calcula automáticamente el monto
+  a pagar del mes. El Kwh anterior se precarga solo con el Kwh actual del
+  último mes registrado. Igual que en alquiler, permite varios abonos
+  parciales por mes y tiene su propio historial.
+- **Agua**: funciona igual que Electricidad, pero con lectura del medidor
+  de agua (m³) y su propia tarifa por m³.
+
+### Si ya habías creado las tablas antes (actualizaciones)
+
+- Si tu base de datos ya tenía la tabla `pagos_alquiler` de una versión
+  anterior de esta app, ejecuta `migracion_pagos_multiples.sql` en el SQL
+  Editor de Supabase — reemplaza esa tabla por `periodos_alquiler` + `pagos`,
+  que es lo que permite registrar varios abonos por mes. No afecta los datos
+  de `apartamentos`.
+- Para agregar el control de Electricidad a una base de datos que ya tienes
+  funcionando, ejecuta `migracion_electricidad.sql` en el SQL Editor. Es
+  aditivo: solo crea tablas nuevas, no toca nada de lo que ya existe.
+- Para agregar el control de Agua, ejecuta `migracion_agua.sql` en el SQL
+  Editor. También es aditivo (agrega una columna de tarifa a
+  `configuracion` y crea las tablas `periodos_agua` y `pagos_agua`).
+
+## 7. Próximas mejoras posibles (no incluidas en esta primera versión)
+
+- Usuarios individuales con permisos distintos (en vez de una sola clave compartida).
+- Notificaciones o recordatorios de pagos pendientes.
+
+Cuando quieras avanzar con alguna de estas, dímelo y la agregamos.
