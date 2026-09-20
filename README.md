@@ -63,9 +63,16 @@ Para importar:
 ## 6. Funcionalidades incluidas
 
 - **Dashboard**: resumen general del edificio — unidades ocupadas/desocupadas,
-  total esperado, total recaudado y deuda del mes seleccionado, y estado de
-  pago por apartamento.
-- **Apartamentos**: ver, editar, crear y eliminar apartamentos e inquilinos.
+  total esperado, total recaudado y deuda del mes seleccionado, estado de
+  pago por apartamento, una sección de **⚠️ Alertas** con contratos
+  vencidos o por vencer en los próximos 30 días y apartamentos en mora de
+  alquiler (según el día del mes en que ingresó cada inquilino), una
+  **gráfica de líneas del cobro de alquiler de los últimos 12 meses**, y un
+  **ranking de los 5 apartamentos con mayor consumo de electricidad y agua**
+  del mes seleccionado.
+- **Apartamentos**: ver, editar, crear y eliminar apartamentos e inquilinos,
+  incluyendo los datos del contrato (tipo, estado, fecha inicio/fin y
+  observaciones).
 - **Pagos de Alquiler**: para cada apartamento y mes puedes registrar varios
   abonos (pagos parciales) por separado — ej. Bs 200 el día 5 y Bs 300 el
   día 20 — y el sistema suma automáticamente cuánto se pagó y cuánto queda
@@ -79,6 +86,13 @@ Para importar:
   parciales por mes y tiene su propio historial.
 - **Agua**: funciona igual que Electricidad, pero con lectura del medidor
   de agua (m³) y su propia tarifa por m³.
+- **Roles y permisos**: dos roles — **Administrador** (acceso total) y
+  **Cobrador/Conserje** (solo puede registrar pagos/lecturas de alquiler,
+  electricidad y agua, y ver el Dashboard; no puede editar apartamentos,
+  tarifas, ni editar o eliminar pagos ya registrados). El primer
+  Administrador se crea desde la propia app la primera vez que entras.
+  Desde **👥 Usuarios** (solo visible para Administradores) puedes crear más
+  cuentas, cambiar roles, desactivar o eliminar usuarios.
 
 ### Si ya habías creado las tablas antes (actualizaciones)
 
@@ -93,10 +107,40 @@ Para importar:
 - Para agregar el control de Agua, ejecuta `migracion_agua.sql` en el SQL
   Editor. También es aditivo (agrega una columna de tarifa a
   `configuracion` y crea las tablas `periodos_agua` y `pagos_agua`).
+- Para agregar los datos de contrato a `apartamentos`, ejecuta
+  `migracion_contrato.sql` en el SQL Editor. Solo agrega columnas nuevas.
+- Para agregar roles y permisos, ejecuta `migracion_usuarios.sql` en el
+  SQL Editor. Crea la tabla `usuarios`; no borra nada existente.
 
-## 7. Próximas mejoras posibles (no incluidas en esta primera versión)
+## 7. Backups diarios automáticos
 
-- Usuarios individuales con permisos distintos (en vez de una sola clave compartida).
-- Notificaciones o recordatorios de pagos pendientes.
+Como Supabase en el plan gratuito no incluye backups automáticos, se
+incluye un workflow de GitHub Actions (`.github/workflows/backup-diario.yml`)
+que genera un respaldo completo de la base todos los días.
 
-Cuando quieras avanzar con alguna de estas, dímelo y la agregamos.
+**Importante:** los backups contienen datos personales de tus inquilinos
+(nombres, celular, cédula). Por eso deben guardarse en un repositorio
+**privado**, nunca en el mismo repo público que uses para desplegar la app
+en Streamlit Cloud. Pasos:
+
+1. Crea un repositorio nuevo en GitHub, **privado**, solo para esto (ej.
+   `residencial-equiz-backups`).
+2. Sube ahí únicamente la carpeta `.github/workflows/backup-diario.yml`
+   (no hace falta subir el resto del código).
+3. En Supabase, ve a Project Settings → Database → Connection string →
+   copia la URI y reemplaza `[YOUR-PASSWORD]` por la contraseña real de tu
+   base de datos (la que pusiste al crear el proyecto; si no la recuerdas,
+   puedes resetearla ahí mismo).
+4. En ese repositorio de backups → Settings → Secrets and variables →
+   Actions → New repository secret. Nombre: `SUPABASE_DB_URL`. Valor: la
+   URI completa del paso anterior.
+5. Ve a la pestaña "Actions" del repositorio, entra al workflow "Backup
+   diario de la base de datos" y usa "Run workflow" para probarlo una vez
+   manualmente. Si corre sin errores, revisa la carpeta `backups/` — debe
+   aparecer un archivo `backup-AAAA-MM-DD.sql`.
+6. A partir de ahí corre solo, todos los días, y borra automáticamente los
+   respaldos de más de 30 días para no acumular espacio.
+
+Para restaurar un backup en caso de emergencia, se usa `psql` con ese
+mismo archivo `.sql` contra tu base de datos — avísame si llegas a
+necesitarlo y te guío en el momento.
