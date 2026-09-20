@@ -1,5 +1,5 @@
 """
-Conexión a Supabase para el Sistema de Control del Residencial V4.
+Conexión a Supabase para el Sistema de Control del Residencial.
 """
 import streamlit as st
 from supabase import create_client, Client
@@ -106,6 +106,11 @@ def crear_pago(payload: dict):
     return sb.table("pagos").insert(payload).execute()
 
 
+def actualizar_pago(pago_id, payload: dict):
+    sb = get_client()
+    return sb.table("pagos").update(payload).eq("id", pago_id).execute()
+
+
 def eliminar_pago(pago_id):
     sb = get_client()
     return sb.table("pagos").delete().eq("id", pago_id).execute()
@@ -202,6 +207,11 @@ def crear_pago_electricidad(payload: dict):
     return sb.table("pagos_electricidad").insert(payload).execute()
 
 
+def actualizar_pago_electricidad(pago_id, payload: dict):
+    sb = get_client()
+    return sb.table("pagos_electricidad").update(payload).eq("id", pago_id).execute()
+
+
 def eliminar_pago_electricidad(pago_id):
     sb = get_client()
     return sb.table("pagos_electricidad").delete().eq("id", pago_id).execute()
@@ -270,6 +280,11 @@ def actualizar_periodo_agua(periodo_id, payload: dict):
 def crear_pago_agua(payload: dict):
     sb = get_client()
     return sb.table("pagos_agua").insert(payload).execute()
+
+
+def actualizar_pago_agua(pago_id, payload: dict):
+    sb = get_client()
+    return sb.table("pagos_agua").update(payload).eq("id", pago_id).execute()
 
 
 def eliminar_pago_agua(pago_id):
