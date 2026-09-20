@@ -265,9 +265,16 @@ if pagina == "📊 Dashboard":
     st.line_chart(df_grafica)
 
     st.divider()
-    st.subheader(f"🔝 Mayor consumo — {mes_sel} {anio_sel}")
-    periodos_elec_sel = cargar_periodos_electricidad(anio=anio_sel, mes=mes_sel)
-    periodos_agua_sel = cargar_periodos_agua(anio=anio_sel, mes=mes_sel)
+    st.subheader("🔝 Mayor consumo (Top 5)")
+    colsel1, colsel2 = st.columns(2)
+    with colsel1:
+        anio_consumo = st.selectbox("Año ", options=list(range(date.today().year - 2, date.today().year + 2)),
+                                     index=2, key="anio_consumo")
+    with colsel2:
+        mes_consumo = st.selectbox("Mes ", options=MESES, index=date.today().month - 1, key="mes_consumo")
+
+    periodos_elec_sel = cargar_periodos_electricidad(anio=anio_consumo, mes=mes_consumo)
+    periodos_agua_sel = cargar_periodos_agua(anio=anio_consumo, mes=mes_consumo)
 
     colE, colW = st.columns(2)
     with colE:
