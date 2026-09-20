@@ -18,7 +18,7 @@ def check_password():
     if st.session_state.get("auth_ok"):
         return True
 
-    st.title("🏢 Residencial EQUISE")
+    st.title("🏢 Residencial EQUIZ")
     st.caption("Sistema de control de apartamentos y alquileres")
     pwd = st.text_input("Clave de acceso", type="password")
     if st.button("Ingresar"):
@@ -157,9 +157,10 @@ if pagina == "📊 Dashboard":
 
     st.divider()
     st.subheader("Resumen de todos los apartamentos")
-    tabla = df_apt[["codigo", "piso", "estado", "inquilino_nombre", "monto_alquiler"]].rename(
+    tabla = df_apt[["codigo", "piso", "estado", "inquilino_nombre", "monto_alquiler", "estado_contrato"]].rename(
         columns={"codigo": "Apartamento", "piso": "Piso", "estado": "Estado",
-                 "inquilino_nombre": "Inquilino", "monto_alquiler": "Alquiler mensual"}
+                 "inquilino_nombre": "Inquilino", "monto_alquiler": "Alquiler mensual",
+                 "estado_contrato": "Contrato"}
     )
     st.dataframe(tabla, use_container_width=True, hide_index=True)
 
@@ -213,6 +214,41 @@ elif pagina == "🏠 Apartamentos":
 
                 notas = st.text_area("Notas", value=apt.get("notas") or "")
 
+                st.divider()
+                st.markdown("**📄 Datos del contrato**")
+                colc1, colc2 = st.columns(2)
+                with colc1:
+                    _tipos_contrato = ["", "Alquiler", "Anticrético"]
+                    tipo_contrato = st.selectbox(
+                        "Tipo de contrato", _tipos_contrato,
+                        index=_tipos_contrato.index(apt["tipo_contrato"]) if apt.get("tipo_contrato") in _tipos_contrato else 0
+                    )
+                with colc2:
+                    _estados_contrato = ["Sin Contrato", "Vigente", "Caducado"]
+                    estado_contrato = st.selectbox(
+                        "Estado de contrato", _estados_contrato,
+                        index=_estados_contrato.index(apt["estado_contrato"]) if apt.get("estado_contrato") in _estados_contrato else 0
+                    )
+                colc4, colc5 = st.columns(2)
+                with colc4:
+                    _raw_ci = apt.get("contrato_fecha_inicio")
+                    try:
+                        _ci_val = date.fromisoformat(str(_raw_ci)[:10]) if _raw_ci else None
+                    except ValueError:
+                        _ci_val = None
+                    contrato_fecha_inicio = st.date_input("Fecha inicio", value=_ci_val, format="DD/MM/YYYY",
+                                                           key="ci_edit")
+                with colc5:
+                    _raw_cf = apt.get("contrato_fecha_fin")
+                    try:
+                        _cf_val = date.fromisoformat(str(_raw_cf)[:10]) if _raw_cf else None
+                    except ValueError:
+                        _cf_val = None
+                    contrato_fecha_fin = st.date_input("Fecha fin", value=_cf_val, format="DD/MM/YYYY",
+                                                        key="cf_edit")
+                contrato_observaciones = st.text_area("Observaciones del contrato",
+                                                       value=apt.get("contrato_observaciones") or "")
+
                 col_a, col_b = st.columns([1, 1])
                 guardar = col_a.form_submit_button("💾 Guardar cambios", use_container_width=True)
                 eliminar = col_b.form_submit_button("🗑️ Eliminar apartamento", use_container_width=True)
@@ -235,6 +271,11 @@ elif pagina == "🏠 Apartamentos":
                         "detalle": detalle or None,
                         "monto_alquiler": monto_alquiler,
                         "notas": notas or None,
+                        "tipo_contrato": tipo_contrato or None,
+                        "estado_contrato": estado_contrato,
+                        "contrato_fecha_inicio": str(contrato_fecha_inicio) if contrato_fecha_inicio else None,
+                        "contrato_fecha_fin": str(contrato_fecha_fin) if contrato_fecha_fin else None,
+                        "contrato_observaciones": contrato_observaciones or None,
                     }
                     try:
                         db.actualizar_apartamento(apt["id"], payload)
@@ -270,6 +311,21 @@ elif pagina == "🏠 Apartamentos":
                 garantia = st.text_input("Garantía")
                 detalle = st.text_input("Detalle (ej. incluye agua/internet)")
 
+            st.divider()
+            st.markdown("**📄 Datos del contrato**")
+            colc1, colc2 = st.columns(2)
+            with colc1:
+                tipo_contrato = st.selectbox("Tipo de contrato", ["", "Alquiler", "Anticrético"], key="tipo_nuevo")
+            with colc2:
+                estado_contrato = st.selectbox("Estado de contrato", ["Sin Contrato", "Vigente", "Caducado"],
+                                                key="estado_c_nuevo")
+            colc3, colc4 = st.columns(2)
+            with colc3:
+                contrato_fecha_inicio = st.date_input("Fecha inicio", value=None, format="DD/MM/YYYY", key="ci_nuevo")
+            with colc4:
+                contrato_fecha_fin = st.date_input("Fecha fin", value=None, format="DD/MM/YYYY", key="cf_nuevo")
+            contrato_observaciones = st.text_area("Observaciones del contrato", key="obs_c_nuevo")
+
             crear = st.form_submit_button("➕ Crear apartamento")
             if crear:
                 if not codigo:
@@ -287,6 +343,11 @@ elif pagina == "🏠 Apartamentos":
                         "garantia": garantia or None,
                         "detalle": detalle or None,
                         "monto_alquiler": monto_alquiler,
+                        "tipo_contrato": tipo_contrato or None,
+                        "estado_contrato": estado_contrato,
+                        "contrato_fecha_inicio": str(contrato_fecha_inicio) if contrato_fecha_inicio else None,
+                        "contrato_fecha_fin": str(contrato_fecha_fin) if contrato_fecha_fin else None,
+                        "contrato_observaciones": contrato_observaciones or None,
                     }
                     try:
                         db.crear_apartamento(payload)
