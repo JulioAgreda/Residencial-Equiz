@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
 import calendar
+import bcrypt
 import db
 
 st.set_page_config(page_title="Residencial EQUIZ", page_icon="🏢", layout="wide")
@@ -10,29 +11,92 @@ MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
          "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
 PISOS = ["Planta Baja", "Primer Piso", "Segundo Piso", "Tercer Piso"]
+ROLES = ["Administrador", "Cobrador"]
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verificar_password(password: str, password_hash: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except Exception:
+        return False
 
 
 # ------------------------------------------------------------------
-# Autenticación simple compartida (clave única para el personal)
+# Autenticación con usuario/contraseña y roles (Administrador / Cobrador)
 # ------------------------------------------------------------------
-def check_password():
-    if st.session_state.get("auth_ok"):
+def check_login():
+    if st.session_state.get("usuario"):
         return True
 
     st.title("🏢 Residencial EQUIZ")
     st.caption("Sistema de control de apartamentos y alquileres")
-    pwd = st.text_input("Clave de acceso", type="password")
+
+    try:
+        usuarios_existentes = db.listar_usuarios()
+    except Exception as e:
+        st.error(f"No se pudo conectar con la base de usuarios: {e}")
+        st.info("¿Ya ejecutaste migracion_usuarios.sql en Supabase?")
+        return False
+
+    if not usuarios_existentes:
+        st.info("Aún no hay usuarios creados. Crea la cuenta del **Administrador principal**:")
+        with st.form("form_primer_admin"):
+            username = st.text_input("Usuario (para iniciar sesión)")
+            nombre = st.text_input("Nombre completo")
+            pwd1 = st.text_input("Contraseña", type="password")
+            pwd2 = st.text_input("Repetir contraseña", type="password")
+            crear = st.form_submit_button("Crear administrador")
+            if crear:
+                if not username or not pwd1:
+                    st.error("Usuario y contraseña son obligatorios.")
+                elif pwd1 != pwd2:
+                    st.error("Las contraseñas no coinciden.")
+                else:
+                    try:
+                        db.crear_usuario({
+                            "username": username.strip().lower(),
+                            "nombre": nombre or None,
+                            "password_hash": hash_password(pwd1),
+                            "rol": "Administrador",
+                            "activo": True,
+                        })
+                        st.success("Administrador creado. Ahora inicia sesión.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al crear el usuario: {e}")
+        return False
+
+    username = st.text_input("Usuario")
+    pwd = st.text_input("Contraseña", type="password")
     if st.button("Ingresar"):
-        if pwd == st.secrets.get("APP_PASSWORD", ""):
-            st.session_state["auth_ok"] = True
+        usuario = db.obtener_usuario_por_username(username.strip().lower())
+        if usuario and usuario.get("activo") and verificar_password(pwd, usuario["password_hash"]):
+            st.session_state["usuario"] = usuario
             st.rerun()
         else:
-            st.error("Clave incorrecta.")
+            st.error("Usuario o contraseña incorrectos, o el usuario está desactivado.")
+
+    with st.expander("¿Problemas para entrar? Usar clave general de administrador"):
+        pwd_general = st.text_input("Clave general", type="password", key="pwd_general")
+        if st.button("Ingresar con clave general"):
+            if pwd_general and pwd_general == st.secrets.get("APP_PASSWORD", ""):
+                st.session_state["usuario"] = {"username": "admin", "nombre": "Administrador",
+                                                "rol": "Administrador"}
+                st.rerun()
+            else:
+                st.error("Clave incorrecta.")
     return False
 
 
-if not check_password():
+if not check_login():
     st.stop()
+
+usuario_actual = st.session_state["usuario"]
+es_admin = usuario_actual.get("rol") == "Administrador"
 
 
 # ------------------------------------------------------------------
@@ -146,16 +210,21 @@ def ultimos_n_meses(n=12):
 # Sidebar / navegación
 # ------------------------------------------------------------------
 st.sidebar.title("🏢 Residencial EQUIZ")
-pagina = st.sidebar.radio(
-    "Navegación",
-    ["📊 Dashboard", "🏠 Apartamentos", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua"],
-)
+st.sidebar.caption(f'👤 {usuario_actual.get("nombre") or usuario_actual.get("username")} · {usuario_actual.get("rol")}')
+
+if es_admin:
+    opciones_nav = ["📊 Dashboard", "🏠 Apartamentos", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua",
+                     "👥 Usuarios"]
+else:
+    opciones_nav = ["📊 Dashboard", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua"]
+
+pagina = st.sidebar.radio("Navegación", opciones_nav)
 st.sidebar.divider()
 if st.sidebar.button("🔄 Actualizar datos"):
     limpiar_cache()
     st.rerun()
 if st.sidebar.button("🚪 Cerrar sesión"):
-    st.session_state["auth_ok"] = False
+    del st.session_state["usuario"]
     st.rerun()
 
 
@@ -359,6 +428,9 @@ if pagina == "📊 Dashboard":
 # PÁGINA: APARTAMENTOS
 # ==================================================================
 elif pagina == "🏠 Apartamentos":
+    if not es_admin:
+        st.error("No tienes permiso para acceder a esta sección.")
+        st.stop()
     st.title("🏠 Gestión de Apartamentos")
 
     tab_lista, tab_nuevo, tab_importar = st.tabs(["📋 Lista y edición", "➕ Nuevo apartamento", "📥 Importar CSV"])
@@ -588,7 +660,10 @@ elif pagina == "💵 Pagos de Alquiler":
         st.info("Primero registra apartamentos en la sección **Apartamentos**.")
         st.stop()
 
-    tab_registrar, tab_historial = st.tabs(["➕ Registrar abono", "📜 Historial"])
+    if es_admin:
+        tab_registrar, tab_historial = st.tabs(["➕ Registrar abono", "📜 Historial"])
+    else:
+        tab_registrar, = st.tabs(["➕ Registrar abono"])
 
     with tab_registrar:
         codigos = [f'{a["codigo"]} — {a.get("inquilino_nombre") or "vacío"}' for a in apartamentos]
@@ -612,23 +687,24 @@ elif pagina == "💵 Pagos de Alquiler":
                     f"**Pagado hasta ahora:** {fmt_money(pagado_hasta_ahora)}  |  "
                     f"**Deuda actual:** {fmt_money(deuda_actual)}")
 
-        with st.expander("✏️ Cambiar el monto esperado de este mes (si es distinto al alquiler habitual)"):
-            with st.form("form_monto_esperado"):
-                nuevo_monto_esperado = st.number_input(
-                    "Monto esperado (Bs)", min_value=0.0, step=50.0, value=monto_esperado_actual
-                )
-                guardar_monto = st.form_submit_button("Guardar monto esperado")
-                if guardar_monto:
-                    try:
-                        if periodo:
-                            db.actualizar_periodo(periodo["id"], {"monto_esperado": nuevo_monto_esperado})
-                        else:
-                            db.obtener_o_crear_periodo(apt["id"], mes, int(anio), nuevo_monto_esperado)
-                        limpiar_cache()
-                        st.success("Monto esperado actualizado.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al guardar: {e}")
+        if es_admin:
+            with st.expander("✏️ Cambiar el monto esperado de este mes (si es distinto al alquiler habitual)"):
+                with st.form("form_monto_esperado"):
+                    nuevo_monto_esperado = st.number_input(
+                        "Monto esperado (Bs)", min_value=0.0, step=50.0, value=monto_esperado_actual
+                    )
+                    guardar_monto = st.form_submit_button("Guardar monto esperado")
+                    if guardar_monto:
+                        try:
+                            if periodo:
+                                db.actualizar_periodo(periodo["id"], {"monto_esperado": nuevo_monto_esperado})
+                            else:
+                                db.obtener_o_crear_periodo(apt["id"], mes, int(anio), nuevo_monto_esperado)
+                            limpiar_cache()
+                            st.success("Monto esperado actualizado.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al guardar: {e}")
 
         st.divider()
         st.subheader("➕ Registrar un nuevo abono")
@@ -662,6 +738,12 @@ elif pagina == "💵 Pagos de Alquiler":
             st.divider()
             st.subheader(f"Abonos ya registrados — {mes} {int(anio)}")
             for p in sorted(abonos, key=lambda x: x["fecha"]):
+                if not es_admin:
+                    colf, colm, colo = st.columns([2, 2, 5])
+                    colf.write(p["fecha"])
+                    colm.write(fmt_money(p["monto"]))
+                    colo.write(f'{p.get("metodo_pago") or ""} · {p.get("observacion") or ""}')
+                    continue
                 with st.expander(f'{p["fecha"]} — {fmt_money(p["monto"])} — {p.get("metodo_pago") or ""}'):
                     with st.form(f'form_editar_pago_{p["id"]}'):
                         colf, colm = st.columns(2)
@@ -823,21 +905,25 @@ elif pagina == "⚡ Electricidad":
         st.info("Primero registra apartamentos en la sección **Apartamentos**.")
         st.stop()
 
-    with st.expander("⚙️ Tarifa por Kwh vigente"):
-        tarifa_actual = db.obtener_tarifa_kwh()
-        with st.form("form_tarifa"):
-            nueva_tarifa = st.number_input(
-                "Tarifa por Kwh (Bs)", min_value=0.0, step=0.01, format="%.4f", value=tarifa_actual
-            )
-            if st.form_submit_button("Guardar tarifa"):
-                try:
-                    db.guardar_tarifa_kwh(nueva_tarifa)
-                    st.success("Tarifa actualizada. Se usará como valor por defecto para nuevas lecturas.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
+    tarifa_actual = db.obtener_tarifa_kwh()
+    if es_admin:
+        with st.expander("⚙️ Tarifa por Kwh vigente"):
+            with st.form("form_tarifa"):
+                nueva_tarifa = st.number_input(
+                    "Tarifa por Kwh (Bs)", min_value=0.0, step=0.01, format="%.4f", value=tarifa_actual
+                )
+                if st.form_submit_button("Guardar tarifa"):
+                    try:
+                        db.guardar_tarifa_kwh(nueva_tarifa)
+                        st.success("Tarifa actualizada. Se usará como valor por defecto para nuevas lecturas.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al guardar: {e}")
 
-    tab_registrar, tab_historial = st.tabs(["➕ Registrar lectura y abono", "📜 Historial"])
+    if es_admin:
+        tab_registrar, tab_historial = st.tabs(["➕ Registrar lectura y abono", "📜 Historial"])
+    else:
+        tab_registrar, = st.tabs(["➕ Registrar lectura y abono"])
 
     with tab_registrar:
         codigos = [f'{a["codigo"]} — {a.get("inquilino_nombre") or "vacío"}' for a in apartamentos]
@@ -939,6 +1025,12 @@ elif pagina == "⚡ Electricidad":
                 st.divider()
                 st.subheader(f"Abonos ya registrados — {mes} {int(anio)}")
                 for p in sorted(abonos, key=lambda x: x["fecha"]):
+                    if not es_admin:
+                        colf, colm, colo = st.columns([2, 2, 5])
+                        colf.write(p["fecha"])
+                        colm.write(fmt_money(p["monto"]))
+                        colo.write(f'{p.get("metodo_pago") or ""} · {p.get("observacion") or ""}')
+                        continue
                     with st.expander(f'{p["fecha"]} — {fmt_money(p["monto"])} — {p.get("metodo_pago") or ""}'):
                         with st.form(f'form_editar_pago_elec_{p["id"]}'):
                             colf, colm = st.columns(2)
@@ -1099,21 +1191,25 @@ elif pagina == "💧 Agua":
         st.info("Primero registra apartamentos en la sección **Apartamentos**.")
         st.stop()
 
-    with st.expander("⚙️ Tarifa por m³ vigente"):
-        tarifa_actual = db.obtener_tarifa_agua()
-        with st.form("form_tarifa_agua"):
-            nueva_tarifa = st.number_input(
-                "Tarifa por m³ (Bs)", min_value=0.0, step=0.01, format="%.4f", value=tarifa_actual
-            )
-            if st.form_submit_button("Guardar tarifa"):
-                try:
-                    db.guardar_tarifa_agua(nueva_tarifa)
-                    st.success("Tarifa actualizada. Se usará como valor por defecto para nuevas lecturas.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
+    tarifa_actual = db.obtener_tarifa_agua()
+    if es_admin:
+        with st.expander("⚙️ Tarifa por m³ vigente"):
+            with st.form("form_tarifa_agua"):
+                nueva_tarifa = st.number_input(
+                    "Tarifa por m³ (Bs)", min_value=0.0, step=0.01, format="%.4f", value=tarifa_actual
+                )
+                if st.form_submit_button("Guardar tarifa"):
+                    try:
+                        db.guardar_tarifa_agua(nueva_tarifa)
+                        st.success("Tarifa actualizada. Se usará como valor por defecto para nuevas lecturas.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al guardar: {e}")
 
-    tab_registrar, tab_historial = st.tabs(["➕ Registrar lectura y abono", "📜 Historial"])
+    if es_admin:
+        tab_registrar, tab_historial = st.tabs(["➕ Registrar lectura y abono", "📜 Historial"])
+    else:
+        tab_registrar, = st.tabs(["➕ Registrar lectura y abono"])
 
     with tab_registrar:
         codigos = [f'{a["codigo"]} — {a.get("inquilino_nombre") or "vacío"}' for a in apartamentos]
@@ -1217,6 +1313,12 @@ elif pagina == "💧 Agua":
                 st.divider()
                 st.subheader(f"Abonos ya registrados — {mes} {int(anio)}")
                 for p in sorted(abonos, key=lambda x: x["fecha"]):
+                    if not es_admin:
+                        colf, colm, colo = st.columns([2, 2, 5])
+                        colf.write(p["fecha"])
+                        colm.write(fmt_money(p["monto"]))
+                        colo.write(f'{p.get("metodo_pago") or ""} · {p.get("observacion") or ""}')
+                        continue
                     with st.expander(f'{p["fecha"]} — {fmt_money(p["monto"])} — {p.get("metodo_pago") or ""}'):
                         with st.form(f'form_editar_pago_agua_{p["id"]}'):
                             colf, colm = st.columns(2)
@@ -1368,3 +1470,90 @@ elif pagina == "💧 Agua":
                                         st.rerun()
                                     except Exception as e:
                                         st.error(f"Error al eliminar: {e}")
+
+
+# ==================================================================
+# PÁGINA: USUARIOS (solo Administrador)
+# ==================================================================
+elif pagina == "👥 Usuarios":
+    if not es_admin:
+        st.error("No tienes permiso para acceder a esta sección.")
+        st.stop()
+
+    st.title("👥 Usuarios")
+    st.caption("Administra quién puede entrar al sistema y con qué rol.")
+
+    tab_lista, tab_nuevo = st.tabs(["📋 Lista y edición", "➕ Nuevo usuario"])
+
+    with tab_lista:
+        usuarios = db.listar_usuarios()
+        if not usuarios:
+            st.info("No hay usuarios registrados.")
+        else:
+            etiquetas = [f'{u["username"]} — {u.get("nombre") or ""} ({u["rol"]})' for u in usuarios]
+            idx = st.selectbox("Selecciona un usuario", range(len(usuarios)), format_func=lambda i: etiquetas[i])
+            u = usuarios[idx]
+
+            with st.form("form_editar_usuario"):
+                nombre = st.text_input("Nombre completo", value=u.get("nombre") or "")
+                rol = st.selectbox("Rol", ROLES, index=ROLES.index(u["rol"]) if u["rol"] in ROLES else 0)
+                activo = st.checkbox("Usuario activo", value=u.get("activo", True))
+                st.caption("Deja la contraseña en blanco si no quieres cambiarla.")
+                nueva_pwd = st.text_input("Nueva contraseña (opcional)", type="password")
+
+                col_a, col_b = st.columns(2)
+                guardar = col_a.form_submit_button("💾 Guardar cambios", use_container_width=True)
+                eliminar = col_b.form_submit_button("🗑️ Eliminar usuario", use_container_width=True)
+
+                if guardar:
+                    if u["username"] == usuario_actual.get("username") and (not activo or rol != "Administrador"):
+                        st.error("No puedes quitarte a ti mismo el acceso de Administrador o desactivarte.")
+                    else:
+                        payload = {"nombre": nombre or None, "rol": rol, "activo": activo}
+                        if nueva_pwd:
+                            payload["password_hash"] = hash_password(nueva_pwd)
+                        try:
+                            db.actualizar_usuario(u["id"], payload)
+                            st.success("Usuario actualizado.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al actualizar: {e}")
+
+                if eliminar:
+                    if u["username"] == usuario_actual.get("username"):
+                        st.error("No puedes eliminar tu propio usuario.")
+                    else:
+                        try:
+                            db.eliminar_usuario(u["id"])
+                            st.success("Usuario eliminado.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al eliminar: {e}")
+
+    with tab_nuevo:
+        with st.form("form_nuevo_usuario", clear_on_submit=True):
+            username = st.text_input("Usuario (para iniciar sesión)")
+            nombre = st.text_input("Nombre completo")
+            rol = st.selectbox("Rol", ROLES, index=1)
+            pwd1 = st.text_input("Contraseña", type="password")
+            pwd2 = st.text_input("Repetir contraseña", type="password")
+
+            crear = st.form_submit_button("➕ Crear usuario")
+            if crear:
+                if not username or not pwd1:
+                    st.error("Usuario y contraseña son obligatorios.")
+                elif pwd1 != pwd2:
+                    st.error("Las contraseñas no coinciden.")
+                else:
+                    try:
+                        db.crear_usuario({
+                            "username": username.strip().lower(),
+                            "nombre": nombre or None,
+                            "password_hash": hash_password(pwd1),
+                            "rol": rol,
+                            "activo": True,
+                        })
+                        st.success(f"Usuario {username} creado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al crear (¿usuario repetido?): {e}")
