@@ -24,6 +24,11 @@ create table if not exists apartamentos (
     detalle text,                                 -- ej: "Incluye agua e internet"
     monto_alquiler numeric(10,2) not null default 0,
     notas text,
+    tipo_contrato varchar(20),                     -- Alquiler / Anticrético
+    estado_contrato varchar(20) not null default 'Sin Contrato',  -- Vigente / Caducado / Sin Contrato
+    contrato_fecha_inicio date,
+    contrato_fecha_fin date,
+    contrato_observaciones text,
     created_at timestamptz default now(),
     updated_at timestamptz default now()
 );
