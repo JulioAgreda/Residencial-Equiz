@@ -18,7 +18,7 @@ def check_password():
     if st.session_state.get("auth_ok"):
         return True
 
-    st.title("🏢 Residencial EQUIZ")
+    st.title("🏢 Residencial EQUISE")
     st.caption("Sistema de control de apartamentos y alquileres")
     pwd = st.text_input("Clave de acceso", type="password")
     if st.button("Ingresar"):
