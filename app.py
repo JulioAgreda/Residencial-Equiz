@@ -55,6 +55,16 @@ def cargar_periodos(apartamento_id=None, anio=None, mes=None):
     return db.listar_periodos(apartamento_id=apartamento_id, anio=anio, mes=mes)
 
 
+@st.cache_data(ttl=30)
+def cargar_periodos_electricidad(anio=None, mes=None):
+    return db.listar_periodos_electricidad(anio=anio, mes=mes)
+
+
+@st.cache_data(ttl=30)
+def cargar_periodos_agua(anio=None, mes=None):
+    return db.listar_periodos_agua(anio=anio, mes=mes)
+
+
 def total_pagado(periodo):
     return sum(float(p["monto"]) for p in (periodo.get("pagos") or []))
 
@@ -62,6 +72,8 @@ def total_pagado(periodo):
 def limpiar_cache():
     cargar_apartamentos.clear()
     cargar_periodos.clear()
+    cargar_periodos_electricidad.clear()
+    cargar_periodos_agua.clear()
 
 
 def parse_fecha(valor):
@@ -116,6 +128,18 @@ def estado_contrato_alerta(apt):
         if dias <= 30:
             return "🟠 Por vencer", dias
     return None, None
+
+
+def ultimos_n_meses(n=12):
+    """Lista de (anio, mes_num) de los últimos n meses, terminando en el mes actual, en orden cronológico."""
+    hoy = date.today()
+    resultado = []
+    for i in range(n - 1, -1, -1):
+        offset = hoy.month - 1 - i
+        anio = hoy.year + offset // 12
+        mes_num = offset % 12 + 1
+        resultado.append((anio, mes_num))
+    return resultado
 
 
 # ------------------------------------------------------------------
@@ -225,6 +249,59 @@ if pagina == "📊 Dashboard":
     c5, c6 = st.columns(2)
     c5.metric(f"Esperado en {mes_sel} {anio_sel}", fmt_money(total_esperado))
     c6.metric(f"Recaudado en {mes_sel} {anio_sel}", fmt_money(total_recaudado))
+
+    st.divider()
+    st.subheader("📈 Cobro de alquiler — últimos 12 meses")
+    meses_grafica = ultimos_n_meses(12)
+    valores_grafica = []
+    etiquetas_grafica = []
+    for (anio_g, mes_num_g) in meses_grafica:
+        nombre_mes_g = MESES[mes_num_g - 1]
+        periodos_g = cargar_periodos(anio=anio_g, mes=nombre_mes_g)
+        total_g = sum(total_pagado(p) for p in periodos_g)
+        valores_grafica.append(total_g)
+        etiquetas_grafica.append(f"{nombre_mes_g[:3]} {anio_g}")
+    df_grafica = pd.DataFrame({"Cobrado": valores_grafica}, index=etiquetas_grafica)
+    st.line_chart(df_grafica)
+
+    st.divider()
+    st.subheader(f"🔝 Mayor consumo — {mes_sel} {anio_sel}")
+    periodos_elec_sel = cargar_periodos_electricidad(anio=anio_sel, mes=mes_sel)
+    periodos_agua_sel = cargar_periodos_agua(anio=anio_sel, mes=mes_sel)
+
+    colE, colW = st.columns(2)
+    with colE:
+        st.markdown("**⚡ Electricidad (Kwh)**")
+        filas_elec = []
+        for p in periodos_elec_sel:
+            apt_info = p.get("apartamentos") or {}
+            consumo = float(p["kwh_actual"]) - float(p["kwh_anterior"])
+            filas_elec.append({
+                "Apartamento": apt_info.get("codigo"),
+                "Inquilino": apt_info.get("inquilino_nombre") or "—",
+                "Consumo (Kwh)": consumo,
+            })
+        if filas_elec:
+            filas_elec.sort(key=lambda f: -f["Consumo (Kwh)"])
+            st.dataframe(pd.DataFrame(filas_elec[:5]), use_container_width=True, hide_index=True)
+        else:
+            st.info("Sin lecturas de electricidad registradas este periodo.")
+    with colW:
+        st.markdown("**💧 Agua (m³)**")
+        filas_agua = []
+        for p in periodos_agua_sel:
+            apt_info = p.get("apartamentos") or {}
+            consumo = float(p["lectura_actual"]) - float(p["lectura_anterior"])
+            filas_agua.append({
+                "Apartamento": apt_info.get("codigo"),
+                "Inquilino": apt_info.get("inquilino_nombre") or "—",
+                "Consumo (m³)": consumo,
+            })
+        if filas_agua:
+            filas_agua.sort(key=lambda f: -f["Consumo (m³)"])
+            st.dataframe(pd.DataFrame(filas_agua[:5]), use_container_width=True, hide_index=True)
+        else:
+            st.info("Sin lecturas de agua registradas este periodo.")
 
     st.divider()
     st.subheader(f"Estado de pago por apartamento — {mes_sel} {anio_sel}")
