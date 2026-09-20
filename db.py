@@ -1,5 +1,5 @@
 """
-Conexión a Supabase para el Sistema de Control del Residencial v4.
+Conexión a Supabase para el Sistema de Control del Residencial.
 """
 import streamlit as st
 from supabase import create_client, Client
@@ -290,3 +290,33 @@ def actualizar_pago_agua(pago_id, payload: dict):
 def eliminar_pago_agua(pago_id):
     sb = get_client()
     return sb.table("pagos_agua").delete().eq("id", pago_id).execute()
+
+
+# ---------- Usuarios (roles y permisos) ----------
+
+def listar_usuarios():
+    sb = get_client()
+    res = sb.table("usuarios").select("*").order("username").execute()
+    return res.data or []
+
+
+def obtener_usuario_por_username(username):
+    sb = get_client()
+    res = sb.table("usuarios").select("*").eq("username", username).execute()
+    data = res.data or []
+    return data[0] if data else None
+
+
+def crear_usuario(payload: dict):
+    sb = get_client()
+    return sb.table("usuarios").insert(payload).execute()
+
+
+def actualizar_usuario(usuario_id, payload: dict):
+    sb = get_client()
+    return sb.table("usuarios").update(payload).eq("id", usuario_id).execute()
+
+
+def eliminar_usuario(usuario_id):
+    sb = get_client()
+    return sb.table("usuarios").delete().eq("id", usuario_id).execute()
