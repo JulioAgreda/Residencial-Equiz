@@ -320,3 +320,78 @@ def actualizar_usuario(usuario_id, payload: dict):
 def eliminar_usuario(usuario_id):
     sb = get_client()
     return sb.table("usuarios").delete().eq("id", usuario_id).execute()
+
+
+# ---------- Compras (gastos) ----------
+
+def listar_compras(fecha_desde=None, fecha_hasta=None, categoria=None):
+    sb = get_client()
+    q = sb.table("compras").select("*")
+    if fecha_desde:
+        q = q.gte("fecha_compra", fecha_desde)
+    if fecha_hasta:
+        q = q.lte("fecha_compra", fecha_hasta)
+    if categoria:
+        q = q.eq("categoria", categoria)
+    res = q.order("fecha_compra", desc=True).execute()
+    return res.data or []
+
+
+def crear_compra(payload: dict):
+    sb = get_client()
+    return sb.table("compras").insert(payload).execute()
+
+
+def actualizar_compra(compra_id, payload: dict):
+    sb = get_client()
+    return sb.table("compras").update(payload).eq("id", compra_id).execute()
+
+
+def eliminar_compra(compra_id):
+    sb = get_client()
+    return sb.table("compras").delete().eq("id", compra_id).execute()
+
+
+# ---------- Ventas (ingresos extraordinarios) ----------
+
+def listar_ventas(fecha_desde=None, fecha_hasta=None, concepto=None):
+    sb = get_client()
+    q = sb.table("ventas").select("*")
+    if fecha_desde:
+        q = q.gte("fecha_venta", fecha_desde)
+    if fecha_hasta:
+        q = q.lte("fecha_venta", fecha_hasta)
+    if concepto:
+        q = q.eq("concepto", concepto)
+    res = q.order("fecha_venta", desc=True).execute()
+    return res.data or []
+
+
+def crear_venta(payload: dict):
+    sb = get_client()
+    return sb.table("ventas").insert(payload).execute()
+
+
+def actualizar_venta(venta_id, payload: dict):
+    sb = get_client()
+    return sb.table("ventas").update(payload).eq("id", venta_id).execute()
+
+
+def eliminar_venta(venta_id):
+    sb = get_client()
+    return sb.table("ventas").delete().eq("id", venta_id).execute()
+
+
+# ---------- Almacenamiento de comprobantes ----------
+
+def subir_comprobante(archivo_bytes: bytes, nombre_archivo: str, carpeta: str = "compras") -> str:
+    """Sube un archivo al bucket 'comprobantes' y devuelve su URL pública."""
+    import uuid
+    import mimetypes
+
+    sb = get_client()
+    extension = nombre_archivo.split(".")[-1] if "." in nombre_archivo else "bin"
+    path = f"{carpeta}/{uuid.uuid4().hex}.{extension}"
+    content_type = mimetypes.guess_type(nombre_archivo)[0] or "application/octet-stream"
+    sb.storage.from_("comprobantes").upload(path, archivo_bytes, {"content-type": content_type})
+    return sb.storage.from_("comprobantes").get_public_url(path)
