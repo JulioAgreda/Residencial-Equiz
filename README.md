@@ -87,14 +87,39 @@ Para importar:
 - **Agua**: funciona igual que Electricidad, pero con lectura del medidor
   de agua (m³) y su propia tarifa por m³.
 - **Roles y permisos**: dos roles — **Administrador** (acceso total) y
-  **Cobrador/Conserje** (solo puede registrar pagos/lecturas de alquiler,
-  electricidad y agua, y ver el Dashboard; no puede editar apartamentos,
-  tarifas, ni editar o eliminar pagos ya registrados). El primer
+  **Cobrador/Conserje** (puede registrar pagos/lecturas, ver el
+  Dashboard, ver el Historial completo de todos los módulos y **editar**
+  cualquier registro; solo el Administrador puede **eliminar** registros,
+  editar apartamentos, o cambiar tarifas y montos esperados). El primer
   Administrador se crea desde la propia app la primera vez que entras.
   Desde **👥 Usuarios** (solo visible para Administradores) puedes crear más
   cuentas, cambiar roles, desactivar o eliminar usuarios.
+- **📒 Módulo de Movimientos (Compras y Ventas)**: visualmente separado en
+  el menú lateral (bajo su propio encabezado), pero dentro del mismo
+  sistema y login.
+  - **🧾 Compras (Gastos)**: fecha, categoría/rubro, descripción, monto,
+    método de pago, proveedor, número de comprobante y un adjunto (foto o
+    PDF de la factura, guardado en Supabase Storage). El campo "Encargado"
+    se llena solo con el usuario que inició sesión, no se escribe a mano.
+  - **💸 Ventas (Ingresos extraordinarios)**: fecha, concepto, descripción,
+    monto, forma de cobro, comprador y número de recibo emitido. También
+    registra automáticamente al usuario que la creó.
+  - Ambos roles pueden registrar, ver el Historial completo y editar
+    registros (incluido el adjunto del comprobante en compras); solo
+    Administrador puede eliminarlos.
 
 ### Si ya habías creado las tablas antes (actualizaciones)
+
+**Opción rápida:** si ya tienes el proyecto de Supabase funcionando con al
+menos la tabla `apartamentos`, ejecuta un único script,
+**`migracion_completa.sql`**, en el SQL Editor — incluye todo lo de abajo
+en el orden correcto (pagos múltiples, electricidad, agua, contrato,
+usuarios/roles, Compras y Ventas) y no borra tus apartamentos. Al final te
+muestra una tabla de verificación de seguridad (RLS) que debe mostrar
+`false` en todas las filas.
+
+**Opción paso a paso** (si prefieres ir aplicando cada mejora por
+separado, o ya corriste algunas de estas):
 
 - Si tu base de datos ya tenía la tabla `pagos_alquiler` de una versión
   anterior de esta app, ejecuta `migracion_pagos_multiples.sql` en el SQL
@@ -111,6 +136,15 @@ Para importar:
   `migracion_contrato.sql` en el SQL Editor. Solo agrega columnas nuevas.
 - Para agregar roles y permisos, ejecuta `migracion_usuarios.sql` en el
   SQL Editor. Crea la tabla `usuarios`; no borra nada existente.
+- Para agregar el módulo de Compras y Ventas, ejecuta
+  `migracion_movimientos.sql` en el SQL Editor. Crea las tablas `compras`
+  y `ventas`, y configura el bucket de almacenamiento `comprobantes` para
+  los adjuntos.
+
+Nota: `schema.sql` es distinto — solo se usa si algún día empiezas un
+proyecto de Supabase **completamente nuevo** desde cero (incluye también
+la creación de `apartamentos`). Para tu proyecto actual, usa
+`migracion_completa.sql` o los pasos individuales de arriba, no `schema.sql`.
 
 ## 7. Backups diarios automáticos
 
