@@ -229,7 +229,7 @@ opciones_movimientos = ["(ninguno)", "🧾 Compras", "💸 Ventas"]
 
 pagina_principal = st.sidebar.radio("Gestión del Residencial", opciones_principal, key="nav_principal")
 st.sidebar.divider()
-st.sidebar.caption("📒 MÓDULO DE MOVIMIENTOS")
+st.sidebar.caption("📒 Módulo de Movimientos")
 pagina_movimientos = st.sidebar.radio("Compras y Ventas", opciones_movimientos, key="nav_movimientos",
                                        label_visibility="collapsed")
 
