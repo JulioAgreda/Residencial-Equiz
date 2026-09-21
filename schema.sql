@@ -161,14 +161,87 @@ create trigger trg_periodos_agua_updated
 before update on periodos_agua
 for each row execute function set_updated_at();
 
+-- Usuarios (roles y permisos: Administrador / Cobrador)
+create table if not exists usuarios (
+    id bigserial primary key,
+    username varchar(50) unique not null,
+    nombre varchar(150),
+    password_hash text not null,
+    rol varchar(20) not null default 'Cobrador',
+    activo boolean not null default true,
+    created_at timestamptz default now()
+);
+
+-- Compras (gastos / egresos)
+create table if not exists compras (
+    id bigserial primary key,
+    fecha_compra date not null,
+    categoria varchar(100) not null,
+    descripcion text,
+    monto_total numeric(10,2) not null default 0,
+    metodo_pago varchar(50),
+    proveedor varchar(200),
+    numero_comprobante varchar(100),
+    archivo_url text,
+    archivo_nombre text,
+    encargado varchar(150),
+    created_at timestamptz default now(),
+    updated_at timestamptz default now()
+);
+create index if not exists idx_compras_fecha on compras (fecha_compra);
+create index if not exists idx_compras_categoria on compras (categoria);
+drop trigger if exists trg_compras_updated on compras;
+create trigger trg_compras_updated
+before update on compras
+for each row execute function set_updated_at();
+
+-- Ventas (ingresos extraordinarios)
+create table if not exists ventas (
+    id bigserial primary key,
+    fecha_venta date not null,
+    concepto varchar(100) not null,
+    descripcion text,
+    monto numeric(10,2) not null default 0,
+    forma_cobro varchar(50),
+    comprador varchar(200),
+    recibo_emitido varchar(100),
+    encargado varchar(150),
+    created_at timestamptz default now(),
+    updated_at timestamptz default now()
+);
+create index if not exists idx_ventas_fecha on ventas (fecha_venta);
+create index if not exists idx_ventas_concepto on ventas (concepto);
+drop trigger if exists trg_ventas_updated on ventas;
+create trigger trg_ventas_updated
+before update on ventas
+for each row execute function set_updated_at();
+
+-- Almacenamiento de comprobantes (fotos/PDF de facturas de compras)
+insert into storage.buckets (id, name, public)
+values ('comprobantes', 'comprobantes', true)
+on conflict (id) do nothing;
+
+drop policy if exists "comprobantes_select" on storage.objects;
+create policy "comprobantes_select" on storage.objects
+    for select using (bucket_id = 'comprobantes');
+drop policy if exists "comprobantes_insert" on storage.objects;
+create policy "comprobantes_insert" on storage.objects
+    for insert with check (bucket_id = 'comprobantes');
+drop policy if exists "comprobantes_update" on storage.objects;
+create policy "comprobantes_update" on storage.objects
+    for update using (bucket_id = 'comprobantes');
+drop policy if exists "comprobantes_delete" on storage.objects;
+create policy "comprobantes_delete" on storage.objects
+    for delete using (bucket_id = 'comprobantes');
+
 -- ============================================================
 -- Seguridad: estas tablas se acceden con la clave "anon" desde
--- la app de Streamlit, que ya está protegida con una clave de
--- acceso compartida (APP_PASSWORD). Por eso desactivamos RLS
--- explícitamente: los proyectos nuevos de Supabase a veces lo
--- activan por defecto sin políticas, lo que bloquearía todo
--- acceso ("row-level security policy" error). Si más adelante
--- quieres activar RLS y definir políticas, se puede ajustar.
+-- la app de Streamlit, que ya está protegida con login propio
+-- (usuarios/roles). Por eso desactivamos RLS explícitamente: los
+-- proyectos nuevos de Supabase a veces lo activan por defecto sin
+-- políticas, lo que bloquearía todo acceso ("row-level security
+-- policy" error). Si más adelante quieres activar RLS y definir
+-- políticas, se puede ajustar.
 -- ============================================================
 alter table apartamentos disable row level security;
 alter table periodos_alquiler disable row level security;
@@ -178,3 +251,6 @@ alter table periodos_electricidad disable row level security;
 alter table pagos_electricidad disable row level security;
 alter table periodos_agua disable row level security;
 alter table pagos_agua disable row level security;
+alter table usuarios disable row level security;
+alter table compras disable row level security;
+alter table ventas disable row level security;
