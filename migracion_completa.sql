@@ -1,10 +1,11 @@
 -- ============================================================
 -- MIGRACIÓN CONSOLIDADA — Sistema de Control Residencial EQUIZ
 -- Ejecuta este ÚNICO script completo en el SQL Editor de Supabase.
--- Incluye, en orden seguro: pagos múltiples de alquiler,
--- electricidad, agua y datos de contrato. Es seguro de ejecutar
--- aunque ya hayas corrido alguno de los migracion_*.sql sueltos
--- antes (todo usa "if not exists" / "if exists").
+-- Incluye TODO lo implementado hasta ahora: pagos múltiples de
+-- alquiler, electricidad, agua, datos de contrato, usuarios (roles
+-- y permisos), y el módulo de Compras/Ventas con almacenamiento de
+-- comprobantes. Es seguro de ejecutar aunque ya hayas corrido antes
+-- alguno de los migracion_*.sql sueltos (todo usa "if not exists").
 -- No borra tus apartamentos.
 -- ============================================================
 
@@ -146,8 +147,81 @@ create table if not exists usuarios (
 );
 alter table usuarios disable row level security;
 
--- ---------- 6) Seguridad: asegurar RLS desactivado en TODAS las tablas ----------
--- Esto es clave: si alguna quedó con RLS activo, las consultas devuelven
+-- ---------- 6) Compras (gastos) ----------
+create table if not exists compras (
+    id bigserial primary key,
+    fecha_compra date not null,
+    categoria varchar(100) not null,
+    descripcion text,
+    monto_total numeric(10,2) not null default 0,
+    metodo_pago varchar(50),
+    proveedor varchar(200),
+    numero_comprobante varchar(100),
+    archivo_url text,
+    archivo_nombre text,
+    encargado varchar(150),
+    created_at timestamptz default now(),
+    updated_at timestamptz default now()
+);
+
+create index if not exists idx_compras_fecha on compras (fecha_compra);
+create index if not exists idx_compras_categoria on compras (categoria);
+
+drop trigger if exists trg_compras_updated on compras;
+create trigger trg_compras_updated
+before update on compras
+for each row execute function set_updated_at();
+
+alter table compras disable row level security;
+
+-- ---------- 7) Ventas (ingresos extraordinarios) ----------
+create table if not exists ventas (
+    id bigserial primary key,
+    fecha_venta date not null,
+    concepto varchar(100) not null,
+    descripcion text,
+    monto numeric(10,2) not null default 0,
+    forma_cobro varchar(50),
+    comprador varchar(200),
+    recibo_emitido varchar(100),
+    encargado varchar(150),
+    created_at timestamptz default now(),
+    updated_at timestamptz default now()
+);
+
+create index if not exists idx_ventas_fecha on ventas (fecha_venta);
+create index if not exists idx_ventas_concepto on ventas (concepto);
+
+drop trigger if exists trg_ventas_updated on ventas;
+create trigger trg_ventas_updated
+before update on ventas
+for each row execute function set_updated_at();
+
+alter table ventas disable row level security;
+
+-- ---------- 8) Almacenamiento de comprobantes (fotos/PDF de facturas) ----------
+insert into storage.buckets (id, name, public)
+values ('comprobantes', 'comprobantes', true)
+on conflict (id) do nothing;
+
+drop policy if exists "comprobantes_select" on storage.objects;
+create policy "comprobantes_select" on storage.objects
+    for select using (bucket_id = 'comprobantes');
+
+drop policy if exists "comprobantes_insert" on storage.objects;
+create policy "comprobantes_insert" on storage.objects
+    for insert with check (bucket_id = 'comprobantes');
+
+drop policy if exists "comprobantes_update" on storage.objects;
+create policy "comprobantes_update" on storage.objects
+    for update using (bucket_id = 'comprobantes');
+
+drop policy if exists "comprobantes_delete" on storage.objects;
+create policy "comprobantes_delete" on storage.objects
+    for delete using (bucket_id = 'comprobantes');
+
+-- ---------- 9) Seguridad: asegurar RLS desactivado en TODAS las tablas ----------
+-- Esto es clave: si alguna queda con RLS activo, las consultas devuelven
 -- vacío (200 con 0 filas) en vez de error, lo que parece "no trae datos".
 alter table apartamentos disable row level security;
 alter table periodos_alquiler disable row level security;
@@ -157,12 +231,16 @@ alter table periodos_electricidad disable row level security;
 alter table pagos_electricidad disable row level security;
 alter table periodos_agua disable row level security;
 alter table pagos_agua disable row level security;
+alter table usuarios disable row level security;
+alter table compras disable row level security;
+alter table ventas disable row level security;
 
--- ---------- 7) Verificación final ----------
+-- ---------- 10) Verificación final ----------
 select tablename, rowsecurity
 from pg_tables
 where tablename in (
     'apartamentos','periodos_alquiler','pagos','configuracion',
-    'periodos_electricidad','pagos_electricidad','periodos_agua','pagos_agua','usuarios'
+    'periodos_electricidad','pagos_electricidad','periodos_agua','pagos_agua',
+    'usuarios','compras','ventas'
 );
 -- Todas las filas de este resultado deben mostrar "false" en rowsecurity.
