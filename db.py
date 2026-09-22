@@ -352,6 +352,36 @@ def eliminar_compra(compra_id):
     return sb.table("compras").delete().eq("id", compra_id).execute()
 
 
+# ---------- Pagos generales (tercera opción de Movimientos, sin comprobante) ----------
+
+def listar_pagos_generales(fecha_desde=None, fecha_hasta=None, categoria=None):
+    sb = get_client()
+    q = sb.table("pagos_generales").select("*")
+    if fecha_desde:
+        q = q.gte("fecha_pago", fecha_desde)
+    if fecha_hasta:
+        q = q.lte("fecha_pago", fecha_hasta)
+    if categoria:
+        q = q.eq("categoria", categoria)
+    res = q.order("fecha_pago", desc=True).execute()
+    return res.data or []
+
+
+def crear_pago_general(payload: dict):
+    sb = get_client()
+    return sb.table("pagos_generales").insert(payload).execute()
+
+
+def actualizar_pago_general(pago_id, payload: dict):
+    sb = get_client()
+    return sb.table("pagos_generales").update(payload).eq("id", pago_id).execute()
+
+
+def eliminar_pago_general(pago_id):
+    sb = get_client()
+    return sb.table("pagos_generales").delete().eq("id", pago_id).execute()
+
+
 # ---------- Ventas (ingresos extraordinarios) ----------
 
 def listar_ventas(fecha_desde=None, fecha_hasta=None, concepto=None):
