@@ -382,6 +382,62 @@ def eliminar_venta(venta_id):
     return sb.table("ventas").delete().eq("id", venta_id).execute()
 
 
+# ---------- Pendientes (tareas / to-dos de colaboradores) ----------
+
+def listar_pendientes(estado=None, prioridad=None, asignado_a=None, apartamento_id=None):
+    sb = get_client()
+    q = sb.table("pendientes").select(
+        "*, apartamentos(codigo, piso), "
+        "asignado:usuarios!pendientes_asignado_a_fkey(id, nombre, username), "
+        "creador:usuarios!pendientes_creado_por_fkey(id, nombre, username)"
+    )
+    if estado:
+        q = q.eq("estado", estado)
+    if prioridad:
+        q = q.eq("prioridad", prioridad)
+    if asignado_a:
+        q = q.eq("asignado_a", asignado_a)
+    if apartamento_id:
+        q = q.eq("apartamento_id", apartamento_id)
+    res = q.order("created_at", desc=True).execute()
+    return res.data or []
+
+
+def obtener_pendiente(pendiente_id):
+    sb = get_client()
+    res = sb.table("pendientes").select("*").eq("id", pendiente_id).single().execute()
+    return res.data
+
+
+def crear_pendiente(payload: dict):
+    sb = get_client()
+    res = sb.table("pendientes").insert(payload).execute()
+    return res.data[0]
+
+
+def actualizar_pendiente(pendiente_id, payload: dict):
+    sb = get_client()
+    return sb.table("pendientes").update(payload).eq("id", pendiente_id).execute()
+
+
+def cambiar_estado_pendiente(pendiente_id, nuevo_estado: str):
+    """Actualiza el estado y, si pasa a 'Terminado', registra la fecha de cierre
+    (si sale de 'Terminado' hacia otro estado, limpia la fecha de cierre)."""
+    payload = {"estado": nuevo_estado}
+    if nuevo_estado == "Terminado":
+        from datetime import datetime, timezone
+        payload["fecha_completado"] = datetime.now(timezone.utc).isoformat()
+    else:
+        payload["fecha_completado"] = None
+    sb = get_client()
+    return sb.table("pendientes").update(payload).eq("id", pendiente_id).execute()
+
+
+def eliminar_pendiente(pendiente_id):
+    sb = get_client()
+    return sb.table("pendientes").delete().eq("id", pendiente_id).execute()
+
+
 # ---------- Almacenamiento de comprobantes ----------
 
 def subir_comprobante(archivo_bytes: bytes, nombre_archivo: str, carpeta: str = "compras") -> str:
