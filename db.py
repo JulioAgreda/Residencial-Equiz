@@ -385,12 +385,11 @@ def eliminar_venta(venta_id):
 # ---------- Pendientes (tareas / to-dos de colaboradores) ----------
 
 def listar_pendientes(estado=None, prioridad=None, asignado_a=None, apartamento_id=None):
+    """Trae los pendientes con el apartamento embebido. Los nombres de 'asignado_a' y
+    'creado_por' se resuelven en la app con un diccionario de usuarios (evita usar
+    joins ambiguos hacia la misma tabla usuarios, que son frágiles en Postgrest)."""
     sb = get_client()
-    q = sb.table("pendientes").select(
-        "*, apartamentos(codigo, piso), "
-        "asignado:usuarios!pendientes_asignado_a_fkey(id, nombre, username), "
-        "creador:usuarios!pendientes_creado_por_fkey(id, nombre, username)"
-    )
+    q = sb.table("pendientes").select("*, apartamentos(codigo, piso)")
     if estado:
         q = q.eq("estado", estado)
     if prioridad:
