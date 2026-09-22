@@ -155,6 +155,11 @@ def cargar_usuarios_activos():
     return [u for u in db.listar_usuarios() if u.get("activo")]
 
 
+@st.cache_data(ttl=60)
+def cargar_todos_los_usuarios():
+    return db.listar_usuarios()
+
+
 def limpiar_cache():
     cargar_apartamentos.clear()
     cargar_periodos.clear()
@@ -162,6 +167,7 @@ def limpiar_cache():
     cargar_periodos_agua.clear()
     cargar_pendientes.clear()
     cargar_usuarios_activos.clear()
+    cargar_todos_los_usuarios.clear()
 
 
 def parse_fecha(valor):
@@ -238,19 +244,29 @@ st.sidebar.caption(f'👤 {usuario_actual.get("nombre") or usuario_actual.get("u
 
 if es_admin:
     opciones_principal = ["📊 Dashboard", "🏠 Apartamentos", "💵 Pagos de Alquiler", "⚡ Electricidad",
-                          "💧 Agua", "✅ Pendientes", "👥 Usuarios"]
+                          "💧 Agua", "👥 Usuarios"]
 else:
-    opciones_principal = ["📊 Dashboard", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua", "✅ Pendientes"]
+    opciones_principal = ["📊 Dashboard", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua"]
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💸 Ventas"]
+opciones_pendientes = ["(ninguno)", "✅ Pendientes"]
 
 pagina_principal = st.sidebar.radio("Gestión del Residencial", opciones_principal, key="nav_principal")
 st.sidebar.divider()
 st.sidebar.caption("📒 Módulo de Movimientos")
 pagina_movimientos = st.sidebar.radio("Compras y Ventas", opciones_movimientos, key="nav_movimientos",
                                        label_visibility="collapsed")
+st.sidebar.divider()
+st.sidebar.caption("✅ Módulo de Pendientes")
+pagina_pendientes = st.sidebar.radio("Pendientes", opciones_pendientes, key="nav_pendientes",
+                                      label_visibility="collapsed")
 
-pagina = pagina_movimientos if pagina_movimientos != "(ninguno)" else pagina_principal
+if pagina_movimientos != "(ninguno)":
+    pagina = pagina_movimientos
+elif pagina_pendientes != "(ninguno)":
+    pagina = pagina_pendientes
+else:
+    pagina = pagina_principal
 st.sidebar.divider()
 if st.sidebar.button("🔄 Actualizar datos"):
     limpiar_cache()
@@ -1504,6 +1520,8 @@ elif pagina == "✅ Pendientes":
                "asignarlas y actualizar su estado.")
 
     usuarios_activos = cargar_usuarios_activos()
+    usuarios_todos = cargar_todos_los_usuarios()
+    usuarios_por_id = {u["id"]: u for u in usuarios_todos}
     apartamentos_pend = cargar_apartamentos()
     nombre_usuario_actual = usuario_actual.get("nombre") or usuario_actual.get("username")
 
@@ -1606,7 +1624,8 @@ elif pagina == "✅ Pendientes":
             st.divider()
 
             for p in pendientes:
-                asignado_info = p.get("asignado")
+                asignado_info = usuarios_por_id.get(p.get("asignado_a"))
+                creador_info = usuarios_por_id.get(p.get("creado_por"))
                 apto_info = p.get("apartamentos")
                 asignado_txt = nombre_de(asignado_info) if asignado_info else "Sin asignar"
                 apto_txt = f' · 🏠 {apto_info["codigo"]}' if apto_info else ""
@@ -1628,8 +1647,8 @@ elif pagina == "✅ Pendientes":
                         st.markdown(f'🧰 **¿Qué falta?:** {p["que_falta"]}')
                     if p.get("observacion"):
                         st.markdown(f'📝 **Observación:** {p["observacion"]}')
-                    if p.get("creador"):
-                        st.caption(f'Creado por {nombre_de(p["creador"])} el {str(p["created_at"])[:10]}')
+                    if p.get("creado_por"):
+                        st.caption(f'Creado por {nombre_de(creador_info)} el {str(p["created_at"])[:10]}')
 
                     with st.form(f'form_pendiente_{p["id"]}'):
                         col1, col2, col3 = st.columns(3)
