@@ -20,6 +20,11 @@ CONCEPTOS_VENTA = ["Alquiler de área común", "Venta de activos fijos", "Emisi�
                    "Alquiler de parqueo de visitas", "Copias de llaves", "Otro"]
 FORMAS_COBRO_VENTA = ["Efectivo", "Depósito/Transferencia", "Otro"]
 
+PRIORIDADES_PENDIENTE = ["Urgente", "Alta", "Media", "Baja"]
+ESTADOS_PENDIENTE = ["Pendiente", "En Proceso", "Terminado"]
+COLOR_PRIORIDAD = {"Urgente": "🔴", "Alta": "🟠", "Media": "🟡", "Baja": "🟢"}
+ICONO_ESTADO = {"Pendiente": "⏳", "En Proceso": "🔧", "Terminado": "✅"}
+
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
@@ -140,11 +145,23 @@ def total_pagado(periodo):
     return sum(float(p["monto"]) for p in (periodo.get("pagos") or []))
 
 
+@st.cache_data(ttl=30)
+def cargar_pendientes(estado=None, prioridad=None, asignado_a=None):
+    return db.listar_pendientes(estado=estado, prioridad=prioridad, asignado_a=asignado_a)
+
+
+@st.cache_data(ttl=60)
+def cargar_usuarios_activos():
+    return [u for u in db.listar_usuarios() if u.get("activo")]
+
+
 def limpiar_cache():
     cargar_apartamentos.clear()
     cargar_periodos.clear()
     cargar_periodos_electricidad.clear()
     cargar_periodos_agua.clear()
+    cargar_pendientes.clear()
+    cargar_usuarios_activos.clear()
 
 
 def parse_fecha(valor):
@@ -221,9 +238,9 @@ st.sidebar.caption(f'👤 {usuario_actual.get("nombre") or usuario_actual.get("u
 
 if es_admin:
     opciones_principal = ["📊 Dashboard", "🏠 Apartamentos", "💵 Pagos de Alquiler", "⚡ Electricidad",
-                          "💧 Agua", "👥 Usuarios"]
+                          "💧 Agua", "✅ Pendientes", "👥 Usuarios"]
 else:
-    opciones_principal = ["📊 Dashboard", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua"]
+    opciones_principal = ["📊 Dashboard", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua", "✅ Pendientes"]
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💸 Ventas"]
 
@@ -1476,6 +1493,214 @@ elif pagina == "💧 Agua":
                                         st.rerun()
                                     except Exception as e:
                                         st.error(f"Error al eliminar: {e}")
+
+
+# ==================================================================
+# PÁGINA: PENDIENTES (tareas de colaboradores)
+# ==================================================================
+elif pagina == "✅ Pendientes":
+    st.title("✅ Pendientes")
+    st.caption("Tareas y actividades del edificio: cualquier colaborador puede crearlas, "
+               "asignarlas y actualizar su estado.")
+
+    usuarios_activos = cargar_usuarios_activos()
+    apartamentos_pend = cargar_apartamentos()
+    nombre_usuario_actual = usuario_actual.get("nombre") or usuario_actual.get("username")
+
+    def nombre_de(u):
+        return u.get("nombre") or u.get("username") or "—"
+
+    tab_nuevo, tab_tablero = st.tabs(["➕ Nuevo pendiente", "📋 Tablero"])
+
+    # ---------------- Nuevo pendiente ----------------
+    with tab_nuevo:
+        with st.form("form_nuevo_pendiente", clear_on_submit=True):
+            titulo = st.text_input("Título", placeholder='Ej. "Cambiar foco del pasillo piso 2"')
+            descripcion = st.text_area("Descripción (opcional)")
+            que_falta = st.text_input(
+                "¿Qué falta para realizarlo? (opcional)",
+                placeholder='Ej. "Comprar lampas", "Contratar personal", "Terminar tumbado antes"')
+            observacion = st.text_area("Observación (opcional)")
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                prioridad = st.selectbox("Prioridad", PRIORIDADES_PENDIENTE, index=2)
+            with col2:
+                opciones_asignado = ["Sin asignar"] + [nombre_de(u) for u in usuarios_activos]
+                asignado_sel = st.selectbox("Asignar a (opcional)", opciones_asignado)
+            with col3:
+                fecha_limite = st.date_input("Fecha límite (opcional)", value=None, format="DD/MM/YYYY")
+
+            opciones_apto = ["(General, sin apartamento)"] + [f'{a["codigo"]} — {a.get("inquilino_nombre") or ""}'
+                                                                for a in apartamentos_pend]
+            apto_sel = st.selectbox("Apartamento relacionado (opcional)", opciones_apto)
+
+            st.caption(f"Creado por: **{nombre_usuario_actual}**")
+            guardar = st.form_submit_button("💾 Crear pendiente")
+
+            if guardar:
+                if not titulo.strip():
+                    st.error("El título es obligatorio.")
+                else:
+                    try:
+                        asignado_a_id = None
+                        if asignado_sel != "Sin asignar":
+                            idx = opciones_asignado.index(asignado_sel) - 1
+                            asignado_a_id = usuarios_activos[idx]["id"]
+                        apartamento_id_sel = None
+                        if apto_sel != "(General, sin apartamento)":
+                            idx_a = opciones_apto.index(apto_sel) - 1
+                            apartamento_id_sel = apartamentos_pend[idx_a]["id"]
+
+                        db.crear_pendiente({
+                            "titulo": titulo.strip(),
+                            "descripcion": descripcion or None,
+                            "que_falta": que_falta or None,
+                            "observacion": observacion or None,
+                            "prioridad": prioridad,
+                            "estado": "Pendiente",
+                            "asignado_a": asignado_a_id,
+                            "creado_por": usuario_actual.get("id"),
+                            "apartamento_id": apartamento_id_sel,
+                            "fecha_limite": str(fecha_limite) if fecha_limite else None,
+                        })
+                        limpiar_cache()
+                        st.success("Pendiente creado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al guardar: {e}")
+
+    # ---------------- Tablero / listado ----------------
+    with tab_tablero:
+        colf1, colf2, colf3 = st.columns(3)
+        with colf1:
+            filtro_estado = st.selectbox("Estado", ["Todos"] + ESTADOS_PENDIENTE, key="pend_filtro_estado")
+        with colf2:
+            filtro_prioridad = st.selectbox("Prioridad", ["Todas"] + PRIORIDADES_PENDIENTE, key="pend_filtro_prioridad")
+        with colf3:
+            opciones_filtro_asig = ["Todos"] + [nombre_de(u) for u in usuarios_activos]
+            filtro_asignado = st.selectbox("Asignado a", opciones_filtro_asig, key="pend_filtro_asignado")
+
+        asignado_a_filtro_id = None
+        if filtro_asignado != "Todos":
+            idx_f = opciones_filtro_asig.index(filtro_asignado) - 1
+            asignado_a_filtro_id = usuarios_activos[idx_f]["id"]
+
+        pendientes = cargar_pendientes(
+            estado=None if filtro_estado == "Todos" else filtro_estado,
+            prioridad=None if filtro_prioridad == "Todas" else filtro_prioridad,
+            asignado_a=asignado_a_filtro_id,
+        )
+
+        if not pendientes:
+            st.info("No hay pendientes que coincidan con el filtro.")
+        else:
+            orden_prioridad = {"Urgente": 0, "Alta": 1, "Media": 2, "Baja": 3}
+            pendientes = sorted(pendientes, key=lambda p: orden_prioridad.get(p["prioridad"], 9))
+
+            colm1, colm2, colm3 = st.columns(3)
+            colm1.metric("⏳ Pendientes", sum(1 for p in pendientes if p["estado"] == "Pendiente"))
+            colm2.metric("🔧 En Proceso", sum(1 for p in pendientes if p["estado"] == "En Proceso"))
+            colm3.metric("✅ Terminados", sum(1 for p in pendientes if p["estado"] == "Terminado"))
+
+            st.divider()
+
+            for p in pendientes:
+                asignado_info = p.get("asignado")
+                apto_info = p.get("apartamentos")
+                asignado_txt = nombre_de(asignado_info) if asignado_info else "Sin asignar"
+                apto_txt = f' · 🏠 {apto_info["codigo"]}' if apto_info else ""
+                vencida = False
+                if p.get("fecha_limite") and p["estado"] != "Terminado":
+                    fl = parse_fecha(p["fecha_limite"])
+                    vencida = bool(fl and fl < date.today())
+
+                titulo_linea = (f'{COLOR_PRIORIDAD.get(p["prioridad"], "")} **{p["titulo"]}**  '
+                                 f'{ICONO_ESTADO.get(p["estado"], "")} _{p["estado"]}_'
+                                 + (" ⚠️ Vencido" if vencida else ""))
+
+                with st.expander(titulo_linea):
+                    if p.get("descripcion"):
+                        st.write(p["descripcion"])
+                    st.caption(f'Prioridad: **{p["prioridad"]}** · Asignado a: **{asignado_txt}**{apto_txt}'
+                               + (f' · Vence: {p["fecha_limite"]}' if p.get("fecha_limite") else ""))
+                    if p.get("que_falta"):
+                        st.markdown(f'🧰 **¿Qué falta?:** {p["que_falta"]}')
+                    if p.get("observacion"):
+                        st.markdown(f'📝 **Observación:** {p["observacion"]}')
+                    if p.get("creador"):
+                        st.caption(f'Creado por {nombre_de(p["creador"])} el {str(p["created_at"])[:10]}')
+
+                    with st.form(f'form_pendiente_{p["id"]}'):
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            nuevo_estado = st.selectbox("Estado", ESTADOS_PENDIENTE,
+                                                         index=ESTADOS_PENDIENTE.index(p["estado"]),
+                                                         key=f'pend_estado_{p["id"]}')
+                        with col2:
+                            nueva_prioridad = st.selectbox("Prioridad", PRIORIDADES_PENDIENTE,
+                                                            index=PRIORIDADES_PENDIENTE.index(p["prioridad"]),
+                                                            key=f'pend_prioridad_{p["id"]}')
+                        with col3:
+                            opciones_asig_edit = ["Sin asignar"] + [nombre_de(u) for u in usuarios_activos]
+                            idx_actual = 0
+                            if asignado_info:
+                                for i, u in enumerate(usuarios_activos):
+                                    if u["id"] == asignado_info["id"]:
+                                        idx_actual = i + 1
+                                        break
+                            nuevo_asignado = st.selectbox("Asignado a (opcional)", opciones_asig_edit,
+                                                           index=idx_actual, key=f'pend_asignado_{p["id"]}')
+
+                        nuevo_titulo = st.text_input("Título", value=p["titulo"], key=f'pend_titulo_{p["id"]}')
+                        nueva_desc = st.text_area("Descripción", value=p.get("descripcion") or "",
+                                                   key=f'pend_desc_{p["id"]}')
+                        nuevo_que_falta = st.text_input("¿Qué falta para realizarlo?",
+                                                         value=p.get("que_falta") or "",
+                                                         key=f'pend_quefalta_{p["id"]}')
+                        nueva_observacion = st.text_area("Observación", value=p.get("observacion") or "",
+                                                          key=f'pend_obs_{p["id"]}')
+                        nueva_fecha_limite = st.date_input(
+                            "Fecha límite", value=parse_fecha(p.get("fecha_limite")), format="DD/MM/YYYY",
+                            key=f'pend_fecha_{p["id"]}')
+
+                        colg, cold = st.columns(2)
+                        guardar_p = colg.form_submit_button("💾 Guardar cambios", use_container_width=True)
+                        eliminar_p = cold.form_submit_button("🗑️ Eliminar", use_container_width=True)
+
+                        if guardar_p:
+                            try:
+                                nuevo_asignado_id = None
+                                if nuevo_asignado != "Sin asignar":
+                                    idx_na = opciones_asig_edit.index(nuevo_asignado) - 1
+                                    nuevo_asignado_id = usuarios_activos[idx_na]["id"]
+
+                                payload = {
+                                    "titulo": nuevo_titulo.strip() or p["titulo"],
+                                    "descripcion": nueva_desc or None,
+                                    "que_falta": nuevo_que_falta or None,
+                                    "observacion": nueva_observacion or None,
+                                    "prioridad": nueva_prioridad,
+                                    "asignado_a": nuevo_asignado_id,
+                                    "fecha_limite": str(nueva_fecha_limite) if nueva_fecha_limite else None,
+                                }
+                                if nuevo_estado != p["estado"]:
+                                    db.cambiar_estado_pendiente(p["id"], nuevo_estado)
+                                db.actualizar_pendiente(p["id"], payload)
+                                limpiar_cache()
+                                st.success("Pendiente actualizado.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error al actualizar: {e}")
+
+                        if eliminar_p:
+                            try:
+                                db.eliminar_pendiente(p["id"])
+                                limpiar_cache()
+                                st.success("Pendiente eliminado.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error al eliminar: {e}")
 
 
 # ==================================================================
