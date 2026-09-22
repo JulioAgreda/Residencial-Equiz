@@ -15,10 +15,11 @@ ROLES = ["Administrador", "Cobrador"]
 
 CATEGORIAS_GASTO = ["Mantenimiento de ascensores", "Artículos de limpieza", "Seguridad",
                     "Servicios públicos", "Mantenimiento general", "Otro"]
-METODOS_PAGO_GASTO = ["Caja chica", "Transferencia bancaria", "Tarjeta de débito", "Efectivo", "Otro"]
+CATEGORIAS_PAGO = ["Servicios (luz, agua, internet)", "Sueldos y honorarios", "Impuestos y tasas",
+                   "Pago a proveedor", "Otro"]
 CONCEPTOS_VENTA = ["Alquiler de área común", "Venta de activos fijos", "Emisión de tag/control de acceso",
                    "Alquiler de parqueo de visitas", "Copias de llaves", "Otro"]
-FORMAS_COBRO_VENTA = ["Efectivo", "Depósito/Transferencia", "Otro"]
+METODOS_PAGO_MOVIMIENTOS = ["Efectivo", "QR", "Transferencia Bancaria", "Tarjeta", "Otro"]
 
 PRIORIDADES_PENDIENTE = ["Urgente", "Alta", "Media", "Baja"]
 ESTADOS_PENDIENTE = ["Pendiente", "En Proceso", "Terminado"]
@@ -248,18 +249,40 @@ if es_admin:
 else:
     opciones_principal = ["📊 Dashboard", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua"]
 
-opciones_movimientos = ["(ninguno)", "🧾 Compras", "💸 Ventas"]
+opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
 opciones_pendientes = ["(ninguno)", "✅ Pendientes"]
 
-pagina_principal = st.sidebar.radio("Gestión del Residencial", opciones_principal, key="nav_principal")
+# Los 3 radios de abajo son independientes en el estado interno de Streamlit:
+# si eliges algo en uno, los otros dos no se "enteran" y siguen marcando su
+# propia opción. Eso es lo que hacía que a veces no se pudiera cambiar de
+# sección (había que volver manualmente a "(ninguno)" primero). Estos
+# callbacks resetean los otros radios apenas se elige uno, para que el
+# cambio de sección sea siempre inmediato.
+def _al_elegir_principal():
+    st.session_state["nav_movimientos"] = "(ninguno)"
+    st.session_state["nav_pendientes"] = "(ninguno)"
+
+
+def _al_elegir_movimientos():
+    if st.session_state["nav_movimientos"] != "(ninguno)":
+        st.session_state["nav_pendientes"] = "(ninguno)"
+
+
+def _al_elegir_pendientes():
+    if st.session_state["nav_pendientes"] != "(ninguno)":
+        st.session_state["nav_movimientos"] = "(ninguno)"
+
+
+pagina_principal = st.sidebar.radio("Gestión del Residencial", opciones_principal, key="nav_principal",
+                                     on_change=_al_elegir_principal)
 st.sidebar.divider()
 st.sidebar.caption("📒 Módulo de Movimientos")
 pagina_movimientos = st.sidebar.radio("Compras y Ventas", opciones_movimientos, key="nav_movimientos",
-                                       label_visibility="collapsed")
+                                       label_visibility="collapsed", on_change=_al_elegir_movimientos)
 st.sidebar.divider()
 st.sidebar.caption("✅ Módulo de Pendientes")
 pagina_pendientes = st.sidebar.radio("Pendientes", opciones_pendientes, key="nav_pendientes",
-                                      label_visibility="collapsed")
+                                      label_visibility="collapsed", on_change=_al_elegir_pendientes)
 
 if pagina_movimientos != "(ninguno)":
     pagina = pagina_movimientos
@@ -788,16 +811,19 @@ elif pagina == "💵 Pagos de Alquiler":
                         colf, colm = st.columns(2)
                         with colf:
                             _f = date.fromisoformat(str(p["fecha"])[:10])
-                            edit_fecha = st.date_input("Fecha", value=_f, format="DD/MM/YYYY")
+                            edit_fecha = st.date_input("Fecha", value=_f, format="DD/MM/YYYY",
+                                                        key=f'alq_fecha_{p["id"]}')
                         with colm:
                             edit_monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0,
-                                                          value=float(p["monto"]))
+                                                          value=float(p["monto"]), key=f'alq_monto_{p["id"]}')
                         edit_metodo = st.selectbox(
                             "Método de pago", ["Efectivo", "Transferencia", "QR", "Otro"],
                             index=["Efectivo", "Transferencia", "QR", "Otro"].index(p.get("metodo_pago"))
-                            if p.get("metodo_pago") in ["Efectivo", "Transferencia", "QR", "Otro"] else 0
+                            if p.get("metodo_pago") in ["Efectivo", "Transferencia", "QR", "Otro"] else 0,
+                            key=f'alq_metodo_{p["id"]}'
                         )
-                        edit_obs = st.text_input("Observación", value=p.get("observacion") or "")
+                        edit_obs = st.text_input("Observación", value=p.get("observacion") or "",
+                                                  key=f'alq_obs_{p["id"]}')
 
                         if es_admin:
                             colg, cold = st.columns(2)
@@ -896,16 +922,20 @@ elif pagina == "💵 Pagos de Alquiler":
                                 colf, colm = st.columns(2)
                                 with colf:
                                     _f = date.fromisoformat(str(p["fecha"])[:10])
-                                    edit_fecha = st.date_input("Fecha", value=_f, format="DD/MM/YYYY")
+                                    edit_fecha = st.date_input("Fecha", value=_f, format="DD/MM/YYYY",
+                                                                key=f'alq_hist_fecha_{p["id"]}')
                                 with colm:
                                     edit_monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0,
-                                                                  value=float(p["monto"]))
+                                                                  value=float(p["monto"]),
+                                                                  key=f'alq_hist_monto_{p["id"]}')
                                 edit_metodo = st.selectbox(
                                     "Método de pago", ["Efectivo", "Transferencia", "QR", "Otro"],
                                     index=["Efectivo", "Transferencia", "QR", "Otro"].index(p.get("metodo_pago"))
-                                    if p.get("metodo_pago") in ["Efectivo", "Transferencia", "QR", "Otro"] else 0
+                                    if p.get("metodo_pago") in ["Efectivo", "Transferencia", "QR", "Otro"] else 0,
+                                    key=f'alq_hist_metodo_{p["id"]}'
                                 )
-                                edit_obs = st.text_input("Observación", value=p.get("observacion") or "")
+                                edit_obs = st.text_input("Observación", value=p.get("observacion") or "",
+                                                          key=f'alq_hist_obs_{p["id"]}')
 
                                 if es_admin:
                                     colg, cold = st.columns(2)
@@ -1072,16 +1102,19 @@ elif pagina == "⚡ Electricidad":
                             colf, colm = st.columns(2)
                             with colf:
                                 _f = date.fromisoformat(str(p["fecha"])[:10])
-                                edit_fecha = st.date_input("Fecha", value=_f, format="DD/MM/YYYY")
+                                edit_fecha = st.date_input("Fecha", value=_f, format="DD/MM/YYYY",
+                                                            key=f'elec_fecha_{p["id"]}')
                             with colm:
                                 edit_monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0,
-                                                              value=float(p["monto"]))
+                                                              value=float(p["monto"]), key=f'elec_monto_{p["id"]}')
                             edit_metodo = st.selectbox(
                                 "Método de pago", ["Efectivo", "Transferencia", "QR", "Otro"],
                                 index=["Efectivo", "Transferencia", "QR", "Otro"].index(p.get("metodo_pago"))
-                                if p.get("metodo_pago") in ["Efectivo", "Transferencia", "QR", "Otro"] else 0
+                                if p.get("metodo_pago") in ["Efectivo", "Transferencia", "QR", "Otro"] else 0,
+                                key=f'elec_metodo_{p["id"]}'
                             )
-                            edit_obs = st.text_input("Observación", value=p.get("observacion") or "")
+                            edit_obs = st.text_input("Observación", value=p.get("observacion") or "",
+                                                      key=f'elec_obs_{p["id"]}')
 
                             if es_admin:
                                 colg, cold = st.columns(2)
@@ -1183,16 +1216,20 @@ elif pagina == "⚡ Electricidad":
                                 colf, colm = st.columns(2)
                                 with colf:
                                     _f = date.fromisoformat(str(p["fecha"])[:10])
-                                    edit_fecha = st.date_input("Fecha", value=_f, format="DD/MM/YYYY")
+                                    edit_fecha = st.date_input("Fecha", value=_f, format="DD/MM/YYYY",
+                                                                key=f'elec_hist_fecha_{p["id"]}')
                                 with colm:
                                     edit_monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0,
-                                                                  value=float(p["monto"]))
+                                                                  value=float(p["monto"]),
+                                                                  key=f'elec_hist_monto_{p["id"]}')
                                 edit_metodo = st.selectbox(
                                     "Método de pago", ["Efectivo", "Transferencia", "QR", "Otro"],
                                     index=["Efectivo", "Transferencia", "QR", "Otro"].index(p.get("metodo_pago"))
-                                    if p.get("metodo_pago") in ["Efectivo", "Transferencia", "QR", "Otro"] else 0
+                                    if p.get("metodo_pago") in ["Efectivo", "Transferencia", "QR", "Otro"] else 0,
+                                    key=f'elec_hist_metodo_{p["id"]}'
                                 )
-                                edit_obs = st.text_input("Observación", value=p.get("observacion") or "")
+                                edit_obs = st.text_input("Observación", value=p.get("observacion") or "",
+                                                          key=f'elec_hist_obs_{p["id"]}')
 
                                 if es_admin:
                                     colg, cold = st.columns(2)
@@ -1357,16 +1394,19 @@ elif pagina == "💧 Agua":
                             colf, colm = st.columns(2)
                             with colf:
                                 _f = date.fromisoformat(str(p["fecha"])[:10])
-                                edit_fecha = st.date_input("Fecha", value=_f, format="DD/MM/YYYY")
+                                edit_fecha = st.date_input("Fecha", value=_f, format="DD/MM/YYYY",
+                                                            key=f'agua_fecha_{p["id"]}')
                             with colm:
                                 edit_monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0,
-                                                              value=float(p["monto"]))
+                                                              value=float(p["monto"]), key=f'agua_monto_{p["id"]}')
                             edit_metodo = st.selectbox(
                                 "Método de pago", ["Efectivo", "Transferencia", "QR", "Otro"],
                                 index=["Efectivo", "Transferencia", "QR", "Otro"].index(p.get("metodo_pago"))
-                                if p.get("metodo_pago") in ["Efectivo", "Transferencia", "QR", "Otro"] else 0
+                                if p.get("metodo_pago") in ["Efectivo", "Transferencia", "QR", "Otro"] else 0,
+                                key=f'agua_metodo_{p["id"]}'
                             )
-                            edit_obs = st.text_input("Observación", value=p.get("observacion") or "")
+                            edit_obs = st.text_input("Observación", value=p.get("observacion") or "",
+                                                      key=f'agua_obs_{p["id"]}')
 
                             if es_admin:
                                 colg, cold = st.columns(2)
@@ -1468,16 +1508,20 @@ elif pagina == "💧 Agua":
                                 colf, colm = st.columns(2)
                                 with colf:
                                     _f = date.fromisoformat(str(p["fecha"])[:10])
-                                    edit_fecha = st.date_input("Fecha", value=_f, format="DD/MM/YYYY")
+                                    edit_fecha = st.date_input("Fecha", value=_f, format="DD/MM/YYYY",
+                                                                key=f'agua_hist_fecha_{p["id"]}')
                                 with colm:
                                     edit_monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0,
-                                                                  value=float(p["monto"]))
+                                                                  value=float(p["monto"]),
+                                                                  key=f'agua_hist_monto_{p["id"]}')
                                 edit_metodo = st.selectbox(
                                     "Método de pago", ["Efectivo", "Transferencia", "QR", "Otro"],
                                     index=["Efectivo", "Transferencia", "QR", "Otro"].index(p.get("metodo_pago"))
-                                    if p.get("metodo_pago") in ["Efectivo", "Transferencia", "QR", "Otro"] else 0
+                                    if p.get("metodo_pago") in ["Efectivo", "Transferencia", "QR", "Otro"] else 0,
+                                    key=f'agua_hist_metodo_{p["id"]}'
                                 )
-                                edit_obs = st.text_input("Observación", value=p.get("observacion") or "")
+                                edit_obs = st.text_input("Observación", value=p.get("observacion") or "",
+                                                          key=f'agua_hist_obs_{p["id"]}')
 
                                 if es_admin:
                                     colg, cold = st.columns(2)
@@ -1828,7 +1872,7 @@ elif pagina == "🧾 Compras":
                 categoria_sel = st.selectbox("Categoría / Rubro", CATEGORIAS_GASTO)
                 categoria_otro = st.text_input("Especificar categoría") if categoria_sel == "Otro" else ""
                 monto_total = st.number_input("Monto total (Bs)", min_value=0.0, step=10.0)
-                metodo_pago_sel = st.selectbox("Método de pago", METODOS_PAGO_GASTO)
+                metodo_pago_sel = st.selectbox("Método de pago", METODOS_PAGO_MOVIMIENTOS)
                 metodo_pago_otro = st.text_input("Especificar método de pago") if metodo_pago_sel == "Otro" else ""
             with col2:
                 proveedor = st.text_input("Proveedor (tienda o técnico)")
@@ -1945,6 +1989,127 @@ elif pagina == "🧾 Compras":
 
 
 # ==================================================================
+# PÁGINA: PAGOS (pagos generales, sin comprobante adjunto)
+# ==================================================================
+elif pagina == "💳 Pagos":
+    st.title("💳 Pagos")
+    st.caption("Pagos generales del edificio que no requieren comprobante adjunto: "
+               "sueldos, servicios, pagos a proveedores, etc.")
+
+    nombre_encargado = usuario_actual.get("nombre") or usuario_actual.get("username")
+
+    tab_registrar, tab_historial = st.tabs(["➕ Registrar pago", "📜 Historial"])
+
+    with tab_registrar:
+        with st.form("form_nuevo_pago_general", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                fecha_pago = st.date_input("Fecha de pago", value=date.today(), format="DD/MM/YYYY")
+                categoria_sel = st.selectbox("Categoría / Concepto", CATEGORIAS_PAGO)
+                categoria_otro = st.text_input("Especificar categoría") if categoria_sel == "Otro" else ""
+                monto = st.number_input("Monto pagado (Bs)", min_value=0.0, step=10.0)
+            with col2:
+                metodo_pago_sel = st.selectbox("Método de pago", METODOS_PAGO_MOVIMIENTOS)
+                metodo_pago_otro = st.text_input("Especificar método de pago") if metodo_pago_sel == "Otro" else ""
+                beneficiario = st.text_input("Beneficiario (a quién se le pagó)")
+            descripcion = st.text_area("Descripción",
+                                        placeholder='Ej. "Pago de factura de luz de áreas comunes, septiembre"')
+
+            st.caption(f"Registrado por: **{nombre_encargado}**")
+
+            guardar = st.form_submit_button("💾 Registrar pago")
+            if guardar:
+                if monto <= 0:
+                    st.error("El monto pagado debe ser mayor a 0.")
+                else:
+                    try:
+                        db.crear_pago_general({
+                            "fecha_pago": str(fecha_pago),
+                            "categoria": categoria_otro if categoria_sel == "Otro" and categoria_otro else categoria_sel,
+                            "descripcion": descripcion or None,
+                            "monto": monto,
+                            "metodo_pago": metodo_pago_otro if metodo_pago_sel == "Otro" and metodo_pago_otro else metodo_pago_sel,
+                            "beneficiario": beneficiario or None,
+                            "encargado": nombre_encargado,
+                        })
+                        st.success("Pago registrado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al guardar: {e}")
+
+    with tab_historial:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            filtro_desde = st.date_input("Desde", value=date.today().replace(day=1), format="DD/MM/YYYY",
+                                          key="pagos_gen_desde")
+        with col2:
+            filtro_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY", key="pagos_gen_hasta")
+        with col3:
+            filtro_categoria = st.selectbox("Categoría", ["Todas"] + CATEGORIAS_PAGO, key="pagos_gen_cat")
+
+        pagos_generales = db.listar_pagos_generales(
+            fecha_desde=str(filtro_desde), fecha_hasta=str(filtro_hasta),
+            categoria=None if filtro_categoria == "Todas" else filtro_categoria,
+        )
+
+        if not pagos_generales:
+            st.info("No hay pagos que coincidan con el filtro.")
+        else:
+            total = sum(float(pg["monto"]) for pg in pagos_generales)
+            st.metric("Total pagado en el periodo", fmt_money(total))
+            st.dataframe(
+                pd.DataFrame([{
+                    "Fecha": pg["fecha_pago"], "Categoría": pg["categoria"],
+                    "Descripción": pg.get("descripcion") or "", "Monto": pg["monto"],
+                    "Método de pago": pg.get("metodo_pago") or "", "Beneficiario": pg.get("beneficiario") or "",
+                    "Encargado": pg.get("encargado") or "",
+                } for pg in pagos_generales]),
+                use_container_width=True, hide_index=True,
+            )
+
+            with st.expander("✏️ Editar o eliminar un pago"):
+                opciones = [f'{pg["fecha_pago"]} — {pg["categoria"]} — {fmt_money(pg["monto"])}'
+                            for pg in pagos_generales]
+                sel = st.selectbox("Pago", range(len(opciones)), format_func=lambda i: opciones[i])
+                pg = pagos_generales[sel]
+                with st.form(f'form_editar_pago_general_{pg["id"]}'):
+                    e_fecha = st.date_input("Fecha", value=date.fromisoformat(str(pg["fecha_pago"])[:10]),
+                                             format="DD/MM/YYYY")
+                    e_categoria = st.text_input("Categoría", value=pg["categoria"])
+                    e_descripcion = st.text_area("Descripción", value=pg.get("descripcion") or "")
+                    e_monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0, value=float(pg["monto"]))
+                    e_metodo = st.text_input("Método de pago", value=pg.get("metodo_pago") or "")
+                    e_beneficiario = st.text_input("Beneficiario", value=pg.get("beneficiario") or "")
+
+                    if es_admin:
+                        colg, cold = st.columns(2)
+                        g = colg.form_submit_button("💾 Guardar cambios", use_container_width=True)
+                        d = cold.form_submit_button("🗑️ Eliminar pago", use_container_width=True)
+                    else:
+                        g = st.form_submit_button("💾 Guardar cambios", use_container_width=True)
+                        d = False
+
+                    if g:
+                        try:
+                            db.actualizar_pago_general(pg["id"], {
+                                "fecha_pago": str(e_fecha), "categoria": e_categoria,
+                                "descripcion": e_descripcion or None, "monto": e_monto,
+                                "metodo_pago": e_metodo or None, "beneficiario": e_beneficiario or None,
+                            })
+                            st.success("Pago actualizado.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al actualizar: {e}")
+                    if d:
+                        try:
+                            db.eliminar_pago_general(pg["id"])
+                            st.success("Pago eliminado.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al eliminar: {e}")
+
+
+# ==================================================================
 # PÁGINA: VENTAS (Ingresos extraordinarios)
 # ==================================================================
 elif pagina == "💸 Ventas":
@@ -1964,7 +2129,7 @@ elif pagina == "💸 Ventas":
                 concepto_otro = st.text_input("Especificar concepto") if concepto_sel == "Otro" else ""
                 monto = st.number_input("Monto recibido (Bs)", min_value=0.0, step=10.0)
             with col2:
-                forma_cobro_sel = st.selectbox("Forma de cobro", FORMAS_COBRO_VENTA)
+                forma_cobro_sel = st.selectbox("Forma de cobro", METODOS_PAGO_MOVIMIENTOS)
                 forma_cobro_otro = st.text_input("Especificar forma de cobro") if forma_cobro_sel == "Otro" else ""
                 comprador = st.text_input("Comprador (residente, depto. o tercero)")
                 recibo_emitido = st.text_input("N° de recibo emitido")
