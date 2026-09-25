@@ -156,6 +156,11 @@ def cargar_reuniones(fecha_desde=None, fecha_hasta=None):
     return db.listar_reuniones(fecha_desde=fecha_desde, fecha_hasta=fecha_hasta)
 
 
+@st.cache_data(ttl=30)
+def cargar_participantes_reuniones():
+    return db.listar_participantes_reuniones()
+
+
 @st.cache_data(ttl=60)
 def cargar_usuarios_activos():
     return [u for u in db.listar_usuarios() if u.get("activo")]
@@ -173,6 +178,7 @@ def limpiar_cache():
     cargar_periodos_agua.clear()
     cargar_pendientes.clear()
     cargar_reuniones.clear()
+    cargar_participantes_reuniones.clear()
     cargar_usuarios_activos.clear()
     cargar_todos_los_usuarios.clear()
 
@@ -1799,8 +1805,20 @@ elif pagina == "🗒️ Reuniones":
     usuarios_activos_reu = cargar_usuarios_activos()
     usuarios_por_id_reu = {u["id"]: u for u in usuarios_todos_reu}
 
+    # Mapa reunion_id -> [usuario_id, ...], armado en Python en vez de con un
+    # embed anidado (reuniones -> reuniones_participantes -> usuarios), que
+    # resultó frágil en la librería de Supabase.
+    participantes_ids_por_reunion = {}
+    for fila in cargar_participantes_reuniones():
+        participantes_ids_por_reunion.setdefault(fila["reunion_id"], []).append(fila["usuario_id"])
+
     def _nombre_usuario_reu(u):
         return u.get("nombre") or u.get("username") or "—"
+
+    def _participantes_de(r):
+        """Nombres de los usuarios del sistema que participaron en la reunión r."""
+        ids = participantes_ids_por_reunion.get(r["id"], [])
+        return [_nombre_usuario_reu(usuarios_por_id_reu[uid]) for uid in ids if uid in usuarios_por_id_reu]
 
     def _mostrar_reunion(r):
         """Vista de solo lectura de una reunión (usada tanto por Administrador como Cobrador)."""
@@ -1810,10 +1828,7 @@ elif pagina == "🗒️ Reuniones":
         if r.get("descripcion_acuerdos"):
             st.markdown("**Lo acordado:**")
             st.write(r["descripcion_acuerdos"])
-        nombres_participantes = [
-            _nombre_usuario_reu(fila["usuarios"]) for fila in (r.get("reuniones_participantes") or [])
-            if fila.get("usuarios")
-        ]
+        nombres_participantes = _participantes_de(r)
         partes = []
         if nombres_participantes:
             partes.append("👤 " + ", ".join(nombres_participantes))
@@ -1890,10 +1905,7 @@ elif pagina == "🗒️ Reuniones":
                         _mostrar_reunion(r)
                         st.divider()
 
-                        ids_actuales = [
-                            fila["usuarios"]["id"] for fila in (r.get("reuniones_participantes") or [])
-                            if fila.get("usuarios")
-                        ]
+                        ids_actuales = participantes_ids_por_reunion.get(r["id"], [])
                         nombres_actuales = [
                             _nombre_usuario_reu(usuarios_por_id_reu[uid])
                             for uid in ids_actuales if uid in usuarios_por_id_reu
