@@ -467,6 +467,49 @@ def eliminar_pendiente(pendiente_id):
     return sb.table("pendientes").delete().eq("id", pendiente_id).execute()
 
 
+# ---------- Reuniones (área administrativa) ----------
+
+def listar_reuniones(fecha_desde=None, fecha_hasta=None):
+    sb = get_client()
+    q = sb.table("reuniones").select(
+        "*, reuniones_participantes(usuarios(id, nombre, username))"
+    )
+    if fecha_desde:
+        q = q.gte("fecha", fecha_desde)
+    if fecha_hasta:
+        q = q.lte("fecha", fecha_hasta)
+    res = q.order("fecha", desc=True).execute()
+    return res.data or []
+
+
+def crear_reunion(payload: dict, participantes_ids=None):
+    """Crea la reunión y, si se pasan ids de usuarios, los vincula como participantes."""
+    sb = get_client()
+    res = sb.table("reuniones").insert(payload).execute()
+    reunion = res.data[0]
+    if participantes_ids:
+        filas = [{"reunion_id": reunion["id"], "usuario_id": uid} for uid in participantes_ids]
+        sb.table("reuniones_participantes").insert(filas).execute()
+    return reunion
+
+
+def actualizar_reunion(reunion_id, payload: dict, participantes_ids=None):
+    """Actualiza los datos de la reunión y sincroniza la lista de participantes
+    (borra los anteriores y registra los nuevos)."""
+    sb = get_client()
+    sb.table("reuniones").update(payload).eq("id", reunion_id).execute()
+    sb.table("reuniones_participantes").delete().eq("reunion_id", reunion_id).execute()
+    if participantes_ids:
+        filas = [{"reunion_id": reunion_id, "usuario_id": uid} for uid in participantes_ids]
+        sb.table("reuniones_participantes").insert(filas).execute()
+    return True
+
+
+def eliminar_reunion(reunion_id):
+    sb = get_client()
+    return sb.table("reuniones").delete().eq("id", reunion_id).execute()
+
+
 # ---------- Almacenamiento de comprobantes ----------
 
 def subir_comprobante(archivo_bytes: bytes, nombre_archivo: str, carpeta: str = "compras") -> str:
