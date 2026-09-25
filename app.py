@@ -151,6 +151,11 @@ def cargar_pendientes(estado=None, prioridad=None, asignado_a=None):
     return db.listar_pendientes(estado=estado, prioridad=prioridad, asignado_a=asignado_a)
 
 
+@st.cache_data(ttl=30)
+def cargar_reuniones(fecha_desde=None, fecha_hasta=None):
+    return db.listar_reuniones(fecha_desde=fecha_desde, fecha_hasta=fecha_hasta)
+
+
 @st.cache_data(ttl=60)
 def cargar_usuarios_activos():
     return [u for u in db.listar_usuarios() if u.get("activo")]
@@ -167,6 +172,7 @@ def limpiar_cache():
     cargar_periodos_electricidad.clear()
     cargar_periodos_agua.clear()
     cargar_pendientes.clear()
+    cargar_reuniones.clear()
     cargar_usuarios_activos.clear()
     cargar_todos_los_usuarios.clear()
 
@@ -251,26 +257,36 @@ else:
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
 opciones_pendientes = ["(ninguno)", "✅ Pendientes"]
+opciones_reuniones = ["(ninguno)", "🗒️ Reuniones"]
 
-# Los 3 radios de abajo son independientes en el estado interno de Streamlit:
-# si eliges algo en uno, los otros dos no se "enteran" y siguen marcando su
+# Los radios de abajo son independientes en el estado interno de Streamlit:
+# si eliges algo en uno, los demás no se "enteran" y siguen marcando su
 # propia opción. Eso es lo que hacía que a veces no se pudiera cambiar de
 # sección (había que volver manualmente a "(ninguno)" primero). Estos
-# callbacks resetean los otros radios apenas se elige uno, para que el
+# callbacks resetean los demás radios apenas se elige uno, para que el
 # cambio de sección sea siempre inmediato.
 def _al_elegir_principal():
     st.session_state["nav_movimientos"] = "(ninguno)"
     st.session_state["nav_pendientes"] = "(ninguno)"
+    st.session_state["nav_reuniones"] = "(ninguno)"
 
 
 def _al_elegir_movimientos():
     if st.session_state["nav_movimientos"] != "(ninguno)":
         st.session_state["nav_pendientes"] = "(ninguno)"
+        st.session_state["nav_reuniones"] = "(ninguno)"
 
 
 def _al_elegir_pendientes():
     if st.session_state["nav_pendientes"] != "(ninguno)":
         st.session_state["nav_movimientos"] = "(ninguno)"
+        st.session_state["nav_reuniones"] = "(ninguno)"
+
+
+def _al_elegir_reuniones():
+    if st.session_state["nav_reuniones"] != "(ninguno)":
+        st.session_state["nav_movimientos"] = "(ninguno)"
+        st.session_state["nav_pendientes"] = "(ninguno)"
 
 
 pagina_principal = st.sidebar.radio("Gestión del Residencial", opciones_principal, key="nav_principal",
@@ -283,11 +299,17 @@ st.sidebar.divider()
 st.sidebar.caption("✅ Módulo de Pendientes")
 pagina_pendientes = st.sidebar.radio("Pendientes", opciones_pendientes, key="nav_pendientes",
                                       label_visibility="collapsed", on_change=_al_elegir_pendientes)
+st.sidebar.divider()
+st.sidebar.caption("🗒️ Módulo de Reuniones")
+pagina_reuniones = st.sidebar.radio("Reuniones", opciones_reuniones, key="nav_reuniones",
+                                     label_visibility="collapsed", on_change=_al_elegir_reuniones)
 
 if pagina_movimientos != "(ninguno)":
     pagina = pagina_movimientos
 elif pagina_pendientes != "(ninguno)":
     pagina = pagina_pendientes
+elif pagina_reuniones != "(ninguno)":
+    pagina = pagina_reuniones
 else:
     pagina = pagina_principal
 st.sidebar.divider()
@@ -1764,6 +1786,169 @@ elif pagina == "✅ Pendientes":
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Error al eliminar: {e}")
+
+
+# ==================================================================
+# PÁGINA: REUNIONES (área administrativa)
+# Solo el Administrador puede crear/editar; el resto solo visualiza.
+# ==================================================================
+elif pagina == "🗒️ Reuniones":
+    st.title("🗒️ Reuniones con el Área Administrativa")
+
+    usuarios_todos_reu = cargar_todos_los_usuarios()
+    usuarios_activos_reu = cargar_usuarios_activos()
+    usuarios_por_id_reu = {u["id"]: u for u in usuarios_todos_reu}
+
+    def _nombre_usuario_reu(u):
+        return u.get("nombre") or u.get("username") or "—"
+
+    def _mostrar_reunion(r):
+        """Vista de solo lectura de una reunión (usada tanto por Administrador como Cobrador)."""
+        st.markdown(f'📅 **{r["fecha"]}**')
+        st.markdown("**Puntos tratados:**")
+        st.write(r["puntos_tratados"])
+        if r.get("descripcion_acuerdos"):
+            st.markdown("**Lo acordado:**")
+            st.write(r["descripcion_acuerdos"])
+        nombres_participantes = [
+            _nombre_usuario_reu(fila["usuarios"]) for fila in (r.get("reuniones_participantes") or [])
+            if fila.get("usuarios")
+        ]
+        partes = []
+        if nombres_participantes:
+            partes.append("👤 " + ", ".join(nombres_participantes))
+        if r.get("invitados"):
+            partes.append("🙋 Invitados: " + r["invitados"])
+        if partes:
+            st.caption(" · ".join(partes))
+        if r.get("creado_por"):
+            creador = usuarios_por_id_reu.get(r["creado_por"])
+            if creador:
+                st.caption(f'Registrado por {_nombre_usuario_reu(creador)}')
+
+    if not es_admin:
+        st.caption("Solo el Administrador puede crear o editar reuniones. Aquí puedes consultarlas.")
+        reuniones = cargar_reuniones()
+        if not reuniones:
+            st.info("Todavía no hay reuniones registradas.")
+        else:
+            for r in reuniones:
+                with st.expander(f'{r["fecha"]} — {(r["puntos_tratados"] or "")[:60]}'):
+                    _mostrar_reunion(r)
+
+    else:
+        tab_nueva, tab_historial = st.tabs(["➕ Nueva reunión", "📋 Historial"])
+
+        with tab_nueva:
+            with st.form("form_nueva_reunion", clear_on_submit=True):
+                fecha_reunion = st.date_input("Fecha de la reunión", value=date.today(), format="DD/MM/YYYY")
+                puntos_tratados = st.text_area(
+                    "Puntos tratados", height=120,
+                    placeholder="Ej.\n- Estado de cobranza del mes\n- Mantenimiento del ascensor\n- Otros temas")
+                descripcion_acuerdos = st.text_area(
+                    "Descripción de lo acordado", height=100,
+                    placeholder="Ej. Se acuerda solicitar 3 cotizaciones para el mantenimiento del ascensor...")
+
+                opciones_participantes = [_nombre_usuario_reu(u) for u in usuarios_activos_reu]
+                participantes_sel = st.multiselect("Participantes (usuarios del sistema)", opciones_participantes)
+                invitados = st.text_input(
+                    "Invitados (personas externas, opcional)",
+                    placeholder="Ej. Juan Pérez (propietario PB-01), representante de la empresa X")
+
+                st.caption(f'Registrado por: **{usuario_actual.get("nombre") or usuario_actual.get("username")}**')
+                guardar = st.form_submit_button("💾 Guardar reunión")
+
+                if guardar:
+                    if not puntos_tratados.strip():
+                        st.error("Los puntos tratados son obligatorios.")
+                    else:
+                        try:
+                            ids_participantes = [
+                                usuarios_activos_reu[opciones_participantes.index(nombre)]["id"]
+                                for nombre in participantes_sel
+                            ]
+                            db.crear_reunion({
+                                "fecha": str(fecha_reunion),
+                                "puntos_tratados": puntos_tratados.strip(),
+                                "descripcion_acuerdos": descripcion_acuerdos or None,
+                                "invitados": invitados or None,
+                                "creado_por": usuario_actual.get("id"),
+                            }, ids_participantes)
+                            limpiar_cache()
+                            st.success("Reunión registrada.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al guardar: {e}")
+
+        with tab_historial:
+            reuniones = cargar_reuniones()
+            if not reuniones:
+                st.info("Todavía no hay reuniones registradas.")
+            else:
+                for r in reuniones:
+                    with st.expander(f'{r["fecha"]} — {(r["puntos_tratados"] or "")[:60]}'):
+                        _mostrar_reunion(r)
+                        st.divider()
+
+                        ids_actuales = [
+                            fila["usuarios"]["id"] for fila in (r.get("reuniones_participantes") or [])
+                            if fila.get("usuarios")
+                        ]
+                        nombres_actuales = [
+                            _nombre_usuario_reu(usuarios_por_id_reu[uid])
+                            for uid in ids_actuales if uid in usuarios_por_id_reu
+                        ]
+
+                        with st.form(f'form_editar_reunion_{r["id"]}'):
+                            e_fecha = st.date_input("Fecha", value=date.fromisoformat(str(r["fecha"])[:10]),
+                                                     format="DD/MM/YYYY", key=f'reu_fecha_{r["id"]}')
+                            e_puntos = st.text_area("Puntos tratados", value=r["puntos_tratados"],
+                                                     height=120, key=f'reu_puntos_{r["id"]}')
+                            e_acuerdos = st.text_area("Descripción de lo acordado",
+                                                       value=r.get("descripcion_acuerdos") or "",
+                                                       height=100, key=f'reu_acuerdos_{r["id"]}')
+                            opciones_part_edit = [_nombre_usuario_reu(u) for u in usuarios_activos_reu]
+                            e_participantes_sel = st.multiselect(
+                                "Participantes (usuarios del sistema)", opciones_part_edit,
+                                default=[n for n in nombres_actuales if n in opciones_part_edit],
+                                key=f'reu_participantes_{r["id"]}')
+                            e_invitados = st.text_input("Invitados (personas externas, opcional)",
+                                                         value=r.get("invitados") or "",
+                                                         key=f'reu_invitados_{r["id"]}')
+
+                            colg, cold = st.columns(2)
+                            guardar_e = colg.form_submit_button("💾 Guardar cambios", use_container_width=True)
+                            eliminar_e = cold.form_submit_button("🗑️ Eliminar reunión", use_container_width=True)
+
+                            if guardar_e:
+                                if not e_puntos.strip():
+                                    st.error("Los puntos tratados son obligatorios.")
+                                else:
+                                    try:
+                                        ids_nuevos = [
+                                            usuarios_activos_reu[opciones_part_edit.index(nombre)]["id"]
+                                            for nombre in e_participantes_sel
+                                        ]
+                                        db.actualizar_reunion(r["id"], {
+                                            "fecha": str(e_fecha),
+                                            "puntos_tratados": e_puntos.strip(),
+                                            "descripcion_acuerdos": e_acuerdos or None,
+                                            "invitados": e_invitados or None,
+                                        }, ids_nuevos)
+                                        limpiar_cache()
+                                        st.success("Reunión actualizada.")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Error al actualizar: {e}")
+
+                            if eliminar_e:
+                                try:
+                                    db.eliminar_reunion(r["id"])
+                                    limpiar_cache()
+                                    st.success("Reunión eliminada.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error al eliminar: {e}")
 
 
 # ==================================================================
