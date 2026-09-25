@@ -470,15 +470,23 @@ def eliminar_pendiente(pendiente_id):
 # ---------- Reuniones (área administrativa) ----------
 
 def listar_reuniones(fecha_desde=None, fecha_hasta=None):
+    """Trae las reuniones (sin embeds anidados, que son frágiles en Postgrest).
+    Los participantes se resuelven aparte con listar_participantes_reuniones()."""
     sb = get_client()
-    q = sb.table("reuniones").select(
-        "*, reuniones_participantes(usuarios(id, nombre, username))"
-    )
+    q = sb.table("reuniones").select("*")
     if fecha_desde:
         q = q.gte("fecha", fecha_desde)
     if fecha_hasta:
         q = q.lte("fecha", fecha_hasta)
     res = q.order("fecha", desc=True).execute()
+    return res.data or []
+
+
+def listar_participantes_reuniones():
+    """Trae todas las filas de reuniones_participantes (tabla chica) para mapear
+    en la app qué usuarios participaron en cada reunión."""
+    sb = get_client()
+    res = sb.table("reuniones_participantes").select("reunion_id, usuario_id").execute()
     return res.data or []
 
 
