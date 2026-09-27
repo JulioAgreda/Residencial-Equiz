@@ -4,6 +4,7 @@ from datetime import date, timedelta
 import calendar
 import bcrypt
 import db
+import recibo
 
 st.set_page_config(page_title="Residencial EQUIZ", page_icon="🏢", layout="wide")
 
@@ -144,6 +145,37 @@ def cargar_periodos_agua(anio=None, mes=None):
 
 def total_pagado(periodo):
     return sum(float(p["monto"]) for p in (periodo.get("pagos") or []))
+
+
+def mostrar_botones_recibo(pago, periodo, apartamento, total_pagado_periodo, key_sufijo):
+    """Muestra dos botones de descarga (PDF y PNG) para el recibo de un abono
+    de alquiler. Se usa tanto en la vista normal como en el historial."""
+    try:
+        datos_recibo = recibo.construir_datos_recibo(
+            pago, periodo, apartamento, total_pagado_periodo,
+            recibido_por=usuario_actual.get("nombre") or usuario_actual.get("username"),
+        )
+        col_pdf, col_png = st.columns(2)
+        with col_pdf:
+            st.download_button(
+                "📄 Descargar recibo (PDF)",
+                data=recibo.generar_recibo_pdf(datos_recibo),
+                file_name=f'{datos_recibo["numero_recibo"]}.pdf',
+                mime="application/pdf",
+                use_container_width=True,
+                key=f'recibo_pdf_{key_sufijo}',
+            )
+        with col_png:
+            st.download_button(
+                "🖼️ Descargar recibo (PNG)",
+                data=recibo.generar_recibo_png(datos_recibo),
+                file_name=f'{datos_recibo["numero_recibo"]}.png',
+                mime="image/png",
+                use_container_width=True,
+                key=f'recibo_png_{key_sufijo}',
+            )
+    except Exception as e:
+        st.caption(f"⚠️ No se pudo preparar el recibo: {e}")
 
 
 @st.cache_data(ttl=30)
@@ -838,6 +870,8 @@ elif pagina == "💵 Pagos de Alquiler":
             st.subheader(f"Abonos ya registrados — {mes} {int(anio)}")
             for p in sorted(abonos, key=lambda x: x["fecha"]):
                 with st.expander(f'{p["fecha"]} — {fmt_money(p["monto"])} — {p.get("metodo_pago") or ""}'):
+                    mostrar_botones_recibo(p, periodo, apt, pagado_hasta_ahora, key_sufijo=f'alq_{p["id"]}')
+                    st.divider()
                     with st.form(f'form_editar_pago_{p["id"]}'):
                         colf, colm = st.columns(2)
                         with colf:
@@ -949,6 +983,11 @@ elif pagina == "💵 Pagos de Alquiler":
                         with st.expander(
                             f'{p["fecha"]} — {fmt_money(p["monto"])} — {p.get("metodo_pago") or ""}'
                         ):
+                            mostrar_botones_recibo(
+                                p, detalle_periodo, detalle_periodo.get("apartamentos"),
+                                total_pagado(detalle_periodo), key_sufijo=f'alq_hist_{p["id"]}'
+                            )
+                            st.divider()
                             with st.form(f'form_editar_pago_hist_{p["id"]}'):
                                 colf, colm = st.columns(2)
                                 with colf:
