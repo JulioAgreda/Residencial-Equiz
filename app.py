@@ -559,8 +559,6 @@ elif pagina == "🏠 Apartamentos":
                                                       value=float(apt.get("monto_alquiler") or 0), step=50.0)
                 with col2:
                     referencia_nombre = st.text_input("Referencia - nombre", value=apt.get("referencia_nombre") or "")
-                    referencia_parentesco = st.text_input("Referencia - parentesco",
-                                                           value=apt.get("referencia_parentesco") or "")
                     referencia_celular = st.text_input("Referencia - celular", value=apt.get("referencia_celular") or "")
                     _raw_fecha = apt.get("fecha_ingreso")
                     try:
@@ -572,8 +570,11 @@ elif pagina == "🏠 Apartamentos":
                     amoblado = st.text_area("Amoblado", value=apt.get("amoblado") or "", height=70)
                     detalle = st.text_area("Detalle (ej. incluye agua/internet)", value=apt.get("detalle") or "",
                                             height=70)
-
-                notas = st.text_area("Notas", value=apt.get("notas") or "")
+                    _opciones_dia_pago = ["(sin definir)"] + [str(d) for d in range(1, 32)]
+                    _dia_pago_actual = apt.get("dia_pago")
+                    _idx_dia_pago = _opciones_dia_pago.index(str(_dia_pago_actual)) if _dia_pago_actual else 0
+                    dia_pago_sel = st.selectbox("Fecha Pago (día fijo del mes)", _opciones_dia_pago,
+                                                 index=_idx_dia_pago)
 
                 st.divider()
                 st.markdown("**📄 Datos del contrato**")
@@ -624,14 +625,13 @@ elif pagina == "🏠 Apartamentos":
                         "cedula_identidad": cedula_identidad or None,
                         "nacionalidad": nacionalidad or None,
                         "referencia_nombre": referencia_nombre or None,
-                        "referencia_parentesco": referencia_parentesco or None,
                         "referencia_celular": referencia_celular or None,
                         "fecha_ingreso": str(fecha_ingreso) if fecha_ingreso else None,
                         "garantia": garantia or None,
                         "amoblado": amoblado or None,
                         "detalle": detalle or None,
                         "monto_alquiler": monto_alquiler,
-                        "notas": notas or None,
+                        "dia_pago": int(dia_pago_sel) if dia_pago_sel != "(sin definir)" else None,
                         "tipo_contrato": tipo_contrato or None,
                         "estado_contrato": estado_contrato,
                         "contrato_fecha_inicio": str(contrato_fecha_inicio) if contrato_fecha_inicio else None,
@@ -671,6 +671,8 @@ elif pagina == "🏠 Apartamentos":
                 fecha_ingreso = st.date_input("Fecha de ingreso", value=None, format="DD/MM/YYYY")
                 garantia = st.text_input("Garantía")
                 detalle = st.text_input("Detalle (ej. incluye agua/internet)")
+                dia_pago_sel = st.selectbox("Fecha Pago (día fijo del mes)",
+                                             ["(sin definir)"] + [str(d) for d in range(1, 32)])
 
             st.divider()
             st.markdown("**📄 Datos del contrato**")
@@ -704,6 +706,7 @@ elif pagina == "🏠 Apartamentos":
                         "garantia": garantia or None,
                         "detalle": detalle or None,
                         "monto_alquiler": monto_alquiler,
+                        "dia_pago": int(dia_pago_sel) if dia_pago_sel != "(sin definir)" else None,
                         "tipo_contrato": tipo_contrato or None,
                         "estado_contrato": estado_contrato,
                         "contrato_fecha_inicio": str(contrato_fecha_inicio) if contrato_fecha_inicio else None,
