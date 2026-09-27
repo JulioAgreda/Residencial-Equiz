@@ -573,7 +573,7 @@ elif pagina == "🏠 Apartamentos":
                     _opciones_dia_pago = ["(sin definir)"] + [str(d) for d in range(1, 32)]
                     _dia_pago_actual = apt.get("dia_pago")
                     _idx_dia_pago = _opciones_dia_pago.index(str(_dia_pago_actual)) if _dia_pago_actual else 0
-                    dia_pago_sel = st.selectbox("Fecha Pago (día fijo del mes)", _opciones_dia_pago,
+                    dia_pago_sel = st.selectbox("Día de Pago (día fijo del mes)", _opciones_dia_pago,
                                                  index=_idx_dia_pago)
 
                 st.divider()
@@ -671,7 +671,7 @@ elif pagina == "🏠 Apartamentos":
                 fecha_ingreso = st.date_input("Fecha de ingreso", value=None, format="DD/MM/YYYY")
                 garantia = st.text_input("Garantía")
                 detalle = st.text_input("Detalle (ej. incluye agua/internet)")
-                dia_pago_sel = st.selectbox("Fecha Pago (día fijo del mes)",
+                dia_pago_sel = st.selectbox("Día de Pago (día fijo del mes)",
                                              ["(sin definir)"] + [str(d) for d in range(1, 32)])
 
             st.divider()
