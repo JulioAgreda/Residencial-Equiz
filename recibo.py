@@ -58,7 +58,7 @@ def construir_datos_recibo(pago, periodo, apartamento, total_pagado_periodo, rec
         "fecha_emision": datetime.now().strftime("%d/%m/%Y %H:%M"),
         "apartamento_codigo": (apartamento or {}).get("codigo", ""),
         "apartamento_piso": (apartamento or {}).get("piso", ""),
-        "inquilino_nombre": (apartamento or {}).get("inquilino_nombre") or "—",
+        "inquilino_nombre": (periodo or {}).get("inquilino_nombre") or (apartamento or {}).get("inquilino_nombre") or "—",
         "periodo": f'{(periodo or {}).get("mes", "")} {(periodo or {}).get("anio", "")}'.strip(),
         "fecha_pago": pago.get("fecha", ""),
         "monto_pagado": float(pago.get("monto") or 0),
