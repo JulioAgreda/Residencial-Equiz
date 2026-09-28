@@ -123,14 +123,20 @@ def fmt_money(v):
         return "Bs 0.00"
 
 
+def nombre_inquilino_periodo(periodo, apt_info=None):
+    """Inquilino al que pertenece ese periodo (se guarda al crearlo). Si el periodo no lo tiene,
+    se usa el inquilino actual del apartamento."""
+    return periodo.get("inquilino_nombre") or (apt_info or {}).get("inquilino_nombre") or "—"
+
+
 @st.cache_data(ttl=30)
 def cargar_apartamentos():
     return db.listar_apartamentos()
 
 
 @st.cache_data(ttl=30)
-def cargar_periodos(apartamento_id=None, anio=None, mes=None):
-    return db.listar_periodos(apartamento_id=apartamento_id, anio=anio, mes=mes)
+def cargar_periodos(apartamento_id=None, anio=None, mes=None, solo_activos=False):
+    return db.listar_periodos(apartamento_id=apartamento_id, anio=anio, mes=mes, solo_activos=solo_activos)
 
 
 @st.cache_data(ttl=30)
@@ -375,7 +381,7 @@ if pagina == "📊 Dashboard":
     # ---------------- Alertas: contratos y mora ----------------
     hoy = date.today()
     mes_actual_nombre = MESES[hoy.month - 1]
-    periodos_mes_actual = cargar_periodos(anio=hoy.year, mes=mes_actual_nombre)
+    periodos_mes_actual = cargar_periodos(anio=hoy.year, mes=mes_actual_nombre, solo_activos=True)
     periodos_mes_actual_por_apt = {p["apartamento_id"]: p for p in periodos_mes_actual}
 
     filas_contrato = []
@@ -485,7 +491,7 @@ if pagina == "📊 Dashboard":
             consumo = float(p["kwh_actual"]) - float(p["kwh_anterior"])
             filas_elec.append({
                 "Apartamento": apt_info.get("codigo"),
-                "Inquilino": apt_info.get("inquilino_nombre") or "—",
+                "Inquilino": nombre_inquilino_periodo(p, apt_info),
                 "Consumo (Kwh)": consumo,
             })
         if filas_elec:
@@ -564,7 +570,8 @@ elif pagina == "🏠 Apartamentos":
         st.stop()
     st.title("🏠 Gestión de Apartamentos")
 
-    tab_lista, tab_nuevo, tab_importar = st.tabs(["📋 Lista y edición", "➕ Nuevo apartamento", "📥 Importar CSV"])
+    tab_lista, tab_nuevo, tab_historial_inq, tab_importar = st.tabs(
+        ["📋 Lista y edición", "➕ Nuevo apartamento", "🕘 Historial de inquilinos", "📥 Importar CSV"])
 
     with tab_lista:
         apartamentos = cargar_apartamentos()
@@ -575,6 +582,13 @@ elif pagina == "🏠 Apartamentos":
             idx = st.selectbox("Selecciona un apartamento para ver o editar", range(len(apartamentos)),
                                 format_func=lambda i: codigos[i])
             apt = apartamentos[idx]
+
+            if apt.get("estado") == "Desocupado" and not apt.get("inquilino_nombre"):
+                st.info("🟢 Apartamento libre. Para ingresar un nuevo inquilino completa sus datos abajo, "
+                        "cambia el estado a **Ocupado** y guarda.")
+            else:
+                st.caption("ℹ️ Para cambiar de inquilino no sobrescribas estos datos: usa "
+                           "**🚪 Registrar salida del inquilino** (más abajo). Así se guarda su ficha y su deuda.")
 
             with st.form("editar_apartamento"):
                 col1, col2 = st.columns(2)
@@ -687,6 +701,56 @@ elif pagina == "🏠 Apartamentos":
                     except Exception as e:
                         st.error(f"Error al eliminar: {e}")
 
+            # ---------- Salida del inquilino ----------
+            if apt.get("inquilino_nombre") or apt.get("estado") == "Ocupado":
+                with st.expander("🚪 Registrar salida del inquilino"):
+                    st.write(
+                        f'Se archivará la ficha de **{apt.get("inquilino_nombre") or "este inquilino"}** '
+                        f'en el historial y el apartamento **{apt["codigo"]}** quedará **Desocupado** y libre '
+                        "para el nuevo inquilino. Sus pagos anteriores no se borran."
+                    )
+                    try:
+                        deuda_prev = db.deuda_activa_apartamento(apt["id"])
+                    except Exception:
+                        deuda_prev = None
+                    if deuda_prev is not None:
+                        total_prev = sum(deuda_prev.values())
+                        if total_prev > 0:
+                            st.warning(
+                                f'Deuda pendiente que quedará registrada a nombre de este inquilino: '
+                                f'**{fmt_money(total_prev)}** (Alquiler {fmt_money(deuda_prev["alquiler"])} · '
+                                f'Electricidad {fmt_money(deuda_prev["electricidad"])} · '
+                                f'Agua {fmt_money(deuda_prev["agua"])}). No pasará al nuevo inquilino.'
+                            )
+                        else:
+                            st.success("Este inquilino no tiene deudas pendientes.")
+
+                    with st.form(f'form_salida_{apt["id"]}'):
+                        fecha_salida = st.date_input("Fecha de salida", value=date.today(), format="DD/MM/YYYY",
+                                                      key=f'salida_fecha_{apt["id"]}')
+                        obs_salida = st.text_area(
+                            "Observación de salida (opcional)",
+                            placeholder="Ej. Garantía devuelta, estado en que dejó el apartamento, acuerdos de pago…",
+                            key=f'salida_obs_{apt["id"]}')
+                        confirmar_salida = st.checkbox(
+                            "Confirmo que el inquilino salió y quiero archivar su ficha",
+                            key=f'salida_confirma_{apt["id"]}')
+                        registrar = st.form_submit_button("🚪 Registrar salida")
+
+                        if registrar:
+                            if not confirmar_salida:
+                                st.error("Marca la casilla de confirmación para continuar.")
+                            else:
+                                try:
+                                    db.registrar_salida_inquilino(
+                                        apt["id"], fecha_salida, obs_salida,
+                                        usuario_actual.get("nombre") or usuario_actual.get("username"))
+                                    limpiar_cache()
+                                    st.success("Salida registrada. La ficha quedó en el historial de inquilinos.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error al registrar la salida: {e}")
+
     with tab_nuevo:
         with st.form("nuevo_apartamento", clear_on_submit=True):
             col1, col2 = st.columns(2)
@@ -752,6 +816,65 @@ elif pagina == "🏠 Apartamentos":
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al crear (¿código repetido?): {e}")
+
+    with tab_historial_inq:
+        apartamentos_h = cargar_apartamentos()
+        opciones_h = ["Todos los apartamentos"] + [a["codigo"] for a in apartamentos_h]
+        sel_h = st.selectbox("Apartamento", opciones_h, key="hist_inq_apto")
+        apt_id_h = None if sel_h == opciones_h[0] else apartamentos_h[opciones_h.index(sel_h) - 1]["id"]
+        codigo_por_id = {a["id"]: a["codigo"] for a in apartamentos_h}
+
+        try:
+            historial_inq = db.listar_inquilinos_historial(apt_id_h)
+            deudas_actuales = db.deuda_actual_por_inquilino_historial()
+        except Exception as e:
+            historial_inq, deudas_actuales = [], {}
+            st.error(f"No se pudo cargar el historial (¿ejecutaste migracion_historial_inquilinos.sql?): {e}")
+
+        if not historial_inq:
+            st.info("Todavía no hay inquilinos en el historial. Aparecerán aquí cuando registres su salida.")
+        else:
+            for h in historial_inq:
+                d_act = deudas_actuales.get(h["id"], {"alquiler": 0.0, "electricidad": 0.0, "agua": 0.0})
+                deuda_actual_total = sum(d_act.values())
+                marca = "⚠️" if deuda_actual_total > 0 else "✅"
+                titulo_h = (f'{marca} {codigo_por_id.get(h["apartamento_id"], "—")} — '
+                            f'{h.get("inquilino_nombre") or "Sin nombre"} '
+                            f'({h.get("fecha_ingreso") or "?"} → {h["fecha_salida"]})')
+                with st.expander(titulo_h):
+                    colh1, colh2 = st.columns(2)
+                    with colh1:
+                        st.markdown(f'**Cédula:** {h.get("cedula_identidad") or "—"}')
+                        st.markdown(f'**Celular:** {h.get("celular") or "—"}')
+                        st.markdown(f'**Nacionalidad:** {h.get("nacionalidad") or "—"}')
+                        st.markdown(f'**Referencia:** {h.get("referencia_nombre") or "—"} '
+                                    f'({h.get("referencia_celular") or "sin celular"})')
+                    with colh2:
+                        st.markdown(f'**Alquiler mensual:** {fmt_money(h.get("monto_alquiler") or 0)}')
+                        st.markdown(f'**Garantía:** {h.get("garantia") or "—"}')
+                        st.markdown(f'**Contrato:** {h.get("tipo_contrato") or "—"} · '
+                                    f'{h.get("estado_contrato") or "—"}')
+                        st.markdown(f'**Vigencia:** {h.get("contrato_fecha_inicio") or "—"} → '
+                                    f'{h.get("contrato_fecha_fin") or "—"}')
+                    if h.get("contrato_observaciones"):
+                        st.caption(f'Observaciones del contrato: {h["contrato_observaciones"]}')
+                    if h.get("observacion_salida"):
+                        st.markdown(f'📝 **Observación de salida:** {h["observacion_salida"]}')
+
+                    st.divider()
+                    deuda_salida_total = (float(h.get("deuda_alquiler") or 0) + float(h.get("deuda_electricidad") or 0)
+                                          + float(h.get("deuda_agua") or 0))
+                    cm1, cm2 = st.columns(2)
+                    cm1.metric("Deuda al salir", fmt_money(deuda_salida_total))
+                    cm2.metric("Deuda pendiente hoy", fmt_money(deuda_actual_total))
+                    st.caption(
+                        f'Al salir: Alquiler {fmt_money(h.get("deuda_alquiler") or 0)} · '
+                        f'Electricidad {fmt_money(h.get("deuda_electricidad") or 0)} · '
+                        f'Agua {fmt_money(h.get("deuda_agua") or 0)}  |  '
+                        f'Hoy: Alquiler {fmt_money(d_act["alquiler"])} · '
+                        f'Electricidad {fmt_money(d_act["electricidad"])} · Agua {fmt_money(d_act["agua"])}')
+                    if h.get("registrado_por"):
+                        st.caption(f'Salida registrada por {h["registrado_por"]}')
 
     with tab_importar:
         st.write(
@@ -830,7 +953,8 @@ elif pagina == "💵 Pagos de Alquiler":
                             if periodo:
                                 db.actualizar_periodo(periodo["id"], {"monto_esperado": nuevo_monto_esperado})
                             else:
-                                db.obtener_o_crear_periodo(apt["id"], mes, int(anio), nuevo_monto_esperado)
+                                db.obtener_o_crear_periodo(apt["id"], mes, int(anio), nuevo_monto_esperado,
+                                                           inquilino_nombre=apt.get("inquilino_nombre"))
                             limpiar_cache()
                             st.success("Monto esperado actualizado.")
                             st.rerun()
@@ -851,7 +975,8 @@ elif pagina == "💵 Pagos de Alquiler":
                     st.error("El monto abonado debe ser mayor a 0.")
                 else:
                     try:
-                        periodo_actual = db.obtener_o_crear_periodo(apt["id"], mes, int(anio), monto_esperado_actual)
+                        periodo_actual = db.obtener_o_crear_periodo(apt["id"], mes, int(anio), monto_esperado_actual,
+                                                            inquilino_nombre=apt.get("inquilino_nombre"))
                         db.crear_pago({
                             "periodo_id": periodo_actual["id"],
                             "fecha": str(fecha_pago),
@@ -954,7 +1079,7 @@ elif pagina == "💵 Pagos de Alquiler":
                 n_abonos = len(p.get("pagos") or [])
                 filas.append({
                     "Apartamento": apt_info.get("codigo"),
-                    "Inquilino": apt_info.get("inquilino_nombre"),
+                    "Inquilino": nombre_inquilino_periodo(p, apt_info),
                     "Mes": p["mes"],
                     "Año": p["anio"],
                     "Esperado": p["monto_esperado"],
@@ -1118,7 +1243,8 @@ elif pagina == "⚡ Electricidad":
                     if periodo:
                         db.actualizar_periodo_electricidad(periodo["id"], payload)
                     else:
-                        payload.update({"apartamento_id": apt["id"], "mes": mes, "anio": int(anio)})
+                        payload.update({"apartamento_id": apt["id"], "mes": mes, "anio": int(anio),
+                                        "inquilino_nombre": apt.get("inquilino_nombre")})
                         db.crear_periodo_electricidad(payload)
                     limpiar_cache()
                     st.success("Lectura guardada.")
