@@ -66,10 +66,84 @@ def eliminar_apartamento(apartamento_id):
     return sb.table("apartamentos").delete().eq("id", apartamento_id).execute()
 
 
+# ---------- Historial de inquilinos (salida de un inquilino / ingreso de otro) ----------
+
+def deuda_activa_apartamento(apartamento_id):
+    """Deuda pendiente del inquilino actual (solo periodos abiertos): alquiler, electricidad y agua."""
+    sb = get_client()
+    deudas = {}
+    for clave, tabla, tabla_pagos in [
+        ("alquiler", "periodos_alquiler", "pagos"),
+        ("electricidad", "periodos_electricidad", "pagos_electricidad"),
+        ("agua", "periodos_agua", "pagos_agua"),
+    ]:
+        res = (
+            sb.table(tabla)
+            .select(f"monto_esperado, {tabla_pagos}(monto)")
+            .eq("apartamento_id", apartamento_id)
+            .is_("inquilino_historial_id", "null")
+            .execute()
+        )
+        total = 0.0
+        for p in res.data or []:
+            pagado = sum(float(x["monto"]) for x in (p.get(tabla_pagos) or []))
+            total += max(0.0, float(p.get("monto_esperado") or 0) - pagado)
+        deudas[clave] = round(total, 2)
+    return deudas
+
+
+def registrar_salida_inquilino(apartamento_id, fecha_salida, observacion, registrado_por):
+    """Archiva la ficha del inquilino, cierra sus periodos (su deuda queda a su nombre) y deja
+    el apartamento libre. Todo se hace en una sola operación en la base de datos (todo o nada)."""
+    sb = get_client()
+    res = sb.rpc("registrar_salida_inquilino", {
+        "p_apartamento_id": apartamento_id,
+        "p_fecha_salida": str(fecha_salida),
+        "p_observacion": observacion or None,
+        "p_registrado_por": registrado_por,
+    }).execute()
+    return res.data
+
+
+def listar_inquilinos_historial(apartamento_id=None):
+    sb = get_client()
+    q = sb.table("inquilinos_historial").select("*")
+    if apartamento_id:
+        q = q.eq("apartamento_id", apartamento_id)
+    res = q.order("fecha_salida", desc=True).order("id", desc=True).execute()
+    return res.data or []
+
+
+def deuda_actual_por_inquilino_historial():
+    """Deuda que todavía tiene cada inquilino que salió (según sus periodos cerrados):
+    {historial_id: {"alquiler": x, "electricidad": y, "agua": z}}"""
+    sb = get_client()
+    resultado = {}
+    for clave, tabla, tabla_pagos in [
+        ("alquiler", "periodos_alquiler", "pagos"),
+        ("electricidad", "periodos_electricidad", "pagos_electricidad"),
+        ("agua", "periodos_agua", "pagos_agua"),
+    ]:
+        res = (
+            sb.table(tabla)
+            .select(f"inquilino_historial_id, monto_esperado, {tabla_pagos}(monto)")
+            .gt("inquilino_historial_id", 0)
+            .execute()
+        )
+        for p in res.data or []:
+            hid = p["inquilino_historial_id"]
+            pagado = sum(float(x["monto"]) for x in (p.get(tabla_pagos) or []))
+            deuda = max(0.0, float(p.get("monto_esperado") or 0) - pagado)
+            d = resultado.setdefault(hid, {"alquiler": 0.0, "electricidad": 0.0, "agua": 0.0})
+            d[clave] = round(d[clave] + deuda, 2)
+    return resultado
+
+
 # ---------- Periodos de alquiler (un registro por apartamento + mes/año) ----------
 
-def listar_periodos(apartamento_id=None, anio=None, mes=None):
-    """Trae los periodos junto con el apartamento y todos sus pagos (abonos) asociados."""
+def listar_periodos(apartamento_id=None, anio=None, mes=None, solo_activos=False):
+    """Trae los periodos junto con el apartamento y todos sus pagos (abonos) asociados.
+    solo_activos=True excluye los periodos cerrados de inquilinos que ya salieron."""
     sb = get_client()
     q = sb.table("periodos_alquiler").select(
         "*, apartamentos(codigo, piso, inquilino_nombre), pagos(id, fecha, monto, metodo_pago, observacion)"
@@ -80,6 +154,8 @@ def listar_periodos(apartamento_id=None, anio=None, mes=None):
         q = q.eq("anio", anio)
     if mes:
         q = q.eq("mes", mes)
+    if solo_activos:
+        q = q.is_("inquilino_historial_id", "null")
     res = q.order("anio", desc=True).execute()
     return _ordenar_periodos(res.data or [])
 
@@ -92,6 +168,7 @@ def obtener_periodo(apartamento_id, mes, anio):
         .eq("apartamento_id", apartamento_id)
         .eq("mes", mes)
         .eq("anio", anio)
+        .is_("inquilino_historial_id", "null")
         .execute()
     )
     data = res.data or []
@@ -109,8 +186,9 @@ def actualizar_periodo(periodo_id, payload: dict):
     return sb.table("periodos_alquiler").update(payload).eq("id", periodo_id).execute()
 
 
-def obtener_o_crear_periodo(apartamento_id, mes, anio, monto_esperado):
-    """Devuelve el periodo existente para ese apartamento/mes/año, o lo crea si no existe."""
+def obtener_o_crear_periodo(apartamento_id, mes, anio, monto_esperado, inquilino_nombre=None):
+    """Devuelve el periodo (abierto) existente para ese apartamento/mes/año, o lo crea si no existe.
+    El periodo guarda el nombre del inquilino de ese momento."""
     periodo = obtener_periodo(apartamento_id, mes, anio)
     if periodo:
         return periodo
@@ -119,6 +197,7 @@ def obtener_o_crear_periodo(apartamento_id, mes, anio, monto_esperado):
         "mes": mes,
         "anio": anio,
         "monto_esperado": monto_esperado,
+        "inquilino_nombre": inquilino_nombre,
     })
     nuevo["pagos"] = []
     return nuevo
@@ -192,6 +271,7 @@ def obtener_periodo_electricidad(apartamento_id, mes, anio):
         .eq("apartamento_id", apartamento_id)
         .eq("mes", mes)
         .eq("anio", anio)
+        .is_("inquilino_historial_id", "null")
         .execute()
     )
     data = res.data or []
@@ -267,6 +347,7 @@ def obtener_periodo_agua(apartamento_id, mes, anio):
         .eq("apartamento_id", apartamento_id)
         .eq("mes", mes)
         .eq("anio", anio)
+        .is_("inquilino_historial_id", "null")
         .execute()
     )
     data = res.data or []
