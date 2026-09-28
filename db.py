@@ -14,10 +14,35 @@ def get_client() -> Client:
 
 # ---------- Apartamentos ----------
 
+_ORDEN_PISO_CODIGO = {"PB": 0, "PP": 1, "SP": 2, "TP": 3}
+_MESES_ORDEN = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
+                "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+
+
+def clave_orden_apartamento(codigo):
+    """Orden natural de códigos: PB (planta baja), PP (primer piso), SP (segundo piso),
+    TP (tercer piso), y dentro de cada uno por número (PB-1, PB-2, ... PB-10)."""
+    import re
+    texto = (codigo or "").strip().upper()
+    m = re.match(r"^([A-Z]+)[\s\-_]*(\d+)", texto)
+    if m:
+        return (_ORDEN_PISO_CODIGO.get(m.group(1), 99), m.group(1), int(m.group(2)), texto)
+    return (99, texto, 0, texto)
+
+
+def _ordenar_periodos(periodos):
+    """Más reciente primero (año, mes) y, dentro de cada mes, apartamentos en orden PB, PP, SP, TP."""
+    def clave(p):
+        mes_idx = _MESES_ORDEN.index(p["mes"]) if p.get("mes") in _MESES_ORDEN else 0
+        codigo = (p.get("apartamentos") or {}).get("codigo")
+        return (-int(p.get("anio") or 0), -mes_idx, clave_orden_apartamento(codigo))
+    return sorted(periodos, key=clave)
+
+
 def listar_apartamentos():
     sb = get_client()
-    res = sb.table("apartamentos").select("*").order("codigo").execute()
-    return res.data or []
+    res = sb.table("apartamentos").select("*").execute()
+    return sorted(res.data or [], key=lambda a: clave_orden_apartamento(a.get("codigo")))
 
 
 def obtener_apartamento(apartamento_id):
@@ -56,7 +81,7 @@ def listar_periodos(apartamento_id=None, anio=None, mes=None):
     if mes:
         q = q.eq("mes", mes)
     res = q.order("anio", desc=True).execute()
-    return res.data or []
+    return _ordenar_periodos(res.data or [])
 
 
 def obtener_periodo(apartamento_id, mes, anio):
@@ -156,7 +181,7 @@ def listar_periodos_electricidad(apartamento_id=None, anio=None, mes=None):
     if mes:
         q = q.eq("mes", mes)
     res = q.order("anio", desc=True).execute()
-    return res.data or []
+    return _ordenar_periodos(res.data or [])
 
 
 def obtener_periodo_electricidad(apartamento_id, mes, anio):
@@ -231,7 +256,7 @@ def listar_periodos_agua(apartamento_id=None, anio=None, mes=None):
     if mes:
         q = q.eq("mes", mes)
     res = q.order("anio", desc=True).execute()
-    return res.data or []
+    return _ordenar_periodos(res.data or [])
 
 
 def obtener_periodo_agua(apartamento_id, mes, anio):
