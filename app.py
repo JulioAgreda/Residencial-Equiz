@@ -123,6 +123,14 @@ def fmt_money(v):
         return "Bs 0.00"
 
 
+def redondear_entero(v):
+    """Redondeo comercial a número entero (0.5 siempre hacia arriba), para montos de
+    electricidad y agua. Python's round() nativo usa redondeo bancario (100.5 -> 100),
+    que no es lo esperado para dinero."""
+    from decimal import Decimal, ROUND_HALF_UP
+    return int(Decimal(str(v)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
 def nombre_inquilino_periodo(periodo, apt_info=None):
     """Inquilino al que pertenece ese periodo (se guarda al crearlo). Si el periodo no lo tiene,
     se usa el inquilino actual del apartamento."""
@@ -1275,7 +1283,7 @@ elif pagina == "⚡ Electricidad":
                                               value=tarifa_default)
 
             consumo = max(kwh_actual - kwh_anterior, 0)
-            monto_calculado = consumo * tarifa_kwh
+            monto_calculado = redondear_entero(consumo * tarifa_kwh)
             st.caption(f"Consumo: {consumo:g} Kwh  ×  Bs {tarifa_kwh:.4f}  =  **{fmt_money(monto_calculado)}**")
 
             guardar_lectura = st.form_submit_button("💾 Guardar lectura")
@@ -1568,7 +1576,7 @@ elif pagina == "💧 Agua":
                                                value=tarifa_default)
 
             consumo = max(lectura_actual - lectura_anterior, 0)
-            monto_calculado = consumo * tarifa_agua
+            monto_calculado = redondear_entero(consumo * tarifa_agua)
             st.caption(f"Consumo: {consumo:g} m³  ×  Bs {tarifa_agua:.4f}  =  **{fmt_money(monto_calculado)}**")
 
             guardar_lectura = st.form_submit_button("💾 Guardar lectura")
