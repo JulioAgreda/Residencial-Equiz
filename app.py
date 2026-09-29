@@ -230,32 +230,65 @@ def parse_fecha(valor):
         return None
 
 
-def fecha_vencimiento_del_mes(fecha_ingreso: date, anio: int, mes_num: int):
-    """Día de pago mensual = mismo día del mes que la fecha de ingreso (ajustado si el mes es más corto)."""
+def fecha_vencimiento_del_mes(dia_pago: int, anio: int, mes_num: int):
+    """Fecha de vencimiento del pago de un mes dado, según el día de pago (1-31),
+    ajustado si el mes es más corto (ej. día 31 en febrero -> último día de febrero)."""
     ultimo_dia_mes = calendar.monthrange(anio, mes_num)[1]
-    dia = min(fecha_ingreso.day, ultimo_dia_mes)
+    dia = min(max(int(dia_pago), 1), ultimo_dia_mes)
     return date(anio, mes_num, dia)
 
 
-def calcular_mora_alquiler(apt, periodos_mes_actual_por_apt):
-    """Devuelve (en_mora, dias_atraso, deuda) para un apartamento, según su fecha de pago mensual."""
-    if apt["estado"] != "Ocupado":
-        return False, 0, 0.0
-    fecha_ingreso = parse_fecha(apt.get("fecha_ingreso"))
-    hoy = date.today()
-    dia_pago = fecha_ingreso if fecha_ingreso else date(hoy.year, hoy.month, 1)
-    vencimiento = fecha_vencimiento_del_mes(dia_pago, hoy.year, hoy.month)
-    if hoy <= vencimiento:
-        return False, 0, 0.0  # todavía no vence el pago de este mes
+def _iter_meses(desde_anio, desde_mes_idx, hasta_anio, hasta_mes_idx):
+    """Genera (año, mes_idx) de forma inclusiva, mes_idx 0-based (0=Enero)."""
+    a, m = desde_anio, desde_mes_idx
+    while (a, m) <= (hasta_anio, hasta_mes_idx):
+        yield a, m
+        m += 1
+        if m > 11:
+            m = 0
+            a += 1
 
-    periodo = periodos_mes_actual_por_apt.get(apt["id"])
-    monto_esperado = float(periodo["monto_esperado"]) if periodo else float(apt.get("monto_alquiler") or 0)
-    pagado = total_pagado(periodo) if periodo else 0.0
-    deuda = monto_esperado - pagado
-    if deuda <= 0:
-        return False, 0, 0.0
-    dias_atraso = (hoy - vencimiento).days
-    return True, dias_atraso, deuda
+
+def calcular_mora_alquiler(apt, periodos_por_apt_mes):
+    """Devuelve (en_mora, dias_atraso, deuda_total, meses_adeudados) para un apartamento,
+    sumando TODOS los meses ya vencidos que no se pagaron por completo (no solo el mes
+    actual), según su día de pago fijo. Si el apartamento no tiene 'Día de Pago' definido,
+    se usa el día del mes de su fecha de ingreso."""
+    if apt["estado"] != "Ocupado":
+        return False, 0, 0.0, 0
+
+    hoy = date.today()
+    fecha_ingreso = parse_fecha(apt.get("fecha_ingreso"))
+    dia_pago = apt.get("dia_pago") or (fecha_ingreso.day if fecha_ingreso else None)
+    inicio = fecha_ingreso or date(hoy.year, hoy.month, 1)
+    if not dia_pago:
+        return False, 0, 0.0, 0
+
+    monto_base = float(apt.get("monto_alquiler") or 0)
+    deuda_total = 0.0
+    meses_adeudados = 0
+    vencimiento_mas_antiguo = None
+
+    for anio, mes_idx in _iter_meses(inicio.year, inicio.month - 1, hoy.year, hoy.month - 1):
+        mes_num = mes_idx + 1
+        vencimiento = fecha_vencimiento_del_mes(dia_pago, anio, mes_num)
+        if hoy <= vencimiento:
+            continue  # ese mes todavía no vence
+
+        periodo = periodos_por_apt_mes.get((apt["id"], MESES[mes_idx], anio))
+        monto_esperado = float(periodo["monto_esperado"]) if periodo else monto_base
+        pagado = total_pagado(periodo) if periodo else 0.0
+        deuda_mes = monto_esperado - pagado
+        if deuda_mes > 0.009:
+            deuda_total += deuda_mes
+            meses_adeudados += 1
+            if vencimiento_mas_antiguo is None:
+                vencimiento_mas_antiguo = vencimiento
+
+    if meses_adeudados == 0:
+        return False, 0, 0.0, 0
+    dias_atraso = (hoy - vencimiento_mas_antiguo).days
+    return True, dias_atraso, round(deuda_total, 2), meses_adeudados
 
 
 def estado_contrato_alerta(apt):
@@ -368,6 +401,15 @@ if st.sidebar.button("🚪 Cerrar sesión"):
 # ==================================================================
 # PÁGINA: DASHBOARD
 # ==================================================================
+if pagina != "📊 Dashboard":
+    if st.button("🏠 Volver al Menú Principal", key="btn_volver_inicio"):
+        st.session_state["nav_principal"] = "📊 Dashboard"
+        st.session_state["nav_movimientos"] = "(ninguno)"
+        st.session_state["nav_pendientes"] = "(ninguno)"
+        st.session_state["nav_reuniones"] = "(ninguno)"
+        st.rerun()
+    st.divider()
+
 if pagina == "📊 Dashboard":
     st.title("📊 Dashboard General")
 
@@ -381,8 +423,8 @@ if pagina == "📊 Dashboard":
     # ---------------- Alertas: contratos y mora ----------------
     hoy = date.today()
     mes_actual_nombre = MESES[hoy.month - 1]
-    periodos_mes_actual = cargar_periodos(anio=hoy.year, mes=mes_actual_nombre, solo_activos=True)
-    periodos_mes_actual_por_apt = {p["apartamento_id"]: p for p in periodos_mes_actual}
+    periodos_activos_todos = cargar_periodos(solo_activos=True)
+    periodos_por_apt_mes = {(p["apartamento_id"], p["mes"], p["anio"]): p for p in periodos_activos_todos}
 
     filas_contrato = []
     filas_mora = []
@@ -400,13 +442,14 @@ if pagina == "📊 Dashboard":
                 "_orden": 0 if nivel == "🔴 Vencido" else 1,
             })
 
-        en_mora, dias_atraso, deuda = calcular_mora_alquiler(apt, periodos_mes_actual_por_apt)
+        en_mora, dias_atraso, deuda, meses_adeudados = calcular_mora_alquiler(apt, periodos_por_apt_mes)
         if en_mora:
             filas_mora.append({
                 "Apartamento": apt["codigo"],
                 "Inquilino": apt.get("inquilino_nombre") or "—",
+                "Meses adeudados": meses_adeudados,
                 "Días de atraso": dias_atraso,
-                "Deuda": fmt_money(deuda),
+                "Deuda": deuda,
             })
 
     if filas_contrato or filas_mora:
@@ -421,10 +464,14 @@ if pagina == "📊 Dashboard":
             else:
                 st.success("Sin contratos vencidos ni por vencer en los próximos 30 días.")
         with colB:
-            st.markdown(f"**💰 Alquileres en mora (según fecha de pago de {mes_actual_nombre})**")
+            st.markdown("**💰 Alquileres en mora (suma de todos los meses impagos)**")
             if filas_mora:
-                filas_mora.sort(key=lambda f: -f["Días de atraso"])
-                st.dataframe(pd.DataFrame(filas_mora), use_container_width=True, hide_index=True)
+                filas_mora.sort(key=lambda f: -f["Deuda"])
+                total_mora = sum(f["Deuda"] for f in filas_mora)
+                st.metric("Total en mora", fmt_money(total_mora))
+                df_mora = pd.DataFrame(filas_mora)
+                df_mora["Deuda"] = df_mora["Deuda"].apply(fmt_money)
+                st.dataframe(df_mora, use_container_width=True, hide_index=True)
             else:
                 st.success("Sin alquileres atrasados por ahora.")
         st.divider()
@@ -1830,28 +1877,44 @@ elif pagina == "✅ Pendientes":
 
     # ---------------- Tablero / listado ----------------
     with tab_tablero:
+        busqueda = st.text_input(
+            "🔎 Buscar", key="pend_busqueda",
+            placeholder="Busca por título, descripción, qué falta u observación...")
+
         colf1, colf2, colf3 = st.columns(3)
         with colf1:
-            filtro_estado = st.selectbox("Estado", ["Todos"] + ESTADOS_PENDIENTE, key="pend_filtro_estado")
+            filtro_estados = st.multiselect("Estado", ESTADOS_PENDIENTE, key="pend_filtro_estado")
         with colf2:
-            filtro_prioridad = st.selectbox("Prioridad", ["Todas"] + PRIORIDADES_PENDIENTE, key="pend_filtro_prioridad")
+            filtro_prioridades = st.multiselect("Prioridad", PRIORIDADES_PENDIENTE, key="pend_filtro_prioridad")
         with colf3:
-            opciones_filtro_asig = ["Todos"] + [nombre_de(u) for u in usuarios_activos]
-            filtro_asignado = st.selectbox("Asignado a", opciones_filtro_asig, key="pend_filtro_asignado")
+            opciones_filtro_asig = [nombre_de(u) for u in usuarios_activos]
+            filtro_asignados_sel = st.multiselect("Asignado a", opciones_filtro_asig, key="pend_filtro_asignado")
 
-        asignado_a_filtro_id = None
-        if filtro_asignado != "Todos":
-            idx_f = opciones_filtro_asig.index(filtro_asignado) - 1
-            asignado_a_filtro_id = usuarios_activos[idx_f]["id"]
+        ids_asignados_filtro = {
+            usuarios_activos[opciones_filtro_asig.index(nombre)]["id"] for nombre in filtro_asignados_sel
+        }
 
-        pendientes = cargar_pendientes(
-            estado=None if filtro_estado == "Todos" else filtro_estado,
-            prioridad=None if filtro_prioridad == "Todas" else filtro_prioridad,
-            asignado_a=asignado_a_filtro_id,
-        )
+        # Se trae todo y el filtrado (múltiple + texto libre) se hace aquí: permite marcar
+        # varias opciones a la vez y buscar en varios campos sin ir y volver a la base de datos.
+        pendientes = cargar_pendientes()
+
+        if filtro_estados:
+            pendientes = [p for p in pendientes if p["estado"] in filtro_estados]
+        if filtro_prioridades:
+            pendientes = [p for p in pendientes if p["prioridad"] in filtro_prioridades]
+        if ids_asignados_filtro:
+            pendientes = [p for p in pendientes if p.get("asignado_a") in ids_asignados_filtro]
+        if busqueda.strip():
+            termino = busqueda.strip().lower()
+
+            def _coincide_busqueda(p):
+                campos = [p.get("titulo"), p.get("descripcion"), p.get("que_falta"), p.get("observacion")]
+                return any(termino in (c or "").lower() for c in campos)
+
+            pendientes = [p for p in pendientes if _coincide_busqueda(p)]
 
         if not pendientes:
-            st.info("No hay pendientes que coincidan con el filtro.")
+            st.info("No hay pendientes que coincidan con la búsqueda/filtro.")
         else:
             orden_prioridad = {"Urgente": 0, "Alta": 1, "Media": 2, "Baja": 3}
             pendientes = sorted(pendientes, key=lambda p: orden_prioridad.get(p["prioridad"], 9))
