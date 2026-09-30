@@ -148,8 +148,8 @@ def cargar_periodos(apartamento_id=None, anio=None, mes=None, solo_activos=False
 
 
 @st.cache_data(ttl=30)
-def cargar_periodos_electricidad(anio=None, mes=None):
-    return db.listar_periodos_electricidad(anio=anio, mes=mes)
+def cargar_periodos_electricidad(anio=None, mes=None, solo_activos=False):
+    return db.listar_periodos_electricidad(anio=anio, mes=mes, solo_activos=solo_activos)
 
 
 @st.cache_data(ttl=30)
@@ -157,8 +157,8 @@ def cargar_periodos_agua(anio=None, mes=None):
     return db.listar_periodos_agua(anio=anio, mes=mes)
 
 
-def total_pagado(periodo):
-    return sum(float(p["monto"]) for p in (periodo.get("pagos") or []))
+def total_pagado(periodo, campo="pagos"):
+    return sum(float(p["monto"]) for p in (periodo.get(campo) or []))
 
 
 def mostrar_botones_recibo(pago, periodo, apartamento, total_pagado_periodo, key_sufijo):
@@ -310,6 +310,48 @@ def calcular_mora_alquiler(apt, periodos_por_apt_mes):
     return True, dias_atraso, round(deuda_total, 2), meses_adeudados
 
 
+def calcular_mora_electricidad(apt, periodos_elec_por_apt_mes):
+    """Devuelve (en_mora, dias_atraso, deuda_total, meses_adeudados) para electricidad,
+    sumando todos los periodos YA REGISTRADOS (con lectura de medidor tomada) que estén
+    vencidos y no pagados por completo. A diferencia del alquiler, el monto de luz depende
+    de la lectura del medidor: si un mes no tiene periodo creado (no se tomó lectura), no
+    se puede calcular su monto, así que ese mes no se cuenta como deuda (no se asume un
+    monto fijo como en el alquiler)."""
+    if apt["estado"] != "Ocupado":
+        return False, 0, 0.0, 0
+
+    hoy = date.today()
+    fecha_ingreso = parse_fecha(apt.get("fecha_ingreso"))
+    dia_pago = apt.get("dia_pago") or (fecha_ingreso.day if fecha_ingreso else None)
+    if not dia_pago:
+        return False, 0, 0.0, 0
+
+    deuda_total = 0.0
+    meses_adeudados = 0
+    vencimiento_mas_antiguo = None
+
+    for (apto_id, mes_nombre, anio_periodo), periodo in periodos_elec_por_apt_mes.items():
+        if apto_id != apt["id"] or mes_nombre not in MESES:
+            continue
+        mes_num = MESES.index(mes_nombre) + 1
+        vencimiento = fecha_vencimiento_del_mes(dia_pago, anio_periodo, mes_num)
+        if hoy <= vencimiento:
+            continue  # ese mes todavía no vence
+
+        pagado = total_pagado(periodo, campo="pagos_electricidad")
+        deuda_mes = float(periodo.get("monto_esperado") or 0) - pagado
+        if deuda_mes > 0.009:
+            deuda_total += deuda_mes
+            meses_adeudados += 1
+            if vencimiento_mas_antiguo is None or vencimiento < vencimiento_mas_antiguo:
+                vencimiento_mas_antiguo = vencimiento
+
+    if meses_adeudados == 0:
+        return False, 0, 0.0, 0
+    dias_atraso = (hoy - vencimiento_mas_antiguo).days
+    return True, dias_atraso, round(deuda_total, 2), meses_adeudados
+
+
 def estado_contrato_alerta(apt):
     """Devuelve (nivel, texto) para contratos vencidos o por vencer en los próximos 30 días. None si no aplica."""
     hoy = date.today()
@@ -444,9 +486,12 @@ if pagina == "📊 Dashboard":
     mes_actual_nombre = MESES[hoy.month - 1]
     periodos_activos_todos = cargar_periodos(solo_activos=True)
     periodos_por_apt_mes = {(p["apartamento_id"], p["mes"], p["anio"]): p for p in periodos_activos_todos}
+    periodos_elec_activos_todos = cargar_periodos_electricidad(solo_activos=True)
+    periodos_elec_por_apt_mes = {(p["apartamento_id"], p["mes"], p["anio"]): p for p in periodos_elec_activos_todos}
 
     filas_contrato = []
     filas_mora = []
+    filas_mora_elec = []
     for apt in apartamentos:
         nivel, dias = estado_contrato_alerta(apt)
         if nivel:
@@ -471,6 +516,17 @@ if pagina == "📊 Dashboard":
                 "Deuda": deuda,
             })
 
+        en_mora_elec, dias_atraso_elec, deuda_elec, meses_elec = calcular_mora_electricidad(
+            apt, periodos_elec_por_apt_mes)
+        if en_mora_elec:
+            filas_mora_elec.append({
+                "Apartamento": apt["codigo"],
+                "Inquilino": apt.get("inquilino_nombre") or "—",
+                "Meses adeudados": meses_elec,
+                "Días de atraso": dias_atraso_elec,
+                "Deuda": deuda_elec,
+            })
+
     if filas_contrato or filas_mora:
         st.subheader("⚠️ Alertas")
         colA, colB = st.columns(2)
@@ -493,6 +549,18 @@ if pagina == "📊 Dashboard":
                 st.dataframe(df_mora, use_container_width=True, hide_index=True)
             else:
                 st.success("Sin alquileres atrasados por ahora.")
+        st.divider()
+
+    if filas_mora_elec:
+        st.markdown("**⚡ Electricidad en mora (suma de todos los meses impagos)**")
+        st.caption("Solo cuenta meses con lectura de medidor ya registrada; un mes sin lectura "
+                   "tomada no se puede calcular y no se incluye aquí.")
+        filas_mora_elec.sort(key=lambda f: -f["Deuda"])
+        total_mora_elec = sum(f["Deuda"] for f in filas_mora_elec)
+        st.metric("Total en mora (electricidad)", fmt_money(total_mora_elec))
+        df_mora_elec = pd.DataFrame(filas_mora_elec)
+        df_mora_elec["Deuda"] = df_mora_elec["Deuda"].apply(fmt_money)
+        st.dataframe(df_mora_elec, use_container_width=True, hide_index=True)
         st.divider()
 
     col1, col2 = st.columns(2)
