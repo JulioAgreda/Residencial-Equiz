@@ -14,8 +14,8 @@ MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
 PISOS = ["Planta Baja", "Primer Piso", "Segundo Piso", "Tercer Piso"]
 ROLES = ["Administrador", "Cobrador"]
 
-CATEGORIAS_GASTO = ["Mantenimiento de ascensores", "Artículos de limpieza", "Seguridad",
-                    "Servicios públicos", "Mantenimiento general", "Otro"]
+CATEGORIAS_GASTO = ["Artículos de limpieza", "Repuestos y accesorios", "Material de Construcción",
+                    "Herramientas", "Otros"]
 CATEGORIAS_PAGO = ["Servicios (luz, agua, internet)", "Sueldos y honorarios", "Impuestos y tasas",
                    "Pago a proveedor", "Otro"]
 CONCEPTOS_VENTA = ["Alquiler de área común", "Venta de activos fijos", "Emisión de tag/control de acceso",
@@ -2385,14 +2385,13 @@ elif pagina == "🧾 Compras":
             with col1:
                 fecha_compra = st.date_input("Fecha de compra", value=date.today(), format="DD/MM/YYYY")
                 categoria_sel = st.selectbox("Categoría / Rubro", CATEGORIAS_GASTO)
-                categoria_otro = st.text_input("Especificar categoría") if categoria_sel == "Otro" else ""
+                categoria_otro = st.text_input("Especificar categoría") if categoria_sel == "Otros" else ""
                 monto_total = st.number_input("Monto total (Bs)", min_value=0.0, step=10.0)
                 metodo_pago_sel = st.selectbox("Método de pago", METODOS_PAGO_MOVIMIENTOS)
                 metodo_pago_otro = st.text_input("Especificar método de pago") if metodo_pago_sel == "Otro" else ""
             with col2:
                 proveedor = st.text_input("Proveedor (tienda o técnico)")
                 numero_comprobante = st.text_input("Número de comprobante (factura/recibo)")
-                archivo = st.file_uploader("Adjuntar comprobante (foto o PDF)", type=["pdf", "png", "jpg", "jpeg"])
             descripcion = st.text_area("Descripción detallada",
                                         placeholder='Ej. "Compra de 4 focos LED para el pasillo del piso 3"')
 
@@ -2404,21 +2403,14 @@ elif pagina == "🧾 Compras":
                     st.error("El monto total debe ser mayor a 0.")
                 else:
                     try:
-                        archivo_url = None
-                        archivo_nombre = None
-                        if archivo is not None:
-                            archivo_url = db.subir_comprobante(archivo.getvalue(), archivo.name, carpeta="compras")
-                            archivo_nombre = archivo.name
                         db.crear_compra({
                             "fecha_compra": str(fecha_compra),
-                            "categoria": categoria_otro if categoria_sel == "Otro" and categoria_otro else categoria_sel,
+                            "categoria": categoria_otro if categoria_sel == "Otros" and categoria_otro else categoria_sel,
                             "descripcion": descripcion or None,
                             "monto_total": monto_total,
                             "metodo_pago": metodo_pago_otro if metodo_pago_sel == "Otro" and metodo_pago_otro else metodo_pago_sel,
                             "proveedor": proveedor or None,
                             "numero_comprobante": numero_comprobante or None,
-                            "archivo_url": archivo_url,
-                            "archivo_nombre": archivo_nombre,
                             "encargado": nombre_encargado,
                         })
                         st.success("Compra registrada.")
