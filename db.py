@@ -248,7 +248,8 @@ def guardar_tarifa_agua(valor):
 
 # ---------- Periodos de electricidad (un registro por apartamento + mes/año) ----------
 
-def listar_periodos_electricidad(apartamento_id=None, anio=None, mes=None):
+def listar_periodos_electricidad(apartamento_id=None, anio=None, mes=None, solo_activos=False):
+    """solo_activos=True excluye los periodos cerrados de inquilinos que ya salieron."""
     sb = get_client()
     q = sb.table("periodos_electricidad").select(
         "*, apartamentos(codigo, piso, inquilino_nombre), pagos_electricidad(id, fecha, monto, metodo_pago, observacion)"
@@ -259,6 +260,8 @@ def listar_periodos_electricidad(apartamento_id=None, anio=None, mes=None):
         q = q.eq("anio", anio)
     if mes:
         q = q.eq("mes", mes)
+    if solo_activos:
+        q = q.is_("inquilino_historial_id", "null")
     res = q.order("anio", desc=True).execute()
     return _ordenar_periodos(res.data or [])
 
