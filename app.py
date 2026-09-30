@@ -264,13 +264,24 @@ def calcular_mora_alquiler(apt, periodos_por_apt_mes):
     se usa el día del mes de su fecha de ingreso."""
     if apt["estado"] != "Ocupado":
         return False, 0, 0.0, 0
+    if (apt.get("tipo_contrato") or "").strip().lower() == "anticrético":
+        return False, 0, 0.0, 0  # el anticrético no tiene pago mensual de alquiler, no aplica mora
 
     hoy = date.today()
     fecha_ingreso = parse_fecha(apt.get("fecha_ingreso"))
     dia_pago = apt.get("dia_pago") or (fecha_ingreso.day if fecha_ingreso else None)
-    inicio = fecha_ingreso or date(hoy.year, hoy.month, 1)
     if not dia_pago:
         return False, 0, 0.0, 0
+
+    # Punto de partida: el más antiguo entre la fecha de ingreso (si está cargada) y el
+    # primer periodo de alquiler ya registrado para este apartamento. Si solo se usara la
+    # fecha de ingreso y ese campo estuviera vacío, se perdía todo el historial de meses
+    # impagos y solo se contaba el mes actual.
+    candidatos_inicio = [fecha_ingreso] if fecha_ingreso else []
+    for (apto_id, mes_nombre, anio_periodo) in periodos_por_apt_mes:
+        if apto_id == apt["id"] and mes_nombre in MESES:
+            candidatos_inicio.append(date(anio_periodo, MESES.index(mes_nombre) + 1, 1))
+    inicio = min(candidatos_inicio) if candidatos_inicio else date(hoy.year, hoy.month, 1)
 
     monto_base = float(apt.get("monto_alquiler") or 0)
     deuda_total = 0.0
