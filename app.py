@@ -7,6 +7,8 @@ import db
 import recibo
 import reportes
 
+SENTINEL_SIN_USUARIO = "— Sin usuario asignado —"
+
 st.set_page_config(page_title="Residencial EQUIZ", page_icon="🏢", layout="wide")
 
 MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
@@ -319,11 +321,14 @@ def _obtener_datos_reporte_rango(fecha_desde, fecha_hasta):
     return datos
 
 
-def _filtrar_datos_reporte_por_usuario(datos_todos, nombre_usuario):
+def _filtrar_datos_reporte_por_usuario(datos_todos, nombre_mostrado):
+    """nombre_mostrado puede ser el nombre de un usuario real, o SENTINEL_SIN_USUARIO para
+    agrupar los registros que no tienen quién los registró (datos de antes de esta función)."""
+    clave_buscada = "" if nombre_mostrado == SENTINEL_SIN_USUARIO else nombre_mostrado
     resultado = {}
     for clave, filas in datos_todos.items():
         resultado[clave] = [
-            {k: v for k, v in f.items() if k != "_usuario"} for f in filas if f["_usuario"] == nombre_usuario
+            {k: v for k, v in f.items() if k != "_usuario"} for f in filas if f["_usuario"] == clave_buscada
         ]
     return resultado
 
@@ -2400,6 +2405,7 @@ elif pagina == "📑 Reportes":
 
         usuarios_reporte = cargar_todos_los_usuarios()
         nombres_usuarios = [u.get("nombre") or u.get("username") for u in usuarios_reporte]
+        nombres_usuarios_con_sin_asignar = nombres_usuarios + [SENTINEL_SIN_USUARIO]
 
         if not nombres_usuarios:
             st.warning("No hay usuarios registrados todavía.")
@@ -2409,7 +2415,8 @@ elif pagina == "📑 Reportes":
             with tab_individual:
                 colu, colf1, colf2 = st.columns([2, 1, 1])
                 with colu:
-                    usuario_sel = st.selectbox("Usuario (cobrador)", nombres_usuarios, key="rep_usuario")
+                    usuario_sel = st.selectbox("Usuario (cobrador)", nombres_usuarios_con_sin_asignar,
+                                                key="rep_usuario")
                 with colf1:
                     desde_ind = st.date_input("Desde", value=date.today().replace(day=1),
                                                format="DD/MM/YYYY", key="rep_desde_ind")
@@ -2468,7 +2475,7 @@ elif pagina == "📑 Reportes":
                     reportes_todos = [
                         reportes.construir_reporte_usuario(
                             nombre, _filtrar_datos_reporte_por_usuario(datos_todos_gen, nombre))
-                        for nombre in nombres_usuarios
+                        for nombre in nombres_usuarios_con_sin_asignar
                     ]
 
                     total_todos = sum(r["total_general"] for r in reportes_todos)
