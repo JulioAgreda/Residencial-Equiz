@@ -1,0 +1,21 @@
+codigo,piso,estado,inquilino_nombre,celular,cedula_identidad,nacionalidad,fecha_ingreso,garantia,amoblado,detalle,monto_alquiler
+PB-01,Planta Baja,Ocupado,VALTER / RODRIGUES PEREIRA (DEPOSITO),75504496,,,2024-09-06,SIN GARANTIA,"CON ESPEJO, CANDADO.",,800
+PB-02-03,Planta Baja,Ocupado,VALTER / RODRIGUES PEREIRA (AÇAI),75504496,,,2024-05-25,,,"Incluye: Agua, Sin acceso a internet",0
+PB-04,Planta Baja,Ocupado,VALTER / RODRIGUES PEREIRA (PANADERIA),75504496,E-17586529,BRASIL,2024-05-06,,,"Incluye: Agua, sin acceso a internet",2300
+PB-04-05,Planta Baja,Ocupado,OZIEL,62018369,,Brasilero,2023-11-27,,7,Incluye Agua sin acceso a Internet.,2300
+PB-06,Planta Baja,Ocupado,ANA CINKO,72637789,,BOLIVIANA,01 DE FEBRERO DE 2024,,REPISAS,,0
+PP-01,Primer Piso,Ocupado,NICOL MIRANDA CONDORI,63432891,9854422,BOLIVIANA,04 DE FEBRERO DE 2025,0,"AIRE ACONDICIONADO, 2 PARES DE CORTINAS, 1 MUEBLE METALICO PARA COCINA","Incluye: Agua, Internet",1100
+PP-02,Primer Piso,Desocupado,,,,,,,,,0
+PP-03,Primer Piso,Ocupado,CLENY / NINATAYPE HUANACO,51930275372,E-17380202,PERÚ,11 de agosto de 2024,500 Bs,SOMIER DE 1 PLAZA Y COLCHON DE 1 PLAZA,,1100
+PP-04,Primer Piso,Ocupado,Eliana Rada Jimenez,,,,2023-02-10,Sin garantia,Nada,Incluye: Agua e internet.,0
+PP-05,Primer Piso,Ocupado,NICOLAS SEBASTIAN VALLEJOS ARANCIBIA,67766009,13454159,Boliviano,DOMINGO 1 DE FEBRERO DE 2026,500,"Aire Acondicionado, ropero, 2 repisas, 1 mueble pequeño empotrado",Incluye: Agua e internet,0
+SP-01,Segundo Piso,Ocupado,Luis Orlando Merida El Hage,,7769079 sc,Boliviano,2023-12-06,,,Incluye: Agua,950
+SP-02,Segundo Piso,Ocupado,Eduarda Geitens Gustmann,63573758,,Brasilera,2023-03-07,No tiene,"Ropero, 2 repisas, 1 Estantes de platos en la cocina, 1 garrafa, 1 cocina, 1 Espejo en el baño, 1 frigobar, mesa de madera.",Incluye: Agua e internet,800
+SP-03,Segundo Piso,Ocupado,ANNY STÉFFANY / GOTARDO SILVA,557794098,E-17395065,Brasilera,2024-02-05,600 Bs,"Con heladera, espejo, mueble metalico para cocina, mesa, silla, ropero, cortina, colchon, somier, aire acondicionado",Incluye: Agua e Internet,1200
+SP-04,Segundo Piso,Ocupado,Erick Zelada,,,,2023-03-15,SIN GARANTIA,Armario Melaminico,Agua e internet,0
+SP-05,Segundo Piso,Ocupado,Melody Anelis Equez Cespedes,,,,2022-07-19,500,"2 Espejos, cortina, 2 repisas",Incluye Agua y energia,1000
+TP-01,Tercer Piso,Ocupado,ANNE BEATRIZ NUNES SOUZA,559598129-7825,047.444.612-39,BRASILERA,2025-04-26,500Bs,Aire acondicionado,Incluye: Agua e Internet,1100
+TP-02,Tercer Piso,Ocupado,Gabriela Almeida,+5599991200447,,Brasil,2022-12-12,500 bs cancelado,Ropero,Agua e internet,1100
+TP-03,Tercer Piso,Ocupado,Rayeli Benavides da Cruz Oliveira,+55 65 9959-0186,,,2021-08-10,sin garantia,"Heladera, cama somier, ropero, Aire Acondicionado, cocina, garrafa , cortina",Incluye: Agua e internet,1200
+TP-04,Tercer Piso,Ocupado,Lorena Mamani Rojas,64456805,,,2022-06-09,500,Heladera y ropero.,Incluye Agua,1100
+TP-05,Tercer Piso,Ocupado,VANIA,78499100,,BOLIVIANA,VIERNES 23 DE ENERO DE 2026,500,"2 cortinas, espejo pequeño, 4 repisas,",Incluye: Agua e internet,1100
