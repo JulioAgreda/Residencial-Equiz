@@ -9,7 +9,11 @@ a este archivo) a tu repositorio, en la misma carpeta que app.py.
 """
 import io
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+
+# El servidor (Streamlit Cloud) corre en UTC, no en la hora de Bolivia (UTC-4).
+# Sin esto, la hora de emisión del recibo saldría adelantada.
+_ZONA_BOLIVIA = timezone(timedelta(hours=-4))
 
 from reportlab.lib.pagesizes import A5
 from reportlab.lib.units import mm
@@ -55,7 +59,7 @@ def construir_datos_recibo(pago, periodo, apartamento, total_pagado_periodo, rec
     saldo = monto_esperado - float(total_pagado_periodo or 0)
     return {
         "numero_recibo": f'REC-{int(pago["id"]):06d}',
-        "fecha_emision": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "fecha_emision": datetime.now(_ZONA_BOLIVIA).strftime("%d/%m/%Y %H:%M"),
         "apartamento_codigo": (apartamento or {}).get("codigo", ""),
         "apartamento_piso": (apartamento or {}).get("piso", ""),
         "inquilino_nombre": (periodo or {}).get("inquilino_nombre") or (apartamento or {}).get("inquilino_nombre") or "—",
