@@ -5,6 +5,7 @@ import calendar
 import bcrypt
 import db
 import recibo
+import reportes
 
 st.set_page_config(page_title="Residencial EQUIZ", page_icon="🏢", layout="wide")
 
@@ -217,6 +218,26 @@ def cargar_todos_los_usuarios():
     return db.listar_usuarios()
 
 
+@st.cache_data(ttl=30)
+def cargar_pagos_alquiler_rango(fecha_desde, fecha_hasta):
+    return db.listar_pagos_alquiler_rango(fecha_desde, fecha_hasta)
+
+
+@st.cache_data(ttl=30)
+def cargar_pagos_electricidad_rango(fecha_desde, fecha_hasta):
+    return db.listar_pagos_electricidad_rango(fecha_desde, fecha_hasta)
+
+
+@st.cache_data(ttl=60)
+def cargar_periodos_alquiler_basico():
+    return db.listar_todos_periodos_alquiler_basico()
+
+
+@st.cache_data(ttl=60)
+def cargar_periodos_electricidad_basico():
+    return db.listar_todos_periodos_electricidad_basico()
+
+
 def limpiar_cache():
     cargar_apartamentos.clear()
     cargar_periodos.clear()
@@ -227,6 +248,84 @@ def limpiar_cache():
     cargar_participantes_reuniones.clear()
     cargar_usuarios_activos.clear()
     cargar_todos_los_usuarios.clear()
+    cargar_pagos_alquiler_rango.clear()
+    cargar_pagos_electricidad_rango.clear()
+    cargar_periodos_alquiler_basico.clear()
+    cargar_periodos_electricidad_basico.clear()
+
+
+def _nombre_mes_anio(periodo):
+    if not periodo:
+        return "—"
+    return f'{periodo.get("mes", "")} {periodo.get("anio", "")}'.strip()
+
+
+def _obtener_datos_reporte_rango(fecha_desde, fecha_hasta):
+    """Trae, UNA sola vez, los 5 tipos de movimiento del rango de fechas, ya enriquecidos
+    y con una clave interna "_usuario" (quién lo registró) lista para filtrar por usuario
+    al armar cada reporte. No usa embeds anidados: el cruce periodo->apartamento se hace
+    aquí mismo en Python con los diccionarios ya cacheados."""
+    apartamentos_por_id = {a["id"]: a for a in cargar_apartamentos()}
+    periodos_alq_por_id = {p["id"]: p for p in cargar_periodos_alquiler_basico()}
+    periodos_elec_por_id = {p["id"]: p for p in cargar_periodos_electricidad_basico()}
+
+    pagos_generales = db.listar_pagos_generales(fecha_desde=str(fecha_desde), fecha_hasta=str(fecha_hasta))
+    compras = db.listar_compras(fecha_desde=str(fecha_desde), fecha_hasta=str(fecha_hasta))
+    ventas = db.listar_ventas(fecha_desde=str(fecha_desde), fecha_hasta=str(fecha_hasta))
+    pagos_alq = cargar_pagos_alquiler_rango(str(fecha_desde), str(fecha_hasta))
+    pagos_elec = cargar_pagos_electricidad_rango(str(fecha_desde), str(fecha_hasta))
+
+    datos = {"pagos_generales": [], "compras": [], "ventas": [], "pagos_alquiler": [], "pagos_electricidad": []}
+
+    for p in pagos_generales:
+        datos["pagos_generales"].append({
+            "_usuario": p.get("encargado") or "",
+            "Fecha": p.get("fecha_pago"), "Categoría": p.get("categoria") or "",
+            "Beneficiario": p.get("beneficiario") or "", "Método de pago": p.get("metodo_pago") or "",
+            "Monto": float(p.get("monto") or 0),
+        })
+    for c in compras:
+        datos["compras"].append({
+            "_usuario": c.get("encargado") or "",
+            "Fecha": c.get("fecha_compra"), "Categoría": c.get("categoria") or "",
+            "Proveedor": c.get("proveedor") or "", "Método de pago": c.get("metodo_pago") or "",
+            "Monto": float(c.get("monto_total") or 0),
+        })
+    for v in ventas:
+        datos["ventas"].append({
+            "_usuario": v.get("encargado") or "",
+            "Fecha": v.get("fecha_venta"), "Concepto": v.get("concepto") or "",
+            "Comprador": v.get("comprador") or "", "Forma de cobro": v.get("forma_cobro") or "",
+            "Monto": float(v.get("monto") or 0),
+        })
+    for pa in pagos_alq:
+        periodo = periodos_alq_por_id.get(pa.get("periodo_id"))
+        apt = apartamentos_por_id.get(periodo["apartamento_id"]) if periodo else None
+        datos["pagos_alquiler"].append({
+            "_usuario": pa.get("registrado_por") or "",
+            "Fecha": pa.get("fecha"), "Apartamento": (apt or {}).get("codigo", "—"),
+            "Inquilino": (apt or {}).get("inquilino_nombre") or "—", "Periodo": _nombre_mes_anio(periodo),
+            "Método de pago": pa.get("metodo_pago") or "", "Monto": float(pa.get("monto") or 0),
+        })
+    for pe in pagos_elec:
+        periodo = periodos_elec_por_id.get(pe.get("periodo_id"))
+        apt = apartamentos_por_id.get(periodo["apartamento_id"]) if periodo else None
+        datos["pagos_electricidad"].append({
+            "_usuario": pe.get("registrado_por") or "",
+            "Fecha": pe.get("fecha"), "Apartamento": (apt or {}).get("codigo", "—"),
+            "Inquilino": (apt or {}).get("inquilino_nombre") or "—", "Periodo": _nombre_mes_anio(periodo),
+            "Método de pago": pe.get("metodo_pago") or "", "Monto": float(pe.get("monto") or 0),
+        })
+    return datos
+
+
+def _filtrar_datos_reporte_por_usuario(datos_todos, nombre_usuario):
+    resultado = {}
+    for clave, filas in datos_todos.items():
+        resultado[clave] = [
+            {k: v for k, v in f.items() if k != "_usuario"} for f in filas if f["_usuario"] == nombre_usuario
+        ]
+    return resultado
 
 
 def parse_fecha(valor):
@@ -389,7 +488,7 @@ st.sidebar.caption(f'👤 {usuario_actual.get("nombre") or usuario_actual.get("u
 
 if es_admin:
     opciones_principal = ["📊 Dashboard", "🏠 Apartamentos", "💵 Pagos de Alquiler", "⚡ Electricidad",
-                          "💧 Agua", "👥 Usuarios"]
+                          "💧 Agua", "📑 Reportes", "👥 Usuarios"]
 else:
     opciones_principal = ["📊 Dashboard", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua"]
 
@@ -1117,6 +1216,7 @@ elif pagina == "💵 Pagos de Alquiler":
                             "monto": monto_pago,
                             "metodo_pago": metodo_pago,
                             "observacion": observacion or None,
+                            "registrado_por": usuario_actual.get("nombre") or usuario_actual.get("username"),
                         })
                         limpiar_cache()
                         st.success("Abono registrado.")
@@ -1416,6 +1516,7 @@ elif pagina == "⚡ Electricidad":
                                 "monto": monto_pago,
                                 "metodo_pago": metodo_pago,
                                 "observacion": observacion or None,
+                                "registrado_por": usuario_actual.get("nombre") or usuario_actual.get("username"),
                             })
                             limpiar_cache()
                             st.success("Abono registrado.")
@@ -1708,6 +1809,7 @@ elif pagina == "💧 Agua":
                                 "monto": monto_pago,
                                 "metodo_pago": metodo_pago,
                                 "observacion": observacion or None,
+                                "registrado_por": usuario_actual.get("nombre") or usuario_actual.get("username"),
                             })
                             limpiar_cache()
                             st.success("Abono registrado.")
@@ -2279,6 +2381,126 @@ elif pagina == "🗒️ Reuniones":
                                     st.rerun()
                                 except Exception as e:
                                     st.error(f"Error al eliminar: {e}")
+
+
+# ==================================================================
+# PÁGINA: REPORTES (solo Administrador)
+# ==================================================================
+elif pagina == "📑 Reportes":
+    if not es_admin:
+        st.error("Solo el Administrador puede ver los reportes.")
+    else:
+        st.title("📑 Reportes de actividad por usuario")
+        st.caption("Pagos realizados, compras, ventas, pagos de alquiler y pagos de electricidad, "
+                   "por rango de fechas.")
+        st.info("⚠️ Los pagos de alquiler y electricidad registrados **antes** de activar esta función "
+                "no tienen un usuario asociado, así que no aparecerán en estos reportes (sí siguen "
+                "contando normalmente en el resto del sistema). Compras, ventas y pagos generales si "
+                "ya tenían esa información y aparecen completos.")
+
+        usuarios_reporte = cargar_todos_los_usuarios()
+        nombres_usuarios = [u.get("nombre") or u.get("username") for u in usuarios_reporte]
+
+        if not nombres_usuarios:
+            st.warning("No hay usuarios registrados todavía.")
+        else:
+            tab_individual, tab_general = st.tabs(["👤 Por usuario", "📊 General (todos)"])
+
+            with tab_individual:
+                colu, colf1, colf2 = st.columns([2, 1, 1])
+                with colu:
+                    usuario_sel = st.selectbox("Usuario (cobrador)", nombres_usuarios, key="rep_usuario")
+                with colf1:
+                    desde_ind = st.date_input("Desde", value=date.today().replace(day=1),
+                                               format="DD/MM/YYYY", key="rep_desde_ind")
+                with colf2:
+                    hasta_ind = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY",
+                                               key="rep_hasta_ind")
+
+                if desde_ind > hasta_ind:
+                    st.error("La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                else:
+                    datos_todos = _obtener_datos_reporte_rango(desde_ind, hasta_ind)
+                    datos_usuario = _filtrar_datos_reporte_por_usuario(datos_todos, usuario_sel)
+                    reporte_ind = reportes.construir_reporte_usuario(usuario_sel, datos_usuario)
+
+                    st.metric(f"Total general — {usuario_sel}", fmt_money(reporte_ind["total_general"]))
+
+                    for clave, titulo, _color in reportes.CATEGORIAS:
+                        datos_cat = reporte_ind["categorias"][clave]
+                        with st.expander(f'{titulo} — Subtotal: {fmt_money(datos_cat["total"])} '
+                                         f'({len(datos_cat["filas"])})'):
+                            if datos_cat["filas"]:
+                                st.dataframe(pd.DataFrame(datos_cat["filas"]), use_container_width=True,
+                                             hide_index=True)
+                            else:
+                                st.caption("Sin registros en este periodo.")
+
+                    col_dl1, col_dl2 = st.columns(2)
+                    with col_dl1:
+                        st.download_button(
+                            "📊 Descargar Excel", key="rep_ind_xlsx", use_container_width=True,
+                            data=reportes.generar_excel_reporte([reporte_ind], desde_ind, hasta_ind),
+                            file_name=f'reporte_{usuario_sel}_{desde_ind}_{hasta_ind}.xlsx',
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        )
+                    with col_dl2:
+                        st.download_button(
+                            "📄 Descargar PDF", key="rep_ind_pdf", use_container_width=True,
+                            data=reportes.generar_pdf_reporte([reporte_ind], desde_ind, hasta_ind),
+                            file_name=f'reporte_{usuario_sel}_{desde_ind}_{hasta_ind}.pdf',
+                            mime="application/pdf",
+                        )
+
+            with tab_general:
+                colf1, colf2 = st.columns(2)
+                with colf1:
+                    desde_gen = st.date_input("Desde", value=date.today().replace(day=1),
+                                               format="DD/MM/YYYY", key="rep_desde_gen")
+                with colf2:
+                    hasta_gen = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY",
+                                               key="rep_hasta_gen")
+
+                if desde_gen > hasta_gen:
+                    st.error("La fecha 'Desde' no puede ser posterior a 'Hasta'.")
+                else:
+                    datos_todos_gen = _obtener_datos_reporte_rango(desde_gen, hasta_gen)
+                    reportes_todos = [
+                        reportes.construir_reporte_usuario(
+                            nombre, _filtrar_datos_reporte_por_usuario(datos_todos_gen, nombre))
+                        for nombre in nombres_usuarios
+                    ]
+
+                    total_todos = sum(r["total_general"] for r in reportes_todos)
+                    st.metric("Total general (todos los usuarios)", fmt_money(total_todos))
+
+                    for r in reportes_todos:
+                        with st.expander(f'{r["usuario"]} — Total: {fmt_money(r["total_general"])}'):
+                            for clave, titulo, _color in reportes.CATEGORIAS:
+                                datos_cat = r["categorias"][clave]
+                                st.markdown(f'**{titulo}** — Subtotal: {fmt_money(datos_cat["total"])}')
+                                if datos_cat["filas"]:
+                                    st.dataframe(pd.DataFrame(datos_cat["filas"]), use_container_width=True,
+                                                 hide_index=True)
+                                else:
+                                    st.caption("Sin registros en este periodo.")
+                                st.markdown("")
+
+                    col_dl1, col_dl2 = st.columns(2)
+                    with col_dl1:
+                        st.download_button(
+                            "📊 Descargar Excel (todos)", key="rep_gen_xlsx", use_container_width=True,
+                            data=reportes.generar_excel_reporte(reportes_todos, desde_gen, hasta_gen),
+                            file_name=f'reporte_general_{desde_gen}_{hasta_gen}.xlsx',
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        )
+                    with col_dl2:
+                        st.download_button(
+                            "📄 Descargar PDF (todos)", key="rep_gen_pdf", use_container_width=True,
+                            data=reportes.generar_pdf_reporte(reportes_todos, desde_gen, hasta_gen),
+                            file_name=f'reporte_general_{desde_gen}_{hasta_gen}.pdf',
+                            mime="application/pdf",
+                        )
 
 
 # ==================================================================
