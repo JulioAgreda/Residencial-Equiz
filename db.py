@@ -431,6 +431,44 @@ def eliminar_usuario(usuario_id):
     return sb.table("usuarios").delete().eq("id", usuario_id).execute()
 
 
+# ---------- Reportes por usuario (cobrador) ----------
+
+def listar_pagos_alquiler_rango(fecha_desde, fecha_hasta):
+    """Abonos de alquiler en un rango de fechas (tabla plana, sin embeds anidados;
+    el periodo/apartamento se cruza en la app con listar_todos_periodos_alquiler_basico)."""
+    sb = get_client()
+    res = (
+        sb.table("pagos").select("*")
+        .gte("fecha", str(fecha_desde)).lte("fecha", str(fecha_hasta))
+        .order("fecha").execute()
+    )
+    return res.data or []
+
+
+def listar_pagos_electricidad_rango(fecha_desde, fecha_hasta):
+    sb = get_client()
+    res = (
+        sb.table("pagos_electricidad").select("*")
+        .gte("fecha", str(fecha_desde)).lte("fecha", str(fecha_hasta))
+        .order("fecha").execute()
+    )
+    return res.data or []
+
+
+def listar_todos_periodos_alquiler_basico():
+    """Solo id/apartamento/mes/año de cada periodo de alquiler (tabla chica), para cruzar
+    en la app con los pagos y armar los reportes sin usar embeds anidados."""
+    sb = get_client()
+    res = sb.table("periodos_alquiler").select("id, apartamento_id, mes, anio").execute()
+    return res.data or []
+
+
+def listar_todos_periodos_electricidad_basico():
+    sb = get_client()
+    res = sb.table("periodos_electricidad").select("id, apartamento_id, mes, anio").execute()
+    return res.data or []
+
+
 # ---------- Compras (gastos) ----------
 
 def listar_compras(fecha_desde=None, fecha_hasta=None, categoria=None):
