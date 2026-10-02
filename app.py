@@ -517,7 +517,7 @@ opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"
 opciones_pendientes = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos"]
 opciones_reuniones = ["(ninguno)", "🗒️ Reuniones"]
 opciones_reportes = ["(ninguno)", "📑 Reportes"]
-#opciones_servicios = ["(ninguno)", "🔌 Servicios Básicos"]
+
 
 
 # Las claves de session_state de todos los módulos secundarios (todo menos el
@@ -561,11 +561,6 @@ st.sidebar.caption("🗒️ Módulo de Reuniones")
 pagina_reuniones = st.sidebar.radio("Reuniones", opciones_reuniones, key="nav_reuniones",
                                      label_visibility="collapsed",
                                      on_change=lambda: _al_elegir_secundario("nav_reuniones"))
-#st.sidebar.divider()
-#st.sidebar.caption("🔌 Módulo de Servicios Básicos")
-#pagina_servicios = st.sidebar.radio("Servicios Básicos", opciones_servicios, key="nav_servicios",
-#                                     label_visibility="collapsed",
-#                                     on_change=lambda: _al_elegir_secundario("nav_servicios"))
 
 pagina_reportes = "(ninguno)"
 if es_admin:
@@ -581,8 +576,7 @@ elif pagina_pendientes != "(ninguno)":
     pagina = pagina_pendientes
 elif pagina_reuniones != "(ninguno)":
     pagina = pagina_reuniones
-#elif pagina_servicios != "(ninguno)":
-#    pagina = pagina_servicios
+
 elif pagina_reportes != "(ninguno)":
     pagina = pagina_reportes
 else:
