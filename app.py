@@ -514,8 +514,8 @@ else:
     opciones_principal = ["📊 Dashboard", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua"]
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
-opciones_pendientes = ["(ninguno)", "✅ Pendientes"]
-opciones_reuniones = ["(ninguno)", "🗒️ Reuniones"]
+opciones_pendientes = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos"]
+#opciones_reuniones = ["(ninguno)", "🗒️ Reuniones"]
 opciones_servicios = ["(ninguno)", "🔌 Servicios Básicos"]
 opciones_reportes = ["(ninguno)", "📑 Reportes"]
 
