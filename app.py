@@ -516,11 +516,12 @@ else:
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
 opciones_pendientes = ["(ninguno)", "✅ Pendientes"]
 opciones_reuniones = ["(ninguno)", "🗒️ Reuniones"]
+opciones_servicios = ["(ninguno)", "🔌 Servicios Básicos"]
 opciones_reportes = ["(ninguno)", "📑 Reportes"]
 
 # Las claves de session_state de todos los módulos secundarios (todo menos el
 # principal), para resetearlas entre sí cada vez que se elige uno.
-_CLAVES_NAV_SECUNDARIAS = ["nav_movimientos", "nav_pendientes", "nav_reuniones", "nav_reportes"]
+_CLAVES_NAV_SECUNDARIAS = ["nav_movimientos", "nav_pendientes", "nav_reuniones", "nav_servicios", "nav_reportes"]
 
 
 # Los radios de abajo son independientes en el estado interno de Streamlit:
@@ -558,6 +559,11 @@ st.sidebar.caption("🗒️ Módulo de Reuniones")
 pagina_reuniones = st.sidebar.radio("Reuniones", opciones_reuniones, key="nav_reuniones",
                                      label_visibility="collapsed",
                                      on_change=lambda: _al_elegir_secundario("nav_reuniones"))
+st.sidebar.divider()
+st.sidebar.caption("🔌 Módulo de Servicios Básicos")
+pagina_servicios = st.sidebar.radio("Servicios Básicos", opciones_servicios, key="nav_servicios",
+                                     label_visibility="collapsed",
+                                     on_change=lambda: _al_elegir_secundario("nav_servicios"))
 
 pagina_reportes = "(ninguno)"
 if es_admin:
@@ -573,6 +579,8 @@ elif pagina_pendientes != "(ninguno)":
     pagina = pagina_pendientes
 elif pagina_reuniones != "(ninguno)":
     pagina = pagina_reuniones
+elif pagina_servicios != "(ninguno)":
+    pagina = pagina_servicios
 elif pagina_reportes != "(ninguno)":
     pagina = pagina_reportes
 else:
@@ -2031,8 +2039,7 @@ elif pagina == "✅ Pendientes":
     def nombre_de(u):
         return u.get("nombre") or u.get("username") or "—"
 
-    tab_nuevo, tab_tablero, tab_servicios = st.tabs(
-        ["➕ Nuevo pendiente", "📋 Tablero", "🔌 Servicios Básicos"])
+    tab_nuevo, tab_tablero = st.tabs(["➕ Nuevo pendiente", "📋 Tablero"])
 
     # ---------------- Nuevo pendiente ----------------
     with tab_nuevo:
@@ -2241,104 +2248,108 @@ elif pagina == "✅ Pendientes":
                             except Exception as e:
                                 st.error(f"Error al eliminar: {e}")
 
-    # ---------------- Servicios Básicos ----------------
-    with tab_servicios:
-        st.caption("Datos de contacto de los proveedores de servicios básicos del edificio "
-                   "(electricidad, agua, internet, gas, etc.)")
 
-        tab_serv_nuevo, tab_serv_lista = st.tabs(["➕ Nuevo servicio", "📋 Lista"])
+# ==================================================================
+# PÁGINA: SERVICIOS BÁSICOS
+# ==================================================================
+elif pagina == "🔌 Servicios Básicos":
+    st.title("🔌 Servicios Básicos")
+    st.caption("Datos de contacto de los proveedores de servicios básicos del edificio "
+               "(electricidad, agua, internet, gas, etc.)")
 
-        with tab_serv_nuevo:
-            with st.form("form_nuevo_servicio_basico", clear_on_submit=True):
-                nombre_servicio = st.text_input("Nombre del Servicio",
-                                                 placeholder='Ej. "Electricidad", "Agua", "Internet"')
-                empresa_proveedor = st.text_input("Empresa proveedora")
-                col1, col2 = st.columns(2)
-                with col1:
-                    telefono_serv = st.text_input("Teléfono")
-                with col2:
-                    codigo_serv = st.text_input("Código (cliente / cuenta / NIS)")
-                titular_serv = st.text_input("Titular")
-                observacion_serv = st.text_area("Observación")
+    tab_serv_nuevo, tab_serv_lista = st.tabs(["➕ Nuevo servicio", "📋 Lista"])
 
-                guardar_serv = st.form_submit_button("💾 Guardar servicio")
-                if guardar_serv:
-                    if not nombre_servicio.strip():
-                        st.error("El nombre del servicio es obligatorio.")
-                    else:
-                        try:
-                            db.crear_servicio_basico({
-                                "nombre_servicio": nombre_servicio.strip(),
-                                "empresa_proveedor": empresa_proveedor or None,
-                                "telefono": telefono_serv or None,
-                                "codigo": codigo_serv or None,
-                                "titular": titular_serv or None,
-                                "observacion": observacion_serv or None,
-                                "creado_por": usuario_actual.get("id"),
-                            })
-                            limpiar_cache()
-                            st.success("Servicio registrado.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al guardar: {e}")
+    with tab_serv_nuevo:
+        with st.form("form_nuevo_servicio_basico", clear_on_submit=True):
+            nombre_servicio = st.text_input("Nombre del Servicio",
+                                             placeholder='Ej. "Electricidad", "Agua", "Internet"')
+            empresa_proveedor = st.text_input("Empresa proveedora")
+            col1, col2 = st.columns(2)
+            with col1:
+                telefono_serv = st.text_input("Teléfono")
+            with col2:
+                codigo_serv = st.text_input("Código (cliente / cuenta / NIS)")
+            titular_serv = st.text_input("Titular")
+            observacion_serv = st.text_area("Observación")
 
-        with tab_serv_lista:
-            servicios_basicos = cargar_servicios_basicos()
-            if not servicios_basicos:
-                st.info("Todavía no hay servicios básicos registrados.")
-            else:
-                for s in servicios_basicos:
-                    titulo_s = f'🔌 {s["nombre_servicio"]}' + (f' — {s["empresa_proveedor"]}'
-                                                                if s.get("empresa_proveedor") else "")
-                    with st.expander(titulo_s):
-                        with st.form(f'form_editar_servicio_{s["id"]}'):
-                            e_nombre = st.text_input("Nombre del Servicio", value=s["nombre_servicio"],
-                                                      key=f'serv_nombre_{s["id"]}')
-                            e_empresa = st.text_input("Empresa proveedora", value=s.get("empresa_proveedor") or "",
-                                                       key=f'serv_empresa_{s["id"]}')
-                            colr1, colr2 = st.columns(2)
-                            with colr1:
-                                e_telefono = st.text_input("Teléfono", value=s.get("telefono") or "",
-                                                            key=f'serv_telefono_{s["id"]}')
-                            with colr2:
-                                e_codigo = st.text_input("Código (cliente / cuenta / NIS)",
-                                                          value=s.get("codigo") or "", key=f'serv_codigo_{s["id"]}')
-                            e_titular = st.text_input("Titular", value=s.get("titular") or "",
-                                                       key=f'serv_titular_{s["id"]}')
-                            e_observacion = st.text_area("Observación", value=s.get("observacion") or "",
-                                                          key=f'serv_obs_{s["id"]}')
+            guardar_serv = st.form_submit_button("💾 Guardar servicio")
+            if guardar_serv:
+                if not nombre_servicio.strip():
+                    st.error("El nombre del servicio es obligatorio.")
+                else:
+                    try:
+                        db.crear_servicio_basico({
+                            "nombre_servicio": nombre_servicio.strip(),
+                            "empresa_proveedor": empresa_proveedor or None,
+                            "telefono": telefono_serv or None,
+                            "codigo": codigo_serv or None,
+                            "titular": titular_serv or None,
+                            "observacion": observacion_serv or None,
+                            "creado_por": usuario_actual.get("id"),
+                        })
+                        limpiar_cache()
+                        st.success("Servicio registrado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al guardar: {e}")
 
-                            colg, cold = st.columns(2)
-                            guardar_e = colg.form_submit_button("💾 Guardar cambios", use_container_width=True)
-                            eliminar_e = cold.form_submit_button("🗑️ Eliminar", use_container_width=True)
+    with tab_serv_lista:
+        servicios_basicos = cargar_servicios_basicos()
+        if not servicios_basicos:
+            st.info("Todavía no hay servicios básicos registrados.")
+        else:
+            for s in servicios_basicos:
+                titulo_s = f'🔌 {s["nombre_servicio"]}' + (f' — {s["empresa_proveedor"]}'
+                                                            if s.get("empresa_proveedor") else "")
+                with st.expander(titulo_s):
+                    with st.form(f'form_editar_servicio_{s["id"]}'):
+                        e_nombre = st.text_input("Nombre del Servicio", value=s["nombre_servicio"],
+                                                  key=f'serv_nombre_{s["id"]}')
+                        e_empresa = st.text_input("Empresa proveedora", value=s.get("empresa_proveedor") or "",
+                                                   key=f'serv_empresa_{s["id"]}')
+                        colr1, colr2 = st.columns(2)
+                        with colr1:
+                            e_telefono = st.text_input("Teléfono", value=s.get("telefono") or "",
+                                                        key=f'serv_telefono_{s["id"]}')
+                        with colr2:
+                            e_codigo = st.text_input("Código (cliente / cuenta / NIS)",
+                                                      value=s.get("codigo") or "", key=f'serv_codigo_{s["id"]}')
+                        e_titular = st.text_input("Titular", value=s.get("titular") or "",
+                                                   key=f'serv_titular_{s["id"]}')
+                        e_observacion = st.text_area("Observación", value=s.get("observacion") or "",
+                                                      key=f'serv_obs_{s["id"]}')
 
-                            if guardar_e:
-                                if not e_nombre.strip():
-                                    st.error("El nombre del servicio es obligatorio.")
-                                else:
-                                    try:
-                                        db.actualizar_servicio_basico(s["id"], {
-                                            "nombre_servicio": e_nombre.strip(),
-                                            "empresa_proveedor": e_empresa or None,
-                                            "telefono": e_telefono or None,
-                                            "codigo": e_codigo or None,
-                                            "titular": e_titular or None,
-                                            "observacion": e_observacion or None,
-                                        })
-                                        limpiar_cache()
-                                        st.success("Servicio actualizado.")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Error al actualizar: {e}")
+                        colg, cold = st.columns(2)
+                        guardar_e = colg.form_submit_button("💾 Guardar cambios", use_container_width=True)
+                        eliminar_e = cold.form_submit_button("🗑️ Eliminar", use_container_width=True)
 
-                            if eliminar_e:
+                        if guardar_e:
+                            if not e_nombre.strip():
+                                st.error("El nombre del servicio es obligatorio.")
+                            else:
                                 try:
-                                    db.eliminar_servicio_basico(s["id"])
+                                    db.actualizar_servicio_basico(s["id"], {
+                                        "nombre_servicio": e_nombre.strip(),
+                                        "empresa_proveedor": e_empresa or None,
+                                        "telefono": e_telefono or None,
+                                        "codigo": e_codigo or None,
+                                        "titular": e_titular or None,
+                                        "observacion": e_observacion or None,
+                                    })
                                     limpiar_cache()
-                                    st.success("Servicio eliminado.")
+                                    st.success("Servicio actualizado.")
                                     st.rerun()
                                 except Exception as e:
-                                    st.error(f"Error al eliminar: {e}")
+                                    st.error(f"Error al actualizar: {e}")
+
+                        if eliminar_e:
+                            try:
+                                db.eliminar_servicio_basico(s["id"])
+                                limpiar_cache()
+                                st.success("Servicio eliminado.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error al eliminar: {e}")
 
 
 # ==================================================================
