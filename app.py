@@ -131,9 +131,9 @@ es_admin = usuario_actual.get("rol") == "Administrador"
 # ------------------------------------------------------------------
 def fmt_money(v):
     try:
-        return f"Bs {float(v):,.2f}"
+        return f"Bs {float(v):,.1f}"
     except (TypeError, ValueError):
-        return "Bs 0.00"
+        return "Bs 0.0"
 
 
 def redondear_entero(v):
@@ -161,8 +161,9 @@ def cargar_periodos(apartamento_id=None, anio=None, mes=None, solo_activos=False
 
 
 @st.cache_data(ttl=30)
-def cargar_periodos_electricidad(anio=None, mes=None, solo_activos=False):
-    return db.listar_periodos_electricidad(anio=anio, mes=mes, solo_activos=solo_activos)
+def cargar_periodos_electricidad(apartamento_id=None, anio=None, mes=None, solo_activos=False):
+    return db.listar_periodos_electricidad(apartamento_id=apartamento_id, anio=anio, mes=mes,
+                                            solo_activos=solo_activos)
 
 
 @st.cache_data(ttl=30)
@@ -1187,6 +1188,31 @@ elif pagina == "💵 Pagos de Alquiler":
         codigos = [f'{a["codigo"]} — {a.get("inquilino_nombre") or "vacío"}' for a in apartamentos]
         idx = st.selectbox("Apartamento", range(len(apartamentos)), format_func=lambda i: codigos[i])
         apt = apartamentos[idx]
+
+        with st.expander("📄 Generar Estado de Cuenta (para entregar al inquilino)"):
+            st.caption("Resume todos los meses de alquiler y electricidad del apartamento, con lo "
+                       "pagado, lo pendiente y el total adeudado.")
+            try:
+                periodos_alq_apt = cargar_periodos(apartamento_id=apt["id"], solo_activos=True)
+                periodos_elec_apt = cargar_periodos_electricidad(apartamento_id=apt["id"], solo_activos=True)
+                datos_estado = recibo.construir_datos_estado_cuenta(apt, periodos_alq_apt, periodos_elec_apt)
+
+                st.metric("Deuda total", fmt_money(datos_estado["deuda_total"]))
+                col_ec1, col_ec2 = st.columns(2)
+                with col_ec1:
+                    st.download_button(
+                        "📄 Descargar (PDF)", key=f'estado_cuenta_pdf_{apt["id"]}', use_container_width=True,
+                        data=recibo.generar_estado_cuenta_pdf(datos_estado),
+                        file_name=f'estado_cuenta_{apt["codigo"]}.pdf', mime="application/pdf",
+                    )
+                with col_ec2:
+                    st.download_button(
+                        "🖼️ Descargar (PNG)", key=f'estado_cuenta_png_{apt["id"]}', use_container_width=True,
+                        data=recibo.generar_estado_cuenta_png(datos_estado),
+                        file_name=f'estado_cuenta_{apt["codigo"]}.png', mime="image/png",
+                    )
+            except Exception as e:
+                st.caption(f"⚠️ No se pudo preparar el estado de cuenta: {e}")
 
         col1, col2 = st.columns(2)
         with col1:
