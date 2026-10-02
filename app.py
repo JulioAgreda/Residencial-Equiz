@@ -515,8 +515,8 @@ else:
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
 opciones_pendientes = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos"]
-#opciones_reuniones = ["(ninguno)", "🗒️ Reuniones"]
-opciones_servicios = ["(ninguno)", "🔌 Servicios Básicos"]
+opciones_reuniones = ["(ninguno)", "🗒️ Reuniones"]
+#opciones_servicios = ["(ninguno)", "🔌 Servicios Básicos"]
 opciones_reportes = ["(ninguno)", "📑 Reportes"]
 
 # Las claves de session_state de todos los módulos secundarios (todo menos el
