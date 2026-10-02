@@ -516,8 +516,9 @@ else:
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
 opciones_pendientes = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos"]
 opciones_reuniones = ["(ninguno)", "🗒️ Reuniones"]
-#opciones_servicios = ["(ninguno)", "🔌 Servicios Básicos"]
 opciones_reportes = ["(ninguno)", "📑 Reportes"]
+#opciones_servicios = ["(ninguno)", "🔌 Servicios Básicos"]
+
 
 # Las claves de session_state de todos los módulos secundarios (todo menos el
 # principal), para resetearlas entre sí cada vez que se elige uno.
@@ -554,16 +555,17 @@ st.sidebar.caption("✅ Módulo de Pendientes")
 pagina_pendientes = st.sidebar.radio("Pendientes", opciones_pendientes, key="nav_pendientes",
                                       label_visibility="collapsed",
                                       on_change=lambda: _al_elegir_secundario("nav_pendientes"))
+
 st.sidebar.divider()
 st.sidebar.caption("🗒️ Módulo de Reuniones")
 pagina_reuniones = st.sidebar.radio("Reuniones", opciones_reuniones, key="nav_reuniones",
                                      label_visibility="collapsed",
                                      on_change=lambda: _al_elegir_secundario("nav_reuniones"))
-st.sidebar.divider()
-st.sidebar.caption("🔌 Módulo de Servicios Básicos")
-pagina_servicios = st.sidebar.radio("Servicios Básicos", opciones_servicios, key="nav_servicios",
-                                     label_visibility="collapsed",
-                                     on_change=lambda: _al_elegir_secundario("nav_servicios"))
+#st.sidebar.divider()
+#st.sidebar.caption("🔌 Módulo de Servicios Básicos")
+#pagina_servicios = st.sidebar.radio("Servicios Básicos", opciones_servicios, key="nav_servicios",
+#                                     label_visibility="collapsed",
+#                                     on_change=lambda: _al_elegir_secundario("nav_servicios"))
 
 pagina_reportes = "(ninguno)"
 if es_admin:
