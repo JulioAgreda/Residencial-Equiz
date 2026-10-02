@@ -31,9 +31,9 @@ _COLOR_HEADER = "2E4057"  # sin "#": así lo espera openpyxl (PatternFill); para
 
 def _fmt_bs(v):
     try:
-        return f"Bs {float(v):,.2f}"
+        return f"Bs {float(v):,.1f}"
     except (TypeError, ValueError):
-        return "Bs 0.00"
+        return "Bs 0.0"
 
 
 def construir_reporte_usuario(nombre_usuario, datos_por_categoria):
@@ -97,8 +97,8 @@ def generar_excel_reporte(reportes, fecha_desde, fecha_hasta):
     for r in reportes:
         ws.cell(fila, 1, r["usuario"]).font = fuente_normal
         for col, (clave, _t, _c) in enumerate(CATEGORIAS, start=2):
-            ws.cell(fila, col, r["categorias"][clave]["total"]).number_format = '"Bs" #,##0.00'
-        ws.cell(fila, len(encabezados), r["total_general"]).number_format = '"Bs" #,##0.00'
+            ws.cell(fila, col, r["categorias"][clave]["total"]).number_format = '"Bs" #,##0.0'
+        ws.cell(fila, len(encabezados), r["total_general"]).number_format = '"Bs" #,##0.0'
         ws.cell(fila, len(encabezados)).font = fuente_subtotal
         fila += 1
     if len(reportes) > 1:
@@ -107,11 +107,11 @@ def generar_excel_reporte(reportes, fecha_desde, fecha_hasta):
         for col, (clave, _t, _c) in enumerate(CATEGORIAS, start=2):
             total_cat = sum(r["categorias"][clave]["total"] for r in reportes)
             cc = ws.cell(fila_tg, col, total_cat)
-            cc.number_format = '"Bs" #,##0.00'
+            cc.number_format = '"Bs" #,##0.0'
             cc.font = fuente_subtotal
         total_todo = sum(r["total_general"] for r in reportes)
         cc = ws.cell(fila_tg, len(encabezados), total_todo)
-        cc.number_format = '"Bs" #,##0.00'
+        cc.number_format = '"Bs" #,##0.0'
         cc.font = fuente_total
     ws.column_dimensions["A"].width = 26
     for col in range(2, len(encabezados) + 1):
@@ -149,18 +149,18 @@ def generar_excel_reporte(reportes, fecha_desde, fecha_hasta):
                     c = ws.cell(fila, col, valor)
                     c.font = fuente_normal
                     if nombre_col == "Monto" and isinstance(valor, (int, float)):
-                        c.number_format = '"Bs" #,##0.00'
+                        c.number_format = '"Bs" #,##0.0'
                 fila += 1
             ws.cell(fila, 1, "Subtotal:").font = fuente_subtotal
             c = ws.cell(fila, 2, datos["total"])
             c.font = fuente_subtotal
-            c.number_format = '"Bs" #,##0.00'
+            c.number_format = '"Bs" #,##0.0'
             fila += 2
 
         ws.cell(fila, 1, "TOTAL GENERAL:").font = fuente_total
         c = ws.cell(fila, 2, r["total_general"])
         c.font = fuente_total
-        c.number_format = '"Bs" #,##0.00'
+        c.number_format = '"Bs" #,##0.0'
 
         ws.column_dimensions["A"].width = 16
         for col in range(2, 9):
