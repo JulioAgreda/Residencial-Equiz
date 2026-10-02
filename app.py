@@ -503,13 +503,19 @@ st.sidebar.caption(f'👤 {usuario_actual.get("nombre") or usuario_actual.get("u
 
 if es_admin:
     opciones_principal = ["📊 Dashboard", "🏠 Apartamentos", "💵 Pagos de Alquiler", "⚡ Electricidad",
-                          "💧 Agua", "📑 Reportes", "👥 Usuarios"]
+                          "💧 Agua", "👥 Usuarios"]
 else:
     opciones_principal = ["📊 Dashboard", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua"]
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
 opciones_pendientes = ["(ninguno)", "✅ Pendientes"]
 opciones_reuniones = ["(ninguno)", "🗒️ Reuniones"]
+opciones_reportes = ["(ninguno)", "📑 Reportes"]
+
+# Las claves de session_state de todos los módulos secundarios (todo menos el
+# principal), para resetearlas entre sí cada vez que se elige uno.
+_CLAVES_NAV_SECUNDARIAS = ["nav_movimientos", "nav_pendientes", "nav_reuniones", "nav_reportes"]
+
 
 # Los radios de abajo son independientes en el estado interno de Streamlit:
 # si eliges algo en uno, los demás no se "enteran" y siguen marcando su
@@ -518,27 +524,15 @@ opciones_reuniones = ["(ninguno)", "🗒️ Reuniones"]
 # callbacks resetean los demás radios apenas se elige uno, para que el
 # cambio de sección sea siempre inmediato.
 def _al_elegir_principal():
-    st.session_state["nav_movimientos"] = "(ninguno)"
-    st.session_state["nav_pendientes"] = "(ninguno)"
-    st.session_state["nav_reuniones"] = "(ninguno)"
+    for clave in _CLAVES_NAV_SECUNDARIAS:
+        st.session_state[clave] = "(ninguno)"
 
 
-def _al_elegir_movimientos():
-    if st.session_state["nav_movimientos"] != "(ninguno)":
-        st.session_state["nav_pendientes"] = "(ninguno)"
-        st.session_state["nav_reuniones"] = "(ninguno)"
-
-
-def _al_elegir_pendientes():
-    if st.session_state["nav_pendientes"] != "(ninguno)":
-        st.session_state["nav_movimientos"] = "(ninguno)"
-        st.session_state["nav_reuniones"] = "(ninguno)"
-
-
-def _al_elegir_reuniones():
-    if st.session_state["nav_reuniones"] != "(ninguno)":
-        st.session_state["nav_movimientos"] = "(ninguno)"
-        st.session_state["nav_pendientes"] = "(ninguno)"
+def _al_elegir_secundario(clave_propia):
+    if st.session_state[clave_propia] != "(ninguno)":
+        for clave in _CLAVES_NAV_SECUNDARIAS:
+            if clave != clave_propia:
+                st.session_state[clave] = "(ninguno)"
 
 
 pagina_principal = st.sidebar.radio("Gestión del Residencial", opciones_principal, key="nav_principal",
@@ -546,15 +540,26 @@ pagina_principal = st.sidebar.radio("Gestión del Residencial", opciones_princip
 st.sidebar.divider()
 st.sidebar.caption("📒 Módulo de Movimientos")
 pagina_movimientos = st.sidebar.radio("Compras y Ventas", opciones_movimientos, key="nav_movimientos",
-                                       label_visibility="collapsed", on_change=_al_elegir_movimientos)
+                                       label_visibility="collapsed",
+                                       on_change=lambda: _al_elegir_secundario("nav_movimientos"))
 st.sidebar.divider()
 st.sidebar.caption("✅ Módulo de Pendientes")
 pagina_pendientes = st.sidebar.radio("Pendientes", opciones_pendientes, key="nav_pendientes",
-                                      label_visibility="collapsed", on_change=_al_elegir_pendientes)
+                                      label_visibility="collapsed",
+                                      on_change=lambda: _al_elegir_secundario("nav_pendientes"))
 st.sidebar.divider()
 st.sidebar.caption("🗒️ Módulo de Reuniones")
 pagina_reuniones = st.sidebar.radio("Reuniones", opciones_reuniones, key="nav_reuniones",
-                                     label_visibility="collapsed", on_change=_al_elegir_reuniones)
+                                     label_visibility="collapsed",
+                                     on_change=lambda: _al_elegir_secundario("nav_reuniones"))
+
+pagina_reportes = "(ninguno)"
+if es_admin:
+    st.sidebar.divider()
+    st.sidebar.caption("📑 Módulo de Reportes")
+    pagina_reportes = st.sidebar.radio("Reportes", opciones_reportes, key="nav_reportes",
+                                        label_visibility="collapsed",
+                                        on_change=lambda: _al_elegir_secundario("nav_reportes"))
 
 if pagina_movimientos != "(ninguno)":
     pagina = pagina_movimientos
@@ -562,6 +567,8 @@ elif pagina_pendientes != "(ninguno)":
     pagina = pagina_pendientes
 elif pagina_reuniones != "(ninguno)":
     pagina = pagina_reuniones
+elif pagina_reportes != "(ninguno)":
+    pagina = pagina_reportes
 else:
     pagina = pagina_principal
 st.sidebar.divider()
@@ -579,9 +586,8 @@ if st.sidebar.button("🚪 Cerrar sesión"):
 if pagina != "📊 Dashboard":
     if st.button("🏠 Volver al Menú Principal", key="btn_volver_inicio"):
         st.session_state["nav_principal"] = "📊 Dashboard"
-        st.session_state["nav_movimientos"] = "(ninguno)"
-        st.session_state["nav_pendientes"] = "(ninguno)"
-        st.session_state["nav_reuniones"] = "(ninguno)"
+        for _clave in _CLAVES_NAV_SECUNDARIAS:
+            st.session_state[_clave] = "(ninguno)"
         st.rerun()
     st.divider()
 
