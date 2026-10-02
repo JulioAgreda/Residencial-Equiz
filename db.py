@@ -614,6 +614,29 @@ def eliminar_pendiente(pendiente_id):
     return sb.table("pendientes").delete().eq("id", pendiente_id).execute()
 
 
+# ---------- Servicios Básicos (dentro del módulo de Pendientes) ----------
+
+def listar_servicios_basicos():
+    sb = get_client()
+    res = sb.table("servicios_basicos").select("*").order("nombre_servicio").execute()
+    return res.data or []
+
+
+def crear_servicio_basico(payload: dict):
+    sb = get_client()
+    return sb.table("servicios_basicos").insert(payload).execute()
+
+
+def actualizar_servicio_basico(servicio_id, payload: dict):
+    sb = get_client()
+    return sb.table("servicios_basicos").update(payload).eq("id", servicio_id).execute()
+
+
+def eliminar_servicio_basico(servicio_id):
+    sb = get_client()
+    return sb.table("servicios_basicos").delete().eq("id", servicio_id).execute()
+
+
 # ---------- Reuniones (área administrativa) ----------
 
 def listar_reuniones(fecha_desde=None, fecha_hasta=None):
