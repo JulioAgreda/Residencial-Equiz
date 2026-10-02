@@ -581,8 +581,8 @@ elif pagina_pendientes != "(ninguno)":
     pagina = pagina_pendientes
 elif pagina_reuniones != "(ninguno)":
     pagina = pagina_reuniones
-elif pagina_servicios != "(ninguno)":
-    pagina = pagina_servicios
+#elif pagina_servicios != "(ninguno)":
+#    pagina = pagina_servicios
 elif pagina_reportes != "(ninguno)":
     pagina = pagina_reportes
 else:
