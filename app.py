@@ -1,23 +1,13 @@
+import io
+import zipfile
 import streamlit as st
 import pandas as pd
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 import calendar
-
-# Streamlit Cloud corre el servidor en hora UTC, no en la hora de Bolivia (UTC-4).
-# Si se usara hoy_bolivia() directamente, después de las 20:00 (hora de Bolivia) la
-# app ya "vería" el día siguiente, porque en UTC ya cambió de fecha. Esta función
-# calcula la fecha de hoy según la hora de Bolivia, sin importar dónde corra el servidor.
-ZONA_BOLIVIA = timezone(timedelta(hours=-4))
-
-
-def hoy_bolivia() -> date:
-    return datetime.now(ZONA_BOLIVIA).date()
 import bcrypt
 import db
+import moras
 import recibo
-import reportes
-
-SENTINEL_SIN_USUARIO = "— Sin usuario asignado —"
 
 st.set_page_config(page_title="Residencial EQUIZ", page_icon="🏢", layout="wide")
 
@@ -27,8 +17,8 @@ MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
 PISOS = ["Planta Baja", "Primer Piso", "Segundo Piso", "Tercer Piso"]
 ROLES = ["Administrador", "Cobrador"]
 
-CATEGORIAS_GASTO = ["Artículos de limpieza", "Repuestos y accesorios", "Material de Construcción",
-                    "Herramientas", "Otros"]
+CATEGORIAS_GASTO = ["Mantenimiento de ascensores", "Artículos de limpieza", "Seguridad",
+                    "Servicios públicos", "Mantenimiento general", "Otro"]
 CATEGORIAS_PAGO = ["Servicios (luz, agua, internet)", "Sueldos y honorarios", "Impuestos y tasas",
                    "Pago a proveedor", "Otro"]
 CONCEPTOS_VENTA = ["Alquiler de área común", "Venta de activos fijos", "Emisión de tag/control de acceso",
@@ -136,33 +126,19 @@ def fmt_money(v):
         return "Bs 0.00"
 
 
-def redondear_entero(v):
-    """Redondeo comercial a número entero (0.5 siempre hacia arriba), para montos de
-    electricidad y agua. Python's round() nativo usa redondeo bancario (100.5 -> 100),
-    que no es lo esperado para dinero."""
-    from decimal import Decimal, ROUND_HALF_UP
-    return int(Decimal(str(v)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-
-
-def nombre_inquilino_periodo(periodo, apt_info=None):
-    """Inquilino al que pertenece ese periodo (se guarda al crearlo). Si el periodo no lo tiene,
-    se usa el inquilino actual del apartamento."""
-    return periodo.get("inquilino_nombre") or (apt_info or {}).get("inquilino_nombre") or "—"
-
-
 @st.cache_data(ttl=30)
 def cargar_apartamentos():
     return db.listar_apartamentos()
 
 
 @st.cache_data(ttl=30)
-def cargar_periodos(apartamento_id=None, anio=None, mes=None, solo_activos=False):
-    return db.listar_periodos(apartamento_id=apartamento_id, anio=anio, mes=mes, solo_activos=solo_activos)
+def cargar_periodos(apartamento_id=None, anio=None, mes=None):
+    return db.listar_periodos(apartamento_id=apartamento_id, anio=anio, mes=mes)
 
 
 @st.cache_data(ttl=30)
-def cargar_periodos_electricidad(anio=None, mes=None, solo_activos=False):
-    return db.listar_periodos_electricidad(anio=anio, mes=mes, solo_activos=solo_activos)
+def cargar_periodos_electricidad(anio=None, mes=None):
+    return db.listar_periodos_electricidad(anio=anio, mes=mes)
 
 
 @st.cache_data(ttl=30)
@@ -170,8 +146,28 @@ def cargar_periodos_agua(anio=None, mes=None):
     return db.listar_periodos_agua(anio=anio, mes=mes)
 
 
-def total_pagado(periodo, campo="pagos"):
-    return sum(float(p["monto"]) for p in (periodo.get(campo) or []))
+@st.cache_data(ttl=60)
+def cargar_periodos_abiertos(tipo):
+    return db.listar_periodos_abiertos(tipo)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _reporte_pdf_cache(datos):
+    return recibo.generar_reporte_inquilino_pdf(datos)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _reporte_png_cache(datos):
+    return recibo.generar_reporte_inquilino_png(datos)
+
+
+def _nombre_archivo_reporte(apt, hoy, extension):
+    codigo = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(apt.get("codigo") or "apto"))
+    return f"estado_cuenta_{codigo}_{hoy:%Y-%m-%d}.{extension}"
+
+
+def total_pagado(periodo):
+    return sum(float(p["monto"]) for p in (periodo.get("pagos") or []))
 
 
 def mostrar_botones_recibo(pago, periodo, apartamento, total_pagado_periodo, key_sufijo):
@@ -216,11 +212,6 @@ def cargar_reuniones(fecha_desde=None, fecha_hasta=None):
 
 
 @st.cache_data(ttl=30)
-def cargar_servicios_basicos():
-    return db.listar_servicios_basicos()
-
-
-@st.cache_data(ttl=30)
 def cargar_participantes_reuniones():
     return db.listar_participantes_reuniones()
 
@@ -235,118 +226,17 @@ def cargar_todos_los_usuarios():
     return db.listar_usuarios()
 
 
-@st.cache_data(ttl=30)
-def cargar_pagos_alquiler_rango(fecha_desde, fecha_hasta):
-    return db.listar_pagos_alquiler_rango(fecha_desde, fecha_hasta)
-
-
-@st.cache_data(ttl=30)
-def cargar_pagos_electricidad_rango(fecha_desde, fecha_hasta):
-    return db.listar_pagos_electricidad_rango(fecha_desde, fecha_hasta)
-
-
-@st.cache_data(ttl=60)
-def cargar_periodos_alquiler_basico():
-    return db.listar_todos_periodos_alquiler_basico()
-
-
-@st.cache_data(ttl=60)
-def cargar_periodos_electricidad_basico():
-    return db.listar_todos_periodos_electricidad_basico()
-
-
 def limpiar_cache():
     cargar_apartamentos.clear()
     cargar_periodos.clear()
     cargar_periodos_electricidad.clear()
     cargar_periodos_agua.clear()
+    cargar_periodos_abiertos.clear()
     cargar_pendientes.clear()
     cargar_reuniones.clear()
-    cargar_servicios_basicos.clear()
     cargar_participantes_reuniones.clear()
     cargar_usuarios_activos.clear()
     cargar_todos_los_usuarios.clear()
-    cargar_pagos_alquiler_rango.clear()
-    cargar_pagos_electricidad_rango.clear()
-    cargar_periodos_alquiler_basico.clear()
-    cargar_periodos_electricidad_basico.clear()
-
-
-def _nombre_mes_anio(periodo):
-    if not periodo:
-        return "—"
-    return f'{periodo.get("mes", "")} {periodo.get("anio", "")}'.strip()
-
-
-def _obtener_datos_reporte_rango(fecha_desde, fecha_hasta):
-    """Trae, UNA sola vez, los 5 tipos de movimiento del rango de fechas, ya enriquecidos
-    y con una clave interna "_usuario" (quién lo registró) lista para filtrar por usuario
-    al armar cada reporte. No usa embeds anidados: el cruce periodo->apartamento se hace
-    aquí mismo en Python con los diccionarios ya cacheados."""
-    apartamentos_por_id = {a["id"]: a for a in cargar_apartamentos()}
-    periodos_alq_por_id = {p["id"]: p for p in cargar_periodos_alquiler_basico()}
-    periodos_elec_por_id = {p["id"]: p for p in cargar_periodos_electricidad_basico()}
-
-    pagos_generales = db.listar_pagos_generales(fecha_desde=str(fecha_desde), fecha_hasta=str(fecha_hasta))
-    compras = db.listar_compras(fecha_desde=str(fecha_desde), fecha_hasta=str(fecha_hasta))
-    ventas = db.listar_ventas(fecha_desde=str(fecha_desde), fecha_hasta=str(fecha_hasta))
-    pagos_alq = cargar_pagos_alquiler_rango(str(fecha_desde), str(fecha_hasta))
-    pagos_elec = cargar_pagos_electricidad_rango(str(fecha_desde), str(fecha_hasta))
-
-    datos = {"pagos_generales": [], "compras": [], "ventas": [], "pagos_alquiler": [], "pagos_electricidad": []}
-
-    for p in pagos_generales:
-        datos["pagos_generales"].append({
-            "_usuario": p.get("encargado") or "",
-            "Fecha": p.get("fecha_pago"), "Categoría": p.get("categoria") or "",
-            "Beneficiario": p.get("beneficiario") or "", "Método de pago": p.get("metodo_pago") or "",
-            "Monto": float(p.get("monto") or 0),
-        })
-    for c in compras:
-        datos["compras"].append({
-            "_usuario": c.get("encargado") or "",
-            "Fecha": c.get("fecha_compra"), "Categoría": c.get("categoria") or "",
-            "Proveedor": c.get("proveedor") or "", "Método de pago": c.get("metodo_pago") or "",
-            "Monto": float(c.get("monto_total") or 0),
-        })
-    for v in ventas:
-        datos["ventas"].append({
-            "_usuario": v.get("encargado") or "",
-            "Fecha": v.get("fecha_venta"), "Concepto": v.get("concepto") or "",
-            "Comprador": v.get("comprador") or "", "Forma de cobro": v.get("forma_cobro") or "",
-            "Monto": float(v.get("monto") or 0),
-        })
-    for pa in pagos_alq:
-        periodo = periodos_alq_por_id.get(pa.get("periodo_id"))
-        apt = apartamentos_por_id.get(periodo["apartamento_id"]) if periodo else None
-        datos["pagos_alquiler"].append({
-            "_usuario": pa.get("registrado_por") or "",
-            "Fecha": pa.get("fecha"), "Apartamento": (apt or {}).get("codigo", "—"),
-            "Inquilino": (apt or {}).get("inquilino_nombre") or "—", "Periodo": _nombre_mes_anio(periodo),
-            "Método de pago": pa.get("metodo_pago") or "", "Monto": float(pa.get("monto") or 0),
-        })
-    for pe in pagos_elec:
-        periodo = periodos_elec_por_id.get(pe.get("periodo_id"))
-        apt = apartamentos_por_id.get(periodo["apartamento_id"]) if periodo else None
-        datos["pagos_electricidad"].append({
-            "_usuario": pe.get("registrado_por") or "",
-            "Fecha": pe.get("fecha"), "Apartamento": (apt or {}).get("codigo", "—"),
-            "Inquilino": (apt or {}).get("inquilino_nombre") or "—", "Periodo": _nombre_mes_anio(periodo),
-            "Método de pago": pe.get("metodo_pago") or "", "Monto": float(pe.get("monto") or 0),
-        })
-    return datos
-
-
-def _filtrar_datos_reporte_por_usuario(datos_todos, nombre_mostrado):
-    """nombre_mostrado puede ser el nombre de un usuario real, o SENTINEL_SIN_USUARIO para
-    agrupar los registros que no tienen quién los registró (datos de antes de esta función)."""
-    clave_buscada = "" if nombre_mostrado == SENTINEL_SIN_USUARIO else nombre_mostrado
-    resultado = {}
-    for clave, filas in datos_todos.items():
-        resultado[clave] = [
-            {k: v for k, v in f.items() if k != "_usuario"} for f in filas if f["_usuario"] == clave_buscada
-        ]
-    return resultado
 
 
 def parse_fecha(valor):
@@ -358,123 +248,37 @@ def parse_fecha(valor):
         return None
 
 
-def fecha_vencimiento_del_mes(dia_pago: int, anio: int, mes_num: int):
-    """Fecha de vencimiento del pago de un mes dado, según el día de pago (1-31),
-    ajustado si el mes es más corto (ej. día 31 en febrero -> último día de febrero)."""
+def fecha_vencimiento_del_mes(fecha_ingreso: date, anio: int, mes_num: int):
+    """Día de pago mensual = mismo día del mes que la fecha de ingreso (ajustado si el mes es más corto)."""
     ultimo_dia_mes = calendar.monthrange(anio, mes_num)[1]
-    dia = min(max(int(dia_pago), 1), ultimo_dia_mes)
+    dia = min(fecha_ingreso.day, ultimo_dia_mes)
     return date(anio, mes_num, dia)
 
 
-def _iter_meses(desde_anio, desde_mes_idx, hasta_anio, hasta_mes_idx):
-    """Genera (año, mes_idx) de forma inclusiva, mes_idx 0-based (0=Enero)."""
-    a, m = desde_anio, desde_mes_idx
-    while (a, m) <= (hasta_anio, hasta_mes_idx):
-        yield a, m
-        m += 1
-        if m > 11:
-            m = 0
-            a += 1
-
-
-def calcular_mora_alquiler(apt, periodos_por_apt_mes):
-    """Devuelve (en_mora, dias_atraso, deuda_total, meses_adeudados) para un apartamento,
-    sumando TODOS los meses ya vencidos que no se pagaron por completo (no solo el mes
-    actual), según su día de pago fijo. Si el apartamento no tiene 'Día de Pago' definido,
-    se usa el día del mes de su fecha de ingreso."""
+def calcular_mora_alquiler(apt, periodos_mes_actual_por_apt):
+    """Devuelve (en_mora, dias_atraso, deuda) para un apartamento, según su fecha de pago mensual."""
     if apt["estado"] != "Ocupado":
-        return False, 0, 0.0, 0
-    if (apt.get("tipo_contrato") or "").strip().lower() == "anticrético":
-        return False, 0, 0.0, 0  # el anticrético no tiene pago mensual de alquiler, no aplica mora
-
-    hoy = hoy_bolivia()
+        return False, 0, 0.0
     fecha_ingreso = parse_fecha(apt.get("fecha_ingreso"))
-    dia_pago = apt.get("dia_pago") or (fecha_ingreso.day if fecha_ingreso else None)
-    if not dia_pago:
-        return False, 0, 0.0, 0
+    hoy = date.today()
+    dia_pago = fecha_ingreso if fecha_ingreso else date(hoy.year, hoy.month, 1)
+    vencimiento = fecha_vencimiento_del_mes(dia_pago, hoy.year, hoy.month)
+    if hoy <= vencimiento:
+        return False, 0, 0.0  # todavía no vence el pago de este mes
 
-    # Punto de partida: el más antiguo entre la fecha de ingreso (si está cargada) y el
-    # primer periodo de alquiler ya registrado para este apartamento. Si solo se usara la
-    # fecha de ingreso y ese campo estuviera vacío, se perdía todo el historial de meses
-    # impagos y solo se contaba el mes actual.
-    candidatos_inicio = [fecha_ingreso] if fecha_ingreso else []
-    for (apto_id, mes_nombre, anio_periodo) in periodos_por_apt_mes:
-        if apto_id == apt["id"] and mes_nombre in MESES:
-            candidatos_inicio.append(date(anio_periodo, MESES.index(mes_nombre) + 1, 1))
-    inicio = min(candidatos_inicio) if candidatos_inicio else date(hoy.year, hoy.month, 1)
-
-    monto_base = float(apt.get("monto_alquiler") or 0)
-    deuda_total = 0.0
-    meses_adeudados = 0
-    vencimiento_mas_antiguo = None
-
-    for anio, mes_idx in _iter_meses(inicio.year, inicio.month - 1, hoy.year, hoy.month - 1):
-        mes_num = mes_idx + 1
-        vencimiento = fecha_vencimiento_del_mes(dia_pago, anio, mes_num)
-        if hoy <= vencimiento:
-            continue  # ese mes todavía no vence
-
-        periodo = periodos_por_apt_mes.get((apt["id"], MESES[mes_idx], anio))
-        monto_esperado = float(periodo["monto_esperado"]) if periodo else monto_base
-        pagado = total_pagado(periodo) if periodo else 0.0
-        deuda_mes = monto_esperado - pagado
-        if deuda_mes > 0.009:
-            deuda_total += deuda_mes
-            meses_adeudados += 1
-            if vencimiento_mas_antiguo is None:
-                vencimiento_mas_antiguo = vencimiento
-
-    if meses_adeudados == 0:
-        return False, 0, 0.0, 0
-    dias_atraso = (hoy - vencimiento_mas_antiguo).days
-    return True, dias_atraso, round(deuda_total, 2), meses_adeudados
-
-
-def calcular_mora_electricidad(apt, periodos_elec_por_apt_mes):
-    """Devuelve (en_mora, dias_atraso, deuda_total, meses_adeudados) para electricidad,
-    sumando todos los periodos YA REGISTRADOS (con lectura de medidor tomada) que estén
-    vencidos y no pagados por completo. A diferencia del alquiler, el monto de luz depende
-    de la lectura del medidor: si un mes no tiene periodo creado (no se tomó lectura), no
-    se puede calcular su monto, así que ese mes no se cuenta como deuda (no se asume un
-    monto fijo como en el alquiler)."""
-    if apt["estado"] != "Ocupado":
-        return False, 0, 0.0, 0
-
-    hoy = hoy_bolivia()
-    fecha_ingreso = parse_fecha(apt.get("fecha_ingreso"))
-    dia_pago = apt.get("dia_pago") or (fecha_ingreso.day if fecha_ingreso else None)
-    if not dia_pago:
-        return False, 0, 0.0, 0
-
-    deuda_total = 0.0
-    meses_adeudados = 0
-    vencimiento_mas_antiguo = None
-
-    for (apto_id, mes_nombre, anio_periodo), periodo in periodos_elec_por_apt_mes.items():
-        if apto_id != apt["id"] or mes_nombre not in MESES:
-            continue
-        mes_num = MESES.index(mes_nombre) + 1
-        vencimiento = fecha_vencimiento_del_mes(dia_pago, anio_periodo, mes_num)
-        if hoy <= vencimiento:
-            continue  # ese mes todavía no vence
-
-        pagado = total_pagado(periodo, campo="pagos_electricidad")
-        deuda_mes = float(periodo.get("monto_esperado") or 0) - pagado
-        if deuda_mes > 0.009:
-            deuda_total += deuda_mes
-            meses_adeudados += 1
-            if vencimiento_mas_antiguo is None or vencimiento < vencimiento_mas_antiguo:
-                vencimiento_mas_antiguo = vencimiento
-
-    if meses_adeudados == 0:
-        return False, 0, 0.0, 0
-    dias_atraso = (hoy - vencimiento_mas_antiguo).days
-    return True, dias_atraso, round(deuda_total, 2), meses_adeudados
+    periodo = periodos_mes_actual_por_apt.get(apt["id"])
+    monto_esperado = float(periodo["monto_esperado"]) if periodo else float(apt.get("monto_alquiler") or 0)
+    pagado = total_pagado(periodo) if periodo else 0.0
+    deuda = monto_esperado - pagado
+    if deuda <= 0:
+        return False, 0, 0.0
+    dias_atraso = (hoy - vencimiento).days
+    return True, dias_atraso, deuda
 
 
 def estado_contrato_alerta(apt):
     """Devuelve (nivel, texto) para contratos vencidos o por vencer en los próximos 30 días. None si no aplica."""
-    hoy = hoy_bolivia()
+    hoy = date.today()
     fecha_fin = parse_fecha(apt.get("contrato_fecha_fin"))
     estado = apt.get("estado_contrato") or "Sin Contrato"
 
@@ -491,7 +295,7 @@ def estado_contrato_alerta(apt):
 
 def ultimos_n_meses(n=12):
     """Lista de (anio, mes_num) de los últimos n meses, terminando en el mes actual, en orden cronológico."""
-    hoy = hoy_bolivia()
+    hoy = date.today()
     resultado = []
     for i in range(n - 1, -1, -1):
         offset = hoy.month - 1 - i
@@ -509,21 +313,13 @@ st.sidebar.caption(f'👤 {usuario_actual.get("nombre") or usuario_actual.get("u
 
 if es_admin:
     opciones_principal = ["📊 Dashboard", "🏠 Apartamentos", "💵 Pagos de Alquiler", "⚡ Electricidad",
-                          "💧 Agua", "👥 Usuarios"]
+                          "💧 Agua", "📑 Reportes", "👥 Usuarios"]
 else:
-    opciones_principal = ["📊 Dashboard", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua"]
+    opciones_principal = ["📊 Dashboard", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua", "📑 Reportes"]
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
-opciones_pendientes = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos"]
+opciones_pendientes = ["(ninguno)", "✅ Pendientes"]
 opciones_reuniones = ["(ninguno)", "🗒️ Reuniones"]
-opciones_reportes = ["(ninguno)", "📑 Reportes"]
-
-
-
-# Las claves de session_state de todos los módulos secundarios (todo menos el
-# principal), para resetearlas entre sí cada vez que se elige uno.
-_CLAVES_NAV_SECUNDARIAS = ["nav_movimientos", "nav_pendientes", "nav_reuniones", "nav_servicios", "nav_reportes"]
-
 
 # Los radios de abajo son independientes en el estado interno de Streamlit:
 # si eliges algo en uno, los demás no se "enteran" y siguen marcando su
@@ -532,15 +328,27 @@ _CLAVES_NAV_SECUNDARIAS = ["nav_movimientos", "nav_pendientes", "nav_reuniones",
 # callbacks resetean los demás radios apenas se elige uno, para que el
 # cambio de sección sea siempre inmediato.
 def _al_elegir_principal():
-    for clave in _CLAVES_NAV_SECUNDARIAS:
-        st.session_state[clave] = "(ninguno)"
+    st.session_state["nav_movimientos"] = "(ninguno)"
+    st.session_state["nav_pendientes"] = "(ninguno)"
+    st.session_state["nav_reuniones"] = "(ninguno)"
 
 
-def _al_elegir_secundario(clave_propia):
-    if st.session_state[clave_propia] != "(ninguno)":
-        for clave in _CLAVES_NAV_SECUNDARIAS:
-            if clave != clave_propia:
-                st.session_state[clave] = "(ninguno)"
+def _al_elegir_movimientos():
+    if st.session_state["nav_movimientos"] != "(ninguno)":
+        st.session_state["nav_pendientes"] = "(ninguno)"
+        st.session_state["nav_reuniones"] = "(ninguno)"
+
+
+def _al_elegir_pendientes():
+    if st.session_state["nav_pendientes"] != "(ninguno)":
+        st.session_state["nav_movimientos"] = "(ninguno)"
+        st.session_state["nav_reuniones"] = "(ninguno)"
+
+
+def _al_elegir_reuniones():
+    if st.session_state["nav_reuniones"] != "(ninguno)":
+        st.session_state["nav_movimientos"] = "(ninguno)"
+        st.session_state["nav_pendientes"] = "(ninguno)"
 
 
 pagina_principal = st.sidebar.radio("Gestión del Residencial", opciones_principal, key="nav_principal",
@@ -548,27 +356,15 @@ pagina_principal = st.sidebar.radio("Gestión del Residencial", opciones_princip
 st.sidebar.divider()
 st.sidebar.caption("📒 Módulo de Movimientos")
 pagina_movimientos = st.sidebar.radio("Compras y Ventas", opciones_movimientos, key="nav_movimientos",
-                                       label_visibility="collapsed",
-                                       on_change=lambda: _al_elegir_secundario("nav_movimientos"))
+                                       label_visibility="collapsed", on_change=_al_elegir_movimientos)
 st.sidebar.divider()
 st.sidebar.caption("✅ Módulo de Pendientes")
 pagina_pendientes = st.sidebar.radio("Pendientes", opciones_pendientes, key="nav_pendientes",
-                                      label_visibility="collapsed",
-                                      on_change=lambda: _al_elegir_secundario("nav_pendientes"))
-
+                                      label_visibility="collapsed", on_change=_al_elegir_pendientes)
 st.sidebar.divider()
 st.sidebar.caption("🗒️ Módulo de Reuniones")
 pagina_reuniones = st.sidebar.radio("Reuniones", opciones_reuniones, key="nav_reuniones",
-                                     label_visibility="collapsed",
-                                     on_change=lambda: _al_elegir_secundario("nav_reuniones"))
-
-pagina_reportes = "(ninguno)"
-if es_admin:
-    st.sidebar.divider()
-    st.sidebar.caption("📑 Módulo de Reportes")
-    pagina_reportes = st.sidebar.radio("Reportes", opciones_reportes, key="nav_reportes",
-                                        label_visibility="collapsed",
-                                        on_change=lambda: _al_elegir_secundario("nav_reportes"))
+                                     label_visibility="collapsed", on_change=_al_elegir_reuniones)
 
 if pagina_movimientos != "(ninguno)":
     pagina = pagina_movimientos
@@ -576,9 +372,6 @@ elif pagina_pendientes != "(ninguno)":
     pagina = pagina_pendientes
 elif pagina_reuniones != "(ninguno)":
     pagina = pagina_reuniones
-
-elif pagina_reportes != "(ninguno)":
-    pagina = pagina_reportes
 else:
     pagina = pagina_principal
 st.sidebar.divider()
@@ -593,14 +386,6 @@ if st.sidebar.button("🚪 Cerrar sesión"):
 # ==================================================================
 # PÁGINA: DASHBOARD
 # ==================================================================
-if pagina != "📊 Dashboard":
-    if st.button("🏠 Volver al Menú Principal", key="btn_volver_inicio"):
-        st.session_state["nav_principal"] = "📊 Dashboard"
-        for _clave in _CLAVES_NAV_SECUNDARIAS:
-            st.session_state[_clave] = "(ninguno)"
-        st.rerun()
-    st.divider()
-
 if pagina == "📊 Dashboard":
     st.title("📊 Dashboard General")
 
@@ -611,17 +396,53 @@ if pagina == "📊 Dashboard":
 
     df_apt = pd.DataFrame(apartamentos)
 
-    # ---------------- Alertas: contratos y mora ----------------
-    hoy = hoy_bolivia()
-    mes_actual_nombre = MESES[hoy.month - 1]
-    periodos_activos_todos = cargar_periodos(solo_activos=True)
-    periodos_por_apt_mes = {(p["apartamento_id"], p["mes"], p["anio"]): p for p in periodos_activos_todos}
-    periodos_elec_activos_todos = cargar_periodos_electricidad(solo_activos=True)
-    periodos_elec_por_apt_mes = {(p["apartamento_id"], p["mes"], p["anio"]): p for p in periodos_elec_activos_todos}
+    # ---------------- Moras: alquiler, electricidad y agua ----------------
+    hoy = recibo.hoy_bolivia()
+    cfg_col = {
+        "Departamento": st.column_config.TextColumn("Departamento", width="small"),
+        "Inquilino": st.column_config.TextColumn("Inquilino", width="large"),
+        "Meses atrasados": st.column_config.NumberColumn("Meses atrasados", format="%d", width="small"),
+        "Deuda total": st.column_config.NumberColumn("Deuda total", format="Bs %.2f", width="small"),
+    }
+    mora_alquiler = moras.calcular_mora_alquiler(apartamentos, cargar_periodos_abiertos("alquiler"), hoy)
+    mora_elec = moras.calcular_mora_consumo(
+        apartamentos, cargar_periodos_abiertos("electricidad"), "pagos_electricidad", hoy)
+    mora_agua = moras.calcular_mora_consumo(
+        apartamentos, cargar_periodos_abiertos("agua"), "pagos_agua", hoy)
 
+    def _total(filas):
+        return sum(f["Deuda total"] for f in filas)
+
+    st.subheader("🚨 Moras (deudas pendientes)")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(f"💵 Alquiler ({len(mora_alquiler)} deptos.)", fmt_money(_total(mora_alquiler)))
+    m2.metric(f"⚡ Electricidad ({len(mora_elec)} deptos.)", fmt_money(_total(mora_elec)))
+    m3.metric(f"💧 Agua ({len(mora_agua)} deptos.)", fmt_money(_total(mora_agua)))
+    m4.metric("Total en mora", fmt_money(_total(mora_alquiler) + _total(mora_elec) + _total(mora_agua)))
+
+    for titulo, filas, vacio in [
+        ("💵 Mora de alquiler", mora_alquiler, "Sin alquileres atrasados."),
+        ("⚡ Mora de electricidad", mora_elec, "Sin deudas de electricidad."),
+        ("💧 Mora de agua", mora_agua, "Sin deudas de agua."),
+    ]:
+        with st.container(border=True):
+            st.markdown(f"**{titulo}**")
+            if filas:
+                st.dataframe(pd.DataFrame(filas), use_container_width=True, hide_index=True,
+                             column_config=cfg_col)
+            else:
+                st.success(vacio)
+    st.caption(
+        "Alquiler: deuda real. Cuenta los meses con saldo pendiente cuyo día de pago ya pasó (campo «Día de "
+        "Pago» de la ficha; si no hay, el día de ingreso) y también los meses sin ningún registro desde el "
+        "primer mes registrado (o la fecha de ingreso) hasta hoy; no incluye contratos de anticrético. "
+        "Electricidad y agua: toda factura registrada con saldo pendiente. Solo se considera al inquilino "
+        "actual de los apartamentos ocupados."
+    )
+    st.divider()
+
+    # ---------------- Alertas: contratos ----------------
     filas_contrato = []
-    filas_mora = []
-    filas_mora_elec = []
     for apt in apartamentos:
         nivel, dias = estado_contrato_alerta(apt)
         if nivel:
@@ -635,70 +456,19 @@ if pagina == "📊 Dashboard":
                          else (f"vence en {dias} días" if dias is not None else "—")),
                 "_orden": 0 if nivel == "🔴 Vencido" else 1,
             })
-
-        en_mora, dias_atraso, deuda, meses_adeudados = calcular_mora_alquiler(apt, periodos_por_apt_mes)
-        if en_mora:
-            filas_mora.append({
-                "Apartamento": apt["codigo"],
-                "Inquilino": apt.get("inquilino_nombre") or "—",
-                "Meses adeudados": meses_adeudados,
-                "Días de atraso": dias_atraso,
-                "Deuda": deuda,
-            })
-
-        en_mora_elec, dias_atraso_elec, deuda_elec, meses_elec = calcular_mora_electricidad(
-            apt, periodos_elec_por_apt_mes)
-        if en_mora_elec:
-            filas_mora_elec.append({
-                "Apartamento": apt["codigo"],
-                "Inquilino": apt.get("inquilino_nombre") or "—",
-                "Meses adeudados": meses_elec,
-                "Días de atraso": dias_atraso_elec,
-                "Deuda": deuda_elec,
-            })
-
-    if filas_contrato or filas_mora:
-        st.subheader("⚠️ Alertas")
-        colA, colB = st.columns(2)
-        with colA:
-            st.markdown("**📄 Contratos vencidos o por vencer (30 días)**")
-            if filas_contrato:
-                filas_contrato.sort(key=lambda f: f["_orden"])
-                df_contrato = pd.DataFrame(filas_contrato).drop(columns=["_orden"])
-                st.dataframe(df_contrato, use_container_width=True, hide_index=True)
-            else:
-                st.success("Sin contratos vencidos ni por vencer en los próximos 30 días.")
-        with colB:
-            st.markdown("**💰 Alquileres en mora (suma de todos los meses impagos)**")
-            if filas_mora:
-                filas_mora.sort(key=lambda f: -f["Deuda"])
-                total_mora = sum(f["Deuda"] for f in filas_mora)
-                st.metric("Total en mora", fmt_money(total_mora))
-                df_mora = pd.DataFrame(filas_mora)
-                df_mora["Deuda"] = df_mora["Deuda"].apply(fmt_money)
-                st.dataframe(df_mora, use_container_width=True, hide_index=True)
-            else:
-                st.success("Sin alquileres atrasados por ahora.")
-        st.divider()
-
-    if filas_mora_elec:
-        st.markdown("**⚡ Electricidad en mora (suma de todos los meses impagos)**")
-        st.caption("Solo cuenta meses con lectura de medidor ya registrada; un mes sin lectura "
-                   "tomada no se puede calcular y no se incluye aquí.")
-        filas_mora_elec.sort(key=lambda f: -f["Deuda"])
-        total_mora_elec = sum(f["Deuda"] for f in filas_mora_elec)
-        st.metric("Total en mora (electricidad)", fmt_money(total_mora_elec))
-        df_mora_elec = pd.DataFrame(filas_mora_elec)
-        df_mora_elec["Deuda"] = df_mora_elec["Deuda"].apply(fmt_money)
-        st.dataframe(df_mora_elec, use_container_width=True, hide_index=True)
+    if filas_contrato:
+        st.subheader("📄 Contratos vencidos o por vencer (30 días)")
+        filas_contrato.sort(key=lambda f: f["_orden"])
+        st.dataframe(pd.DataFrame(filas_contrato).drop(columns=["_orden"]),
+                     use_container_width=True, hide_index=True)
         st.divider()
 
     col1, col2 = st.columns(2)
     with col1:
-        anio_sel = st.selectbox("Año", options=list(range(hoy_bolivia().year - 2, hoy_bolivia().year + 2)),
+        anio_sel = st.selectbox("Año", options=list(range(date.today().year - 2, date.today().year + 2)),
                                  index=2)
     with col2:
-        mes_sel = st.selectbox("Mes", options=MESES, index=hoy_bolivia().month - 1)
+        mes_sel = st.selectbox("Mes", options=MESES, index=date.today().month - 1)
 
     periodos = cargar_periodos(anio=anio_sel, mes=mes_sel)
 
@@ -738,10 +508,10 @@ if pagina == "📊 Dashboard":
     st.subheader("🔝 Mayor consumo (Top 5)")
     colsel1, colsel2 = st.columns(2)
     with colsel1:
-        anio_consumo = st.selectbox("Año ", options=list(range(hoy_bolivia().year - 2, hoy_bolivia().year + 2)),
+        anio_consumo = st.selectbox("Año ", options=list(range(date.today().year - 2, date.today().year + 2)),
                                      index=2, key="anio_consumo")
     with colsel2:
-        mes_consumo = st.selectbox("Mes ", options=MESES, index=hoy_bolivia().month - 1, key="mes_consumo")
+        mes_consumo = st.selectbox("Mes ", options=MESES, index=date.today().month - 1, key="mes_consumo")
 
     periodos_elec_sel = cargar_periodos_electricidad(anio=anio_consumo, mes=mes_consumo)
     periodos_agua_sel = cargar_periodos_agua(anio=anio_consumo, mes=mes_consumo)
@@ -755,7 +525,7 @@ if pagina == "📊 Dashboard":
             consumo = float(p["kwh_actual"]) - float(p["kwh_anterior"])
             filas_elec.append({
                 "Apartamento": apt_info.get("codigo"),
-                "Inquilino": nombre_inquilino_periodo(p, apt_info),
+                "Inquilino": apt_info.get("inquilino_nombre") or "—",
                 "Consumo (Kwh)": consumo,
             })
         if filas_elec:
@@ -834,8 +604,7 @@ elif pagina == "🏠 Apartamentos":
         st.stop()
     st.title("🏠 Gestión de Apartamentos")
 
-    tab_lista, tab_nuevo, tab_historial_inq, tab_importar = st.tabs(
-        ["📋 Lista y edición", "➕ Nuevo apartamento", "🕘 Historial de inquilinos", "📥 Importar CSV"])
+    tab_lista, tab_nuevo, tab_importar = st.tabs(["📋 Lista y edición", "➕ Nuevo apartamento", "📥 Importar CSV"])
 
     with tab_lista:
         apartamentos = cargar_apartamentos()
@@ -846,13 +615,6 @@ elif pagina == "🏠 Apartamentos":
             idx = st.selectbox("Selecciona un apartamento para ver o editar", range(len(apartamentos)),
                                 format_func=lambda i: codigos[i])
             apt = apartamentos[idx]
-
-            if apt.get("estado") == "Desocupado" and not apt.get("inquilino_nombre"):
-                st.info("🟢 Apartamento libre. Para ingresar un nuevo inquilino completa sus datos abajo, "
-                        "cambia el estado a **Ocupado** y guarda.")
-            else:
-                st.caption("ℹ️ Para cambiar de inquilino no sobrescribas estos datos: usa "
-                           "**🚪 Registrar salida del inquilino** (más abajo). Así se guarda su ficha y su deuda.")
 
             with st.form("editar_apartamento"):
                 col1, col2 = st.columns(2)
@@ -965,56 +727,6 @@ elif pagina == "🏠 Apartamentos":
                     except Exception as e:
                         st.error(f"Error al eliminar: {e}")
 
-            # ---------- Salida del inquilino ----------
-            if apt.get("inquilino_nombre") or apt.get("estado") == "Ocupado":
-                with st.expander("🚪 Registrar salida del inquilino"):
-                    st.write(
-                        f'Se archivará la ficha de **{apt.get("inquilino_nombre") or "este inquilino"}** '
-                        f'en el historial y el apartamento **{apt["codigo"]}** quedará **Desocupado** y libre '
-                        "para el nuevo inquilino. Sus pagos anteriores no se borran."
-                    )
-                    try:
-                        deuda_prev = db.deuda_activa_apartamento(apt["id"])
-                    except Exception:
-                        deuda_prev = None
-                    if deuda_prev is not None:
-                        total_prev = sum(deuda_prev.values())
-                        if total_prev > 0:
-                            st.warning(
-                                f'Deuda pendiente que quedará registrada a nombre de este inquilino: '
-                                f'**{fmt_money(total_prev)}** (Alquiler {fmt_money(deuda_prev["alquiler"])} · '
-                                f'Electricidad {fmt_money(deuda_prev["electricidad"])} · '
-                                f'Agua {fmt_money(deuda_prev["agua"])}). No pasará al nuevo inquilino.'
-                            )
-                        else:
-                            st.success("Este inquilino no tiene deudas pendientes.")
-
-                    with st.form(f'form_salida_{apt["id"]}'):
-                        fecha_salida = st.date_input("Fecha de salida", value=hoy_bolivia(), format="DD/MM/YYYY",
-                                                      key=f'salida_fecha_{apt["id"]}')
-                        obs_salida = st.text_area(
-                            "Observación de salida (opcional)",
-                            placeholder="Ej. Garantía devuelta, estado en que dejó el apartamento, acuerdos de pago…",
-                            key=f'salida_obs_{apt["id"]}')
-                        confirmar_salida = st.checkbox(
-                            "Confirmo que el inquilino salió y quiero archivar su ficha",
-                            key=f'salida_confirma_{apt["id"]}')
-                        registrar = st.form_submit_button("🚪 Registrar salida")
-
-                        if registrar:
-                            if not confirmar_salida:
-                                st.error("Marca la casilla de confirmación para continuar.")
-                            else:
-                                try:
-                                    db.registrar_salida_inquilino(
-                                        apt["id"], fecha_salida, obs_salida,
-                                        usuario_actual.get("nombre") or usuario_actual.get("username"))
-                                    limpiar_cache()
-                                    st.success("Salida registrada. La ficha quedó en el historial de inquilinos.")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Error al registrar la salida: {e}")
-
     with tab_nuevo:
         with st.form("nuevo_apartamento", clear_on_submit=True):
             col1, col2 = st.columns(2)
@@ -1081,65 +793,6 @@ elif pagina == "🏠 Apartamentos":
                     except Exception as e:
                         st.error(f"Error al crear (¿código repetido?): {e}")
 
-    with tab_historial_inq:
-        apartamentos_h = cargar_apartamentos()
-        opciones_h = ["Todos los apartamentos"] + [a["codigo"] for a in apartamentos_h]
-        sel_h = st.selectbox("Apartamento", opciones_h, key="hist_inq_apto")
-        apt_id_h = None if sel_h == opciones_h[0] else apartamentos_h[opciones_h.index(sel_h) - 1]["id"]
-        codigo_por_id = {a["id"]: a["codigo"] for a in apartamentos_h}
-
-        try:
-            historial_inq = db.listar_inquilinos_historial(apt_id_h)
-            deudas_actuales = db.deuda_actual_por_inquilino_historial()
-        except Exception as e:
-            historial_inq, deudas_actuales = [], {}
-            st.error(f"No se pudo cargar el historial (¿ejecutaste migracion_historial_inquilinos.sql?): {e}")
-
-        if not historial_inq:
-            st.info("Todavía no hay inquilinos en el historial. Aparecerán aquí cuando registres su salida.")
-        else:
-            for h in historial_inq:
-                d_act = deudas_actuales.get(h["id"], {"alquiler": 0.0, "electricidad": 0.0, "agua": 0.0})
-                deuda_actual_total = sum(d_act.values())
-                marca = "⚠️" if deuda_actual_total > 0 else "✅"
-                titulo_h = (f'{marca} {codigo_por_id.get(h["apartamento_id"], "—")} — '
-                            f'{h.get("inquilino_nombre") or "Sin nombre"} '
-                            f'({h.get("fecha_ingreso") or "?"} → {h["fecha_salida"]})')
-                with st.expander(titulo_h):
-                    colh1, colh2 = st.columns(2)
-                    with colh1:
-                        st.markdown(f'**Cédula:** {h.get("cedula_identidad") or "—"}')
-                        st.markdown(f'**Celular:** {h.get("celular") or "—"}')
-                        st.markdown(f'**Nacionalidad:** {h.get("nacionalidad") or "—"}')
-                        st.markdown(f'**Referencia:** {h.get("referencia_nombre") or "—"} '
-                                    f'({h.get("referencia_celular") or "sin celular"})')
-                    with colh2:
-                        st.markdown(f'**Alquiler mensual:** {fmt_money(h.get("monto_alquiler") or 0)}')
-                        st.markdown(f'**Garantía:** {h.get("garantia") or "—"}')
-                        st.markdown(f'**Contrato:** {h.get("tipo_contrato") or "—"} · '
-                                    f'{h.get("estado_contrato") or "—"}')
-                        st.markdown(f'**Vigencia:** {h.get("contrato_fecha_inicio") or "—"} → '
-                                    f'{h.get("contrato_fecha_fin") or "—"}')
-                    if h.get("contrato_observaciones"):
-                        st.caption(f'Observaciones del contrato: {h["contrato_observaciones"]}')
-                    if h.get("observacion_salida"):
-                        st.markdown(f'📝 **Observación de salida:** {h["observacion_salida"]}')
-
-                    st.divider()
-                    deuda_salida_total = (float(h.get("deuda_alquiler") or 0) + float(h.get("deuda_electricidad") or 0)
-                                          + float(h.get("deuda_agua") or 0))
-                    cm1, cm2 = st.columns(2)
-                    cm1.metric("Deuda al salir", fmt_money(deuda_salida_total))
-                    cm2.metric("Deuda pendiente hoy", fmt_money(deuda_actual_total))
-                    st.caption(
-                        f'Al salir: Alquiler {fmt_money(h.get("deuda_alquiler") or 0)} · '
-                        f'Electricidad {fmt_money(h.get("deuda_electricidad") or 0)} · '
-                        f'Agua {fmt_money(h.get("deuda_agua") or 0)}  |  '
-                        f'Hoy: Alquiler {fmt_money(d_act["alquiler"])} · '
-                        f'Electricidad {fmt_money(d_act["electricidad"])} · Agua {fmt_money(d_act["agua"])}')
-                    if h.get("registrado_por"):
-                        st.caption(f'Salida registrada por {h["registrado_por"]}')
-
     with tab_importar:
         st.write(
             "Sube un archivo CSV con columnas: `codigo, piso, estado, inquilino_nombre, celular, "
@@ -1190,9 +843,9 @@ elif pagina == "💵 Pagos de Alquiler":
 
         col1, col2 = st.columns(2)
         with col1:
-            mes = st.selectbox("Mes", MESES, index=hoy_bolivia().month - 1)
+            mes = st.selectbox("Mes", MESES, index=date.today().month - 1)
         with col2:
-            anio = st.number_input("Año", min_value=2000, max_value=2100, value=hoy_bolivia().year, step=1)
+            anio = st.number_input("Año", min_value=2000, max_value=2100, value=date.today().year, step=1)
 
         # obtiene (o prepara) el periodo de este apartamento/mes/año, con sus abonos ya hechos
         periodo = db.obtener_periodo(apt["id"], mes, int(anio))
@@ -1217,8 +870,7 @@ elif pagina == "💵 Pagos de Alquiler":
                             if periodo:
                                 db.actualizar_periodo(periodo["id"], {"monto_esperado": nuevo_monto_esperado})
                             else:
-                                db.obtener_o_crear_periodo(apt["id"], mes, int(anio), nuevo_monto_esperado,
-                                                           inquilino_nombre=apt.get("inquilino_nombre"))
+                                db.obtener_o_crear_periodo(apt["id"], mes, int(anio), nuevo_monto_esperado)
                             limpiar_cache()
                             st.success("Monto esperado actualizado.")
                             st.rerun()
@@ -1229,7 +881,7 @@ elif pagina == "💵 Pagos de Alquiler":
         st.subheader("➕ Registrar un nuevo abono")
         with st.form("form_pago", clear_on_submit=True):
             monto_pago = st.number_input("Monto abonado (Bs)", min_value=0.0, step=50.0)
-            fecha_pago = st.date_input("Fecha del abono", value=hoy_bolivia(), format="DD/MM/YYYY")
+            fecha_pago = st.date_input("Fecha del abono", value=date.today(), format="DD/MM/YYYY")
             metodo_pago = st.selectbox("Método de pago", ["Efectivo", "Transferencia", "QR", "Otro"])
             observacion = st.text_input("Observación (opcional)")
 
@@ -1239,15 +891,13 @@ elif pagina == "💵 Pagos de Alquiler":
                     st.error("El monto abonado debe ser mayor a 0.")
                 else:
                     try:
-                        periodo_actual = db.obtener_o_crear_periodo(apt["id"], mes, int(anio), monto_esperado_actual,
-                                                            inquilino_nombre=apt.get("inquilino_nombre"))
+                        periodo_actual = db.obtener_o_crear_periodo(apt["id"], mes, int(anio), monto_esperado_actual)
                         db.crear_pago({
                             "periodo_id": periodo_actual["id"],
                             "fecha": str(fecha_pago),
                             "monto": monto_pago,
                             "metodo_pago": metodo_pago,
                             "observacion": observacion or None,
-                            "registrado_por": usuario_actual.get("nombre") or usuario_actual.get("username"),
                         })
                         limpiar_cache()
                         st.success("Abono registrado.")
@@ -1319,7 +969,7 @@ elif pagina == "💵 Pagos de Alquiler":
             )
         with col2:
             filtro_anio = st.selectbox("Filtrar por año",
-                                        ["Todos"] + list(range(hoy_bolivia().year - 2, hoy_bolivia().year + 2)))
+                                        ["Todos"] + list(range(date.today().year - 2, date.today().year + 2)))
         with col3:
             filtro_mes = st.selectbox("Filtrar por mes", ["Todos"] + MESES)
 
@@ -1344,7 +994,7 @@ elif pagina == "💵 Pagos de Alquiler":
                 n_abonos = len(p.get("pagos") or [])
                 filas.append({
                     "Apartamento": apt_info.get("codigo"),
-                    "Inquilino": nombre_inquilino_periodo(p, apt_info),
+                    "Inquilino": apt_info.get("inquilino_nombre"),
                     "Mes": p["mes"],
                     "Año": p["anio"],
                     "Esperado": p["monto_esperado"],
@@ -1464,9 +1114,9 @@ elif pagina == "⚡ Electricidad":
 
         col1, col2 = st.columns(2)
         with col1:
-            mes = st.selectbox("Mes", MESES, index=hoy_bolivia().month - 1, key="elec_mes")
+            mes = st.selectbox("Mes", MESES, index=date.today().month - 1, key="elec_mes")
         with col2:
-            anio = st.number_input("Año", min_value=2000, max_value=2100, value=hoy_bolivia().year, step=1,
+            anio = st.number_input("Año", min_value=2000, max_value=2100, value=date.today().year, step=1,
                                     key="elec_anio")
 
         periodo = db.obtener_periodo_electricidad(apt["id"], mes, int(anio))
@@ -1493,7 +1143,7 @@ elif pagina == "⚡ Electricidad":
                                               value=tarifa_default)
 
             consumo = max(kwh_actual - kwh_anterior, 0)
-            monto_calculado = redondear_entero(consumo * tarifa_kwh)
+            monto_calculado = consumo * tarifa_kwh
             st.caption(f"Consumo: {consumo:g} Kwh  ×  Bs {tarifa_kwh:.4f}  =  **{fmt_money(monto_calculado)}**")
 
             guardar_lectura = st.form_submit_button("💾 Guardar lectura")
@@ -1508,8 +1158,7 @@ elif pagina == "⚡ Electricidad":
                     if periodo:
                         db.actualizar_periodo_electricidad(periodo["id"], payload)
                     else:
-                        payload.update({"apartamento_id": apt["id"], "mes": mes, "anio": int(anio),
-                                        "inquilino_nombre": apt.get("inquilino_nombre")})
+                        payload.update({"apartamento_id": apt["id"], "mes": mes, "anio": int(anio)})
                         db.crear_periodo_electricidad(payload)
                     limpiar_cache()
                     st.success("Lectura guardada.")
@@ -1530,7 +1179,7 @@ elif pagina == "⚡ Electricidad":
             st.subheader("➕ Registrar un nuevo abono")
             with st.form("form_pago_elec", clear_on_submit=True):
                 monto_pago = st.number_input("Monto abonado (Bs)", min_value=0.0, step=10.0)
-                fecha_pago = st.date_input("Fecha del abono", value=hoy_bolivia(), format="DD/MM/YYYY")
+                fecha_pago = st.date_input("Fecha del abono", value=date.today(), format="DD/MM/YYYY")
                 metodo_pago = st.selectbox("Método de pago", ["Efectivo", "Transferencia", "QR", "Otro"],
                                             key="metodo_elec")
                 observacion = st.text_input("Observación (opcional)", key="obs_elec")
@@ -1547,7 +1196,6 @@ elif pagina == "⚡ Electricidad":
                                 "monto": monto_pago,
                                 "metodo_pago": metodo_pago,
                                 "observacion": observacion or None,
-                                "registrado_por": usuario_actual.get("nombre") or usuario_actual.get("username"),
                             })
                             limpiar_cache()
                             st.success("Abono registrado.")
@@ -1619,7 +1267,7 @@ elif pagina == "⚡ Electricidad":
             )
         with col2:
             filtro_anio = st.selectbox("Filtrar por año",
-                                        ["Todos"] + list(range(hoy_bolivia().year - 2, hoy_bolivia().year + 2)),
+                                        ["Todos"] + list(range(date.today().year - 2, date.today().year + 2)),
                                         key="elec_hist_anio")
         with col3:
             filtro_mes = st.selectbox("Filtrar por mes", ["Todos"] + MESES, key="elec_hist_mes")
@@ -1756,9 +1404,9 @@ elif pagina == "💧 Agua":
 
         col1, col2 = st.columns(2)
         with col1:
-            mes = st.selectbox("Mes", MESES, index=hoy_bolivia().month - 1, key="agua_mes")
+            mes = st.selectbox("Mes", MESES, index=date.today().month - 1, key="agua_mes")
         with col2:
-            anio = st.number_input("Año", min_value=2000, max_value=2100, value=hoy_bolivia().year, step=1,
+            anio = st.number_input("Año", min_value=2000, max_value=2100, value=date.today().year, step=1,
                                     key="agua_anio")
 
         periodo = db.obtener_periodo_agua(apt["id"], mes, int(anio))
@@ -1787,7 +1435,7 @@ elif pagina == "💧 Agua":
                                                value=tarifa_default)
 
             consumo = max(lectura_actual - lectura_anterior, 0)
-            monto_calculado = redondear_entero(consumo * tarifa_agua)
+            monto_calculado = consumo * tarifa_agua
             st.caption(f"Consumo: {consumo:g} m³  ×  Bs {tarifa_agua:.4f}  =  **{fmt_money(monto_calculado)}**")
 
             guardar_lectura = st.form_submit_button("💾 Guardar lectura")
@@ -1823,7 +1471,7 @@ elif pagina == "💧 Agua":
             st.subheader("➕ Registrar un nuevo abono")
             with st.form("form_pago_agua", clear_on_submit=True):
                 monto_pago = st.number_input("Monto abonado (Bs)", min_value=0.0, step=10.0)
-                fecha_pago = st.date_input("Fecha del abono", value=hoy_bolivia(), format="DD/MM/YYYY")
+                fecha_pago = st.date_input("Fecha del abono", value=date.today(), format="DD/MM/YYYY")
                 metodo_pago = st.selectbox("Método de pago", ["Efectivo", "Transferencia", "QR", "Otro"],
                                             key="metodo_agua")
                 observacion = st.text_input("Observación (opcional)", key="obs_agua")
@@ -1840,7 +1488,6 @@ elif pagina == "💧 Agua":
                                 "monto": monto_pago,
                                 "metodo_pago": metodo_pago,
                                 "observacion": observacion or None,
-                                "registrado_por": usuario_actual.get("nombre") or usuario_actual.get("username"),
                             })
                             limpiar_cache()
                             st.success("Abono registrado.")
@@ -1912,7 +1559,7 @@ elif pagina == "💧 Agua":
             )
         with col2:
             filtro_anio = st.selectbox("Filtrar por año",
-                                        ["Todos"] + list(range(hoy_bolivia().year - 2, hoy_bolivia().year + 2)),
+                                        ["Todos"] + list(range(date.today().year - 2, date.today().year + 2)),
                                         key="agua_hist_anio")
         with col3:
             filtro_mes = st.selectbox("Filtrar por mes", ["Todos"] + MESES, key="agua_hist_mes")
@@ -2021,6 +1668,112 @@ elif pagina == "💧 Agua":
 # ==================================================================
 # PÁGINA: PENDIENTES (tareas de colaboradores)
 # ==================================================================
+elif pagina == "📑 Reportes":
+    st.title("📑 Reportes")
+    st.subheader("Estado de cuenta por apartamento")
+    st.caption(
+        "Reporte para entregar al inquilino con sus pagos realizados y su deuda real de alquiler y "
+        "electricidad, calculada a la fecha de hoy. Aplica a apartamentos ocupados con contrato de alquiler."
+    )
+
+    hoy_rep = recibo.hoy_bolivia()
+    nombre_emisor = usuario_actual.get("nombre") or usuario_actual.get("username")
+    apartamentos = cargar_apartamentos()
+    alq_por_apt, elec_por_apt = {}, {}
+    for p in cargar_periodos_abiertos("alquiler"):
+        alq_por_apt.setdefault(p["apartamento_id"], []).append(p)
+    for p in cargar_periodos_abiertos("electricidad"):
+        elec_por_apt.setdefault(p["apartamento_id"], []).append(p)
+
+    reportes, no_aplican = [], []
+    for apt in apartamentos:
+        d = moras.deuda_real_inquilino(apt, alq_por_apt.get(apt["id"], []), elec_por_apt.get(apt["id"], []), hoy_rep)
+        if d["aplica"]:
+            reportes.append((apt, d))
+        else:
+            no_aplican.append((apt, d["motivo"]))
+
+    if not reportes:
+        st.info("No hay apartamentos ocupados con contrato de alquiler.")
+    else:
+        # ---------- Resumen de todos los apartamentos ----------
+        total_alq = sum(d["alquiler"]["deuda"] for _a, d in reportes)
+        total_elec = sum(d["electricidad"]["deuda"] for _a, d in reportes)
+        r1, r2, r3 = st.columns(3)
+        r1.metric("💵 Deuda de alquiler", fmt_money(total_alq))
+        r2.metric("⚡ Deuda de electricidad", fmt_money(total_elec))
+        r3.metric("Deuda total", fmt_money(total_alq + total_elec))
+
+        filas_resumen = []
+        for apt, d in reportes:
+            up = d["alquiler"]["ultimo_pago"]
+            filas_resumen.append({
+                "Departamento": apt.get("codigo") or "—",
+                "Inquilino": apt.get("inquilino_nombre") or "—",
+                "Meses atrasados": d["alquiler"]["meses_atrasados"],
+                "Deuda alquiler": d["alquiler"]["deuda"],
+                "Deuda electricidad": d["electricidad"]["deuda"],
+                "Deuda total": d["deuda_total"],
+                "Último pago de alquiler": up["fecha"].strftime("%d/%m/%Y") if up else "Sin pagos",
+            })
+        filas_resumen.sort(key=lambda f: (-f["Deuda total"], f["Departamento"]))
+        with st.container(border=True):
+            st.markdown("**Resumen de deuda real por apartamento**")
+            st.dataframe(
+                pd.DataFrame(filas_resumen), use_container_width=True, hide_index=True,
+                column_config={
+                    "Meses atrasados": st.column_config.NumberColumn(format="%d"),
+                    "Deuda alquiler": st.column_config.NumberColumn(format="Bs %.2f"),
+                    "Deuda electricidad": st.column_config.NumberColumn(format="Bs %.2f"),
+                    "Deuda total": st.column_config.NumberColumn(format="Bs %.2f"),
+                },
+            )
+
+        # ---------- Reporte individual (vista previa + descargas) ----------
+        st.divider()
+        st.markdown("### Reporte para entregar al inquilino")
+        etiquetas = [f'{a.get("codigo")} — {a.get("inquilino_nombre") or "sin nombre"}' for a, _d in reportes]
+        indice = st.selectbox("Apartamento", range(len(reportes)), format_func=lambda i: etiquetas[i],
+                              key="rep_apartamento")
+        apt_sel, deuda_sel = reportes[indice]
+        datos_rep = recibo.construir_datos_reporte_inquilino(apt_sel, deuda_sel, emitido_por=nombre_emisor)
+        pdf_rep = _reporte_pdf_cache(datos_rep)
+        png_rep = _reporte_png_cache(datos_rep)
+
+        b1, b2 = st.columns(2)
+        with b1:
+            st.download_button("📄 Descargar reporte (PDF)", data=pdf_rep,
+                               file_name=_nombre_archivo_reporte(apt_sel, hoy_rep, "pdf"),
+                               mime="application/pdf", key="rep_pdf", use_container_width=True)
+        with b2:
+            st.download_button("🖼️ Descargar reporte (PNG)", data=png_rep,
+                               file_name=_nombre_archivo_reporte(apt_sel, hoy_rep, "png"),
+                               mime="image/png", key="rep_png", use_container_width=True)
+        st.image(png_rep, width=640)
+
+        # ---------- Todos los apartamentos en un solo ZIP ----------
+        st.divider()
+        st.markdown("### Descargar todos los reportes")
+        st.caption("Genera un ZIP con el PDF de cada apartamento ocupado en alquiler, listo para imprimir o enviar.")
+        if st.button("📦 Preparar ZIP con todos los PDF"):
+            with st.spinner("Generando reportes..."):
+                memoria = io.BytesIO()
+                with zipfile.ZipFile(memoria, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for apt, d in reportes:
+                        datos_i = recibo.construir_datos_reporte_inquilino(apt, d, emitido_por=nombre_emisor)
+                        zf.writestr(_nombre_archivo_reporte(apt, hoy_rep, "pdf"), _reporte_pdf_cache(datos_i))
+                st.session_state["rep_zip"] = (hoy_rep, memoria.getvalue(), len(reportes))
+        zip_guardado = st.session_state.get("rep_zip")
+        if zip_guardado and zip_guardado[0] == hoy_rep:
+            st.download_button(f"⬇️ Descargar ZIP ({zip_guardado[2]} reportes)", data=zip_guardado[1],
+                               file_name=f"estados_de_cuenta_{hoy_rep:%Y-%m-%d}.zip",
+                               mime="application/zip", key="rep_zip_dl")
+
+    if no_aplican:
+        with st.expander(f"Apartamentos sin reporte ({len(no_aplican)})"):
+            for apt, motivo in no_aplican:
+                st.write(f'**{apt.get("codigo")}**: {motivo}')
+
 elif pagina == "✅ Pendientes":
     st.title("✅ Pendientes")
     st.caption("Tareas y actividades del edificio: cualquier colaborador puede crearlas, "
@@ -2097,44 +1850,28 @@ elif pagina == "✅ Pendientes":
 
     # ---------------- Tablero / listado ----------------
     with tab_tablero:
-        busqueda = st.text_input(
-            "🔎 Buscar", key="pend_busqueda",
-            placeholder="Busca por título, descripción, qué falta u observación...")
-
         colf1, colf2, colf3 = st.columns(3)
         with colf1:
-            filtro_estados = st.multiselect("Estado", ESTADOS_PENDIENTE, key="pend_filtro_estado")
+            filtro_estado = st.selectbox("Estado", ["Todos"] + ESTADOS_PENDIENTE, key="pend_filtro_estado")
         with colf2:
-            filtro_prioridades = st.multiselect("Prioridad", PRIORIDADES_PENDIENTE, key="pend_filtro_prioridad")
+            filtro_prioridad = st.selectbox("Prioridad", ["Todas"] + PRIORIDADES_PENDIENTE, key="pend_filtro_prioridad")
         with colf3:
-            opciones_filtro_asig = [nombre_de(u) for u in usuarios_activos]
-            filtro_asignados_sel = st.multiselect("Asignado a", opciones_filtro_asig, key="pend_filtro_asignado")
+            opciones_filtro_asig = ["Todos"] + [nombre_de(u) for u in usuarios_activos]
+            filtro_asignado = st.selectbox("Asignado a", opciones_filtro_asig, key="pend_filtro_asignado")
 
-        ids_asignados_filtro = {
-            usuarios_activos[opciones_filtro_asig.index(nombre)]["id"] for nombre in filtro_asignados_sel
-        }
+        asignado_a_filtro_id = None
+        if filtro_asignado != "Todos":
+            idx_f = opciones_filtro_asig.index(filtro_asignado) - 1
+            asignado_a_filtro_id = usuarios_activos[idx_f]["id"]
 
-        # Se trae todo y el filtrado (múltiple + texto libre) se hace aquí: permite marcar
-        # varias opciones a la vez y buscar en varios campos sin ir y volver a la base de datos.
-        pendientes = cargar_pendientes()
-
-        if filtro_estados:
-            pendientes = [p for p in pendientes if p["estado"] in filtro_estados]
-        if filtro_prioridades:
-            pendientes = [p for p in pendientes if p["prioridad"] in filtro_prioridades]
-        if ids_asignados_filtro:
-            pendientes = [p for p in pendientes if p.get("asignado_a") in ids_asignados_filtro]
-        if busqueda.strip():
-            termino = busqueda.strip().lower()
-
-            def _coincide_busqueda(p):
-                campos = [p.get("titulo"), p.get("descripcion"), p.get("que_falta"), p.get("observacion")]
-                return any(termino in (c or "").lower() for c in campos)
-
-            pendientes = [p for p in pendientes if _coincide_busqueda(p)]
+        pendientes = cargar_pendientes(
+            estado=None if filtro_estado == "Todos" else filtro_estado,
+            prioridad=None if filtro_prioridad == "Todas" else filtro_prioridad,
+            asignado_a=asignado_a_filtro_id,
+        )
 
         if not pendientes:
-            st.info("No hay pendientes que coincidan con la búsqueda/filtro.")
+            st.info("No hay pendientes que coincidan con el filtro.")
         else:
             orden_prioridad = {"Urgente": 0, "Alta": 1, "Media": 2, "Baja": 3}
             pendientes = sorted(pendientes, key=lambda p: orden_prioridad.get(p["prioridad"], 9))
@@ -2155,7 +1892,7 @@ elif pagina == "✅ Pendientes":
                 vencida = False
                 if p.get("fecha_limite") and p["estado"] != "Terminado":
                     fl = parse_fecha(p["fecha_limite"])
-                    vencida = bool(fl and fl < hoy_bolivia())
+                    vencida = bool(fl and fl < date.today())
 
                 titulo_linea = (f'{COLOR_PRIORIDAD.get(p["prioridad"], "")} **{p["titulo"]}**  '
                                  f'{ICONO_ESTADO.get(p["estado"], "")} _{p["estado"]}_'
@@ -2246,109 +1983,6 @@ elif pagina == "✅ Pendientes":
 
 
 # ==================================================================
-# PÁGINA: SERVICIOS BÁSICOS
-# ==================================================================
-elif pagina == "🔌 Servicios Básicos":
-    st.title("🔌 Servicios Básicos")
-    st.caption("Datos de contacto de los proveedores de servicios básicos del edificio "
-               "(electricidad, agua, internet, gas, etc.)")
-
-    tab_serv_nuevo, tab_serv_lista = st.tabs(["➕ Nuevo servicio", "📋 Lista"])
-
-    with tab_serv_nuevo:
-        with st.form("form_nuevo_servicio_basico", clear_on_submit=True):
-            nombre_servicio = st.text_input("Nombre del Servicio",
-                                             placeholder='Ej. "Electricidad", "Agua", "Internet"')
-            empresa_proveedor = st.text_input("Empresa proveedora")
-            col1, col2 = st.columns(2)
-            with col1:
-                telefono_serv = st.text_input("Teléfono")
-            with col2:
-                codigo_serv = st.text_input("Código (cliente / cuenta / NIS)")
-            titular_serv = st.text_input("Titular")
-            observacion_serv = st.text_area("Observación")
-
-            guardar_serv = st.form_submit_button("💾 Guardar servicio")
-            if guardar_serv:
-                if not nombre_servicio.strip():
-                    st.error("El nombre del servicio es obligatorio.")
-                else:
-                    try:
-                        db.crear_servicio_basico({
-                            "nombre_servicio": nombre_servicio.strip(),
-                            "empresa_proveedor": empresa_proveedor or None,
-                            "telefono": telefono_serv or None,
-                            "codigo": codigo_serv or None,
-                            "titular": titular_serv or None,
-                            "observacion": observacion_serv or None,
-                            "creado_por": usuario_actual.get("id"),
-                        })
-                        limpiar_cache()
-                        st.success("Servicio registrado.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al guardar: {e}")
-
-    with tab_serv_lista:
-        servicios_basicos = cargar_servicios_basicos()
-        if not servicios_basicos:
-            st.info("Todavía no hay servicios básicos registrados.")
-        else:
-            for s in servicios_basicos:
-                titulo_s = f'🔌 {s["nombre_servicio"]}' + (f' — {s["empresa_proveedor"]}'
-                                                            if s.get("empresa_proveedor") else "")
-                with st.expander(titulo_s):
-                    with st.form(f'form_editar_servicio_{s["id"]}'):
-                        e_nombre = st.text_input("Nombre del Servicio", value=s["nombre_servicio"],
-                                                  key=f'serv_nombre_{s["id"]}')
-                        e_empresa = st.text_input("Empresa proveedora", value=s.get("empresa_proveedor") or "",
-                                                   key=f'serv_empresa_{s["id"]}')
-                        colr1, colr2 = st.columns(2)
-                        with colr1:
-                            e_telefono = st.text_input("Teléfono", value=s.get("telefono") or "",
-                                                        key=f'serv_telefono_{s["id"]}')
-                        with colr2:
-                            e_codigo = st.text_input("Código (cliente / cuenta / NIS)",
-                                                      value=s.get("codigo") or "", key=f'serv_codigo_{s["id"]}')
-                        e_titular = st.text_input("Titular", value=s.get("titular") or "",
-                                                   key=f'serv_titular_{s["id"]}')
-                        e_observacion = st.text_area("Observación", value=s.get("observacion") or "",
-                                                      key=f'serv_obs_{s["id"]}')
-
-                        colg, cold = st.columns(2)
-                        guardar_e = colg.form_submit_button("💾 Guardar cambios", use_container_width=True)
-                        eliminar_e = cold.form_submit_button("🗑️ Eliminar", use_container_width=True)
-
-                        if guardar_e:
-                            if not e_nombre.strip():
-                                st.error("El nombre del servicio es obligatorio.")
-                            else:
-                                try:
-                                    db.actualizar_servicio_basico(s["id"], {
-                                        "nombre_servicio": e_nombre.strip(),
-                                        "empresa_proveedor": e_empresa or None,
-                                        "telefono": e_telefono or None,
-                                        "codigo": e_codigo or None,
-                                        "titular": e_titular or None,
-                                        "observacion": e_observacion or None,
-                                    })
-                                    limpiar_cache()
-                                    st.success("Servicio actualizado.")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Error al actualizar: {e}")
-
-                        if eliminar_e:
-                            try:
-                                db.eliminar_servicio_basico(s["id"])
-                                limpiar_cache()
-                                st.success("Servicio eliminado.")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Error al eliminar: {e}")
-
-
-# ==================================================================
 # PÁGINA: REUNIONES (área administrativa)
 # Solo el Administrador puede crear/editar; el resto solo visualiza.
 # ==================================================================
@@ -2410,7 +2044,7 @@ elif pagina == "🗒️ Reuniones":
 
         with tab_nueva:
             with st.form("form_nueva_reunion", clear_on_submit=True):
-                fecha_reunion = st.date_input("Fecha de la reunión", value=hoy_bolivia(), format="DD/MM/YYYY")
+                fecha_reunion = st.date_input("Fecha de la reunión", value=date.today(), format="DD/MM/YYYY")
                 puntos_tratados = st.text_area(
                     "Puntos tratados", height=120,
                     placeholder="Ej.\n- Estado de cobranza del mes\n- Mantenimiento del ascensor\n- Otros temas")
@@ -2518,128 +2152,6 @@ elif pagina == "🗒️ Reuniones":
 
 
 # ==================================================================
-# PÁGINA: REPORTES (solo Administrador)
-# ==================================================================
-elif pagina == "📑 Reportes":
-    if not es_admin:
-        st.error("Solo el Administrador puede ver los reportes.")
-    else:
-        st.title("📑 Reportes de actividad por usuario")
-        st.caption("Pagos realizados, compras, ventas, pagos de alquiler y pagos de electricidad, "
-                   "por rango de fechas.")
-        st.info("⚠️ Los pagos de alquiler y electricidad registrados **antes** de activar esta función "
-                "no tienen un usuario asociado, así que no aparecerán en estos reportes (sí siguen "
-                "contando normalmente en el resto del sistema). Compras, ventas y pagos generales si "
-                "ya tenían esa información y aparecen completos.")
-
-        usuarios_reporte = cargar_todos_los_usuarios()
-        nombres_usuarios = [u.get("nombre") or u.get("username") for u in usuarios_reporte]
-        nombres_usuarios_con_sin_asignar = nombres_usuarios + [SENTINEL_SIN_USUARIO]
-
-        if not nombres_usuarios:
-            st.warning("No hay usuarios registrados todavía.")
-        else:
-            tab_individual, tab_general = st.tabs(["👤 Por usuario", "📊 General (todos)"])
-
-            with tab_individual:
-                colu, colf1, colf2 = st.columns([2, 1, 1])
-                with colu:
-                    usuario_sel = st.selectbox("Usuario (cobrador)", nombres_usuarios_con_sin_asignar,
-                                                key="rep_usuario")
-                with colf1:
-                    desde_ind = st.date_input("Desde", value=hoy_bolivia().replace(day=1),
-                                               format="DD/MM/YYYY", key="rep_desde_ind")
-                with colf2:
-                    hasta_ind = st.date_input("Hasta", value=hoy_bolivia(), format="DD/MM/YYYY",
-                                               key="rep_hasta_ind")
-
-                if desde_ind > hasta_ind:
-                    st.error("La fecha 'Desde' no puede ser posterior a 'Hasta'.")
-                else:
-                    datos_todos = _obtener_datos_reporte_rango(desde_ind, hasta_ind)
-                    datos_usuario = _filtrar_datos_reporte_por_usuario(datos_todos, usuario_sel)
-                    reporte_ind = reportes.construir_reporte_usuario(usuario_sel, datos_usuario)
-
-                    st.metric(f"Total general — {usuario_sel}", fmt_money(reporte_ind["total_general"]))
-
-                    for clave, titulo, _color in reportes.CATEGORIAS:
-                        datos_cat = reporte_ind["categorias"][clave]
-                        with st.expander(f'{titulo} — Subtotal: {fmt_money(datos_cat["total"])} '
-                                         f'({len(datos_cat["filas"])})'):
-                            if datos_cat["filas"]:
-                                st.dataframe(pd.DataFrame(datos_cat["filas"]), use_container_width=True,
-                                             hide_index=True)
-                            else:
-                                st.caption("Sin registros en este periodo.")
-
-                    col_dl1, col_dl2 = st.columns(2)
-                    with col_dl1:
-                        st.download_button(
-                            "📊 Descargar Excel", key="rep_ind_xlsx", use_container_width=True,
-                            data=reportes.generar_excel_reporte([reporte_ind], desde_ind, hasta_ind),
-                            file_name=f'reporte_{usuario_sel}_{desde_ind}_{hasta_ind}.xlsx',
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        )
-                    with col_dl2:
-                        st.download_button(
-                            "📄 Descargar PDF", key="rep_ind_pdf", use_container_width=True,
-                            data=reportes.generar_pdf_reporte([reporte_ind], desde_ind, hasta_ind),
-                            file_name=f'reporte_{usuario_sel}_{desde_ind}_{hasta_ind}.pdf',
-                            mime="application/pdf",
-                        )
-
-            with tab_general:
-                colf1, colf2 = st.columns(2)
-                with colf1:
-                    desde_gen = st.date_input("Desde", value=hoy_bolivia().replace(day=1),
-                                               format="DD/MM/YYYY", key="rep_desde_gen")
-                with colf2:
-                    hasta_gen = st.date_input("Hasta", value=hoy_bolivia(), format="DD/MM/YYYY",
-                                               key="rep_hasta_gen")
-
-                if desde_gen > hasta_gen:
-                    st.error("La fecha 'Desde' no puede ser posterior a 'Hasta'.")
-                else:
-                    datos_todos_gen = _obtener_datos_reporte_rango(desde_gen, hasta_gen)
-                    reportes_todos = [
-                        reportes.construir_reporte_usuario(
-                            nombre, _filtrar_datos_reporte_por_usuario(datos_todos_gen, nombre))
-                        for nombre in nombres_usuarios_con_sin_asignar
-                    ]
-
-                    total_todos = sum(r["total_general"] for r in reportes_todos)
-                    st.metric("Total general (todos los usuarios)", fmt_money(total_todos))
-
-                    for r in reportes_todos:
-                        with st.expander(f'{r["usuario"]} — Total: {fmt_money(r["total_general"])}'):
-                            for clave, titulo, _color in reportes.CATEGORIAS:
-                                datos_cat = r["categorias"][clave]
-                                st.markdown(f'**{titulo}** — Subtotal: {fmt_money(datos_cat["total"])}')
-                                if datos_cat["filas"]:
-                                    st.dataframe(pd.DataFrame(datos_cat["filas"]), use_container_width=True,
-                                                 hide_index=True)
-                                else:
-                                    st.caption("Sin registros en este periodo.")
-                                st.markdown("")
-
-                    col_dl1, col_dl2 = st.columns(2)
-                    with col_dl1:
-                        st.download_button(
-                            "📊 Descargar Excel (todos)", key="rep_gen_xlsx", use_container_width=True,
-                            data=reportes.generar_excel_reporte(reportes_todos, desde_gen, hasta_gen),
-                            file_name=f'reporte_general_{desde_gen}_{hasta_gen}.xlsx',
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        )
-                    with col_dl2:
-                        st.download_button(
-                            "📄 Descargar PDF (todos)", key="rep_gen_pdf", use_container_width=True,
-                            data=reportes.generar_pdf_reporte(reportes_todos, desde_gen, hasta_gen),
-                            file_name=f'reporte_general_{desde_gen}_{hasta_gen}.pdf',
-                            mime="application/pdf",
-                        )
-
-
-# ==================================================================
 # PÁGINA: USUARIOS (solo Administrador)
 # ==================================================================
 elif pagina == "👥 Usuarios":
@@ -2741,15 +2253,16 @@ elif pagina == "🧾 Compras":
         with st.form("form_nueva_compra", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                fecha_compra = st.date_input("Fecha de compra", value=hoy_bolivia(), format="DD/MM/YYYY")
+                fecha_compra = st.date_input("Fecha de compra", value=date.today(), format="DD/MM/YYYY")
                 categoria_sel = st.selectbox("Categoría / Rubro", CATEGORIAS_GASTO)
-                categoria_otro = st.text_input("Especificar categoría") if categoria_sel == "Otros" else ""
+                categoria_otro = st.text_input("Especificar categoría") if categoria_sel == "Otro" else ""
                 monto_total = st.number_input("Monto total (Bs)", min_value=0.0, step=10.0)
                 metodo_pago_sel = st.selectbox("Método de pago", METODOS_PAGO_MOVIMIENTOS)
                 metodo_pago_otro = st.text_input("Especificar método de pago") if metodo_pago_sel == "Otro" else ""
             with col2:
                 proveedor = st.text_input("Proveedor (tienda o técnico)")
                 numero_comprobante = st.text_input("Número de comprobante (factura/recibo)")
+                archivo = st.file_uploader("Adjuntar comprobante (foto o PDF)", type=["pdf", "png", "jpg", "jpeg"])
             descripcion = st.text_area("Descripción detallada",
                                         placeholder='Ej. "Compra de 4 focos LED para el pasillo del piso 3"')
 
@@ -2761,14 +2274,21 @@ elif pagina == "🧾 Compras":
                     st.error("El monto total debe ser mayor a 0.")
                 else:
                     try:
+                        archivo_url = None
+                        archivo_nombre = None
+                        if archivo is not None:
+                            archivo_url = db.subir_comprobante(archivo.getvalue(), archivo.name, carpeta="compras")
+                            archivo_nombre = archivo.name
                         db.crear_compra({
                             "fecha_compra": str(fecha_compra),
-                            "categoria": categoria_otro if categoria_sel == "Otros" and categoria_otro else categoria_sel,
+                            "categoria": categoria_otro if categoria_sel == "Otro" and categoria_otro else categoria_sel,
                             "descripcion": descripcion or None,
                             "monto_total": monto_total,
                             "metodo_pago": metodo_pago_otro if metodo_pago_sel == "Otro" and metodo_pago_otro else metodo_pago_sel,
                             "proveedor": proveedor or None,
                             "numero_comprobante": numero_comprobante or None,
+                            "archivo_url": archivo_url,
+                            "archivo_nombre": archivo_nombre,
                             "encargado": nombre_encargado,
                         })
                         st.success("Compra registrada.")
@@ -2779,10 +2299,10 @@ elif pagina == "🧾 Compras":
     with tab_historial:
         col1, col2, col3 = st.columns(3)
         with col1:
-            filtro_desde = st.date_input("Desde", value=hoy_bolivia().replace(day=1), format="DD/MM/YYYY",
+            filtro_desde = st.date_input("Desde", value=date.today().replace(day=1), format="DD/MM/YYYY",
                                           key="compras_desde")
         with col2:
-            filtro_hasta = st.date_input("Hasta", value=hoy_bolivia(), format="DD/MM/YYYY", key="compras_hasta")
+            filtro_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY", key="compras_hasta")
         with col3:
             filtro_categoria = st.selectbox("Categoría", ["Todas"] + CATEGORIAS_GASTO, key="compras_cat")
 
@@ -2869,7 +2389,7 @@ elif pagina == "💳 Pagos":
         with st.form("form_nuevo_pago_general", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                fecha_pago = st.date_input("Fecha de pago", value=hoy_bolivia(), format="DD/MM/YYYY")
+                fecha_pago = st.date_input("Fecha de pago", value=date.today(), format="DD/MM/YYYY")
                 categoria_sel = st.selectbox("Categoría / Concepto", CATEGORIAS_PAGO)
                 categoria_otro = st.text_input("Especificar categoría") if categoria_sel == "Otro" else ""
                 monto = st.number_input("Monto pagado (Bs)", min_value=0.0, step=10.0)
@@ -2905,10 +2425,10 @@ elif pagina == "💳 Pagos":
     with tab_historial:
         col1, col2, col3 = st.columns(3)
         with col1:
-            filtro_desde = st.date_input("Desde", value=hoy_bolivia().replace(day=1), format="DD/MM/YYYY",
+            filtro_desde = st.date_input("Desde", value=date.today().replace(day=1), format="DD/MM/YYYY",
                                           key="pagos_gen_desde")
         with col2:
-            filtro_hasta = st.date_input("Hasta", value=hoy_bolivia(), format="DD/MM/YYYY", key="pagos_gen_hasta")
+            filtro_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY", key="pagos_gen_hasta")
         with col3:
             filtro_categoria = st.selectbox("Categoría", ["Todas"] + CATEGORIAS_PAGO, key="pagos_gen_cat")
 
@@ -2989,7 +2509,7 @@ elif pagina == "💸 Ventas":
         with st.form("form_nueva_venta", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                fecha_venta = st.date_input("Fecha de venta", value=hoy_bolivia(), format="DD/MM/YYYY")
+                fecha_venta = st.date_input("Fecha de venta", value=date.today(), format="DD/MM/YYYY")
                 concepto_sel = st.selectbox("Concepto de ingreso", CONCEPTOS_VENTA)
                 concepto_otro = st.text_input("Especificar concepto") if concepto_sel == "Otro" else ""
                 monto = st.number_input("Monto recibido (Bs)", min_value=0.0, step=10.0)
@@ -3027,10 +2547,10 @@ elif pagina == "💸 Ventas":
     with tab_historial:
         col1, col2, col3 = st.columns(3)
         with col1:
-            filtro_desde = st.date_input("Desde", value=hoy_bolivia().replace(day=1), format="DD/MM/YYYY",
+            filtro_desde = st.date_input("Desde", value=date.today().replace(day=1), format="DD/MM/YYYY",
                                           key="ventas_desde")
         with col2:
-            filtro_hasta = st.date_input("Hasta", value=hoy_bolivia(), format="DD/MM/YYYY", key="ventas_hasta")
+            filtro_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY", key="ventas_hasta")
         with col3:
             filtro_concepto = st.selectbox("Concepto", ["Todos"] + CONCEPTOS_VENTA, key="ventas_concepto")
 
