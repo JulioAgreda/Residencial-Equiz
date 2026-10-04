@@ -11,6 +11,7 @@ import io
 import os
 import re
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A5, letter
@@ -18,6 +19,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
+from reportlab.lib.utils import ImageReader
 from PIL import Image, ImageDraw, ImageFont
 
 # El servidor (Streamlit Cloud) corre en UTC, no en la hora de Bolivia (UTC-4).
@@ -25,7 +27,17 @@ from PIL import Image, ImageDraw, ImageFont
 _ZONA_BOLIVIA = timezone(timedelta(hours=-4))
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
-LOGO_PATH = os.path.join(_DIR, "assets", "logo_equise.png")
+
+
+def _buscar(*partes):
+    """Busca un recurso en assets/ (estructura recomendada) y, si no está, junto a este archivo."""
+    for ruta in (os.path.join(_DIR, "assets", *partes), os.path.join(_DIR, partes[-1])):
+        if os.path.exists(ruta):
+            return ruta
+    return os.path.join(_DIR, "assets", *partes)
+
+
+LOGO_PATH = _buscar("logo_equise.png")
 NOMBRE_RESIDENCIAL = "Residencial Equise"
 
 _COLOR_ACENTO = (46, 125, 50)      # verde, para PNG (RGB)
@@ -67,6 +79,7 @@ def formatear_apartamento(apartamento):
     return codigo or "—"
 
 
+@lru_cache(maxsize=None)
 def _fuente(tamano, negrita=False, cursiva=False):
     """Carga una fuente TrueType legible desde assets/fonts/. Si por algún
     motivo no está disponible, usa la fuente por defecto de Pillow (más
@@ -77,11 +90,31 @@ def _fuente(tamano, negrita=False, cursiva=False):
         nombre = "DejaVuSans-Oblique.ttf"
     else:
         nombre = "DejaVuSans.ttf"
-    ruta = os.path.join(_DIR, "assets", "fonts", nombre)
+    ruta = _buscar("fonts", nombre)
     try:
         return ImageFont.truetype(ruta, tamano)
     except Exception:
         return ImageFont.load_default()
+
+
+@lru_cache(maxsize=4)
+def _logo_reducido(lado):
+    """El logo pesa ~190 KB: se abre y se reduce una sola vez por tamaño, no en cada documento."""
+    logo = Image.open(LOGO_PATH).convert("RGBA")
+    logo.thumbnail((lado, lado))
+    return logo
+
+
+@lru_cache(maxsize=1)
+def _logo_reportlab():
+    """Versión liviana (200 px) del logo ya decodificada para reportlab. Antes reportlab
+    releía y decodificaba el PNG original en cada recibo (~45 ms de los ~50 ms del PDF)."""
+    logo = Image.open(LOGO_PATH).convert("RGBA")
+    logo.thumbnail((200, 200))
+    buf = io.BytesIO()
+    logo.save(buf, format="PNG")
+    buf.seek(0)
+    return ImageReader(buf)
 
 
 def construir_datos_recibo(pago, periodo, apartamento, total_pagado_periodo, recibido_por):
@@ -124,7 +157,7 @@ def generar_recibo_pdf(datos: dict) -> bytes:
     texto_x = margen
     if os.path.exists(LOGO_PATH):
         try:
-            c.drawImage(LOGO_PATH, margen, y - logo_h, width=logo_w, height=logo_h,
+            c.drawImage(_logo_reportlab(), margen, y - logo_h, width=logo_w, height=logo_h,
                         preserveAspectRatio=True, mask="auto")
             texto_x = margen + logo_w + 4 * mm
         except Exception:
@@ -228,8 +261,7 @@ def generar_recibo_png(datos: dict) -> bytes:
     logo_alto = 0
     if os.path.exists(LOGO_PATH):
         try:
-            logo = Image.open(LOGO_PATH).convert("RGBA")
-            logo.thumbnail((92, 92))
+            logo = _logo_reducido(92)
             img.paste(logo, (margen, y), logo)
             texto_x = margen + logo.width + 18
             logo_alto = logo.height
@@ -295,7 +327,7 @@ def generar_recibo_png(datos: dict) -> bytes:
     y += 34
 
     buffer = io.BytesIO()
-    img.crop((0, 0, ancho, min(y + 20, alto_max))).save(buffer, format="PNG")
+    img.crop((0, 0, ancho, min(y + 20, alto_max))).save(buffer, format="PNG", compress_level=3)
     buffer.seek(0)
     return buffer.getvalue()
 
@@ -362,7 +394,7 @@ def generar_estado_cuenta_pdf(datos: dict) -> bytes:
 
     if os.path.exists(LOGO_PATH):
         try:
-            story.append(RLImage(LOGO_PATH, width=20 * mm, height=20 * mm))
+            story.append(RLImage(_logo_reportlab(), width=20 * mm, height=20 * mm))
             story.append(Spacer(1, 4))
         except Exception:
             pass
@@ -447,8 +479,7 @@ def generar_estado_cuenta_png(datos: dict) -> bytes:
     logo_alto = 0
     if os.path.exists(LOGO_PATH):
         try:
-            logo = Image.open(LOGO_PATH).convert("RGBA")
-            logo.thumbnail((92, 92))
+            logo = _logo_reducido(92)
             img.paste(logo, (margen, y), logo)
             texto_x = margen + logo.width + 18
             logo_alto = logo.height
@@ -514,7 +545,7 @@ def generar_estado_cuenta_png(datos: dict) -> bytes:
     y += caja_alto + 20
 
     buffer = io.BytesIO()
-    img.crop((0, 0, ancho, min(y, alto_max))).save(buffer, format="PNG")
+    img.crop((0, 0, ancho, min(y, alto_max))).save(buffer, format="PNG", compress_level=3)
     buffer.seek(0)
     return buffer.getvalue()
 
