@@ -765,3 +765,41 @@ def listar_actividad_rango(tabla, fecha_desde, fecha_hasta):
         if len(datos) < tam:
             return filas
         inicio += tam
+
+
+# ---------- Compromisos de pago ----------
+
+def listar_compromisos(apartamento_id=None, estado=None):
+    """Historial de compromisos (más recientes primero) con el apartamento embebido.
+    Se pide por páginas: PostgREST corta en 1000 filas por consulta sin avisar."""
+    sb = get_client()
+    filas, inicio, tam = [], 0, 1000
+    while True:
+        q = sb.table("compromisos_pago").select("*, apartamentos(codigo, piso)")
+        if apartamento_id is not None:
+            q = q.eq("apartamento_id", apartamento_id)
+        if estado:
+            q = q.eq("estado", estado)
+        res = (q.order("fecha_registro", desc=True).order("id", desc=True)
+                .range(inicio, inicio + tam - 1).execute())
+        datos = res.data or []
+        filas.extend(datos)
+        if len(datos) < tam:
+            return filas
+        inicio += tam
+
+
+def crear_compromiso(payload: dict):
+    sb = get_client()
+    res = sb.table("compromisos_pago").insert(payload).execute()
+    return res.data[0]
+
+
+def actualizar_compromiso(compromiso_id, payload: dict):
+    sb = get_client()
+    return sb.table("compromisos_pago").update(payload).eq("id", compromiso_id).execute()
+
+
+def eliminar_compromiso(compromiso_id):
+    sb = get_client()
+    return sb.table("compromisos_pago").delete().eq("id", compromiso_id).execute()
