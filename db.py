@@ -1,11 +1,6 @@
 """
 Conexión a Supabase para el Sistema de Control del Residencial.
 """
-import re
-import uuid
-import mimetypes
-from datetime import datetime, timezone
-
 import streamlit as st
 from supabase import create_client, Client
 
@@ -17,35 +12,19 @@ def get_client() -> Client:
     return create_client(url, key)
 
 
-def _traer_todo(query, tam_pagina=1000):
-    """Supabase/PostgREST devuelve como máximo 1000 filas por consulta (sin avisar).
-    Esta función pide páginas sucesivas hasta traer todo, para que ningún historial
-    se corte en silencio cuando el edificio acumule años de datos.
-    La consulta debe traer un orden determinista (siempre se añade .order('id') al final)."""
-    filas, inicio = [], 0
-    while True:
-        res = query.range(inicio, inicio + tam_pagina - 1).execute()
-        datos = res.data or []
-        filas.extend(datos)
-        if len(datos) < tam_pagina:
-            return filas
-        inicio += tam_pagina
-
-
 # ---------- Apartamentos ----------
 
 _ORDEN_PISO_CODIGO = {"PB": 0, "PP": 1, "SP": 2, "TP": 3}
-_RE_CODIGO = re.compile(r"^([A-Z]+)[\s\-_]*(\d+)")
 _MESES_ORDEN = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
                 "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
-_MES_INDICE = {m: i for i, m in enumerate(_MESES_ORDEN)}
 
 
 def clave_orden_apartamento(codigo):
     """Orden natural de códigos: PB (planta baja), PP (primer piso), SP (segundo piso),
     TP (tercer piso), y dentro de cada uno por número (PB-1, PB-2, ... PB-10)."""
+    import re
     texto = (codigo or "").strip().upper()
-    m = _RE_CODIGO.match(texto)
+    m = re.match(r"^([A-Z]+)[\s\-_]*(\d+)", texto)
     if m:
         return (_ORDEN_PISO_CODIGO.get(m.group(1), 99), m.group(1), int(m.group(2)), texto)
     return (99, texto, 0, texto)
@@ -54,7 +33,7 @@ def clave_orden_apartamento(codigo):
 def _ordenar_periodos(periodos):
     """Más reciente primero (año, mes) y, dentro de cada mes, apartamentos en orden PB, PP, SP, TP."""
     def clave(p):
-        mes_idx = _MES_INDICE.get(p.get("mes"), 0)
+        mes_idx = _MESES_ORDEN.index(p["mes"]) if p.get("mes") in _MESES_ORDEN else 0
         codigo = (p.get("apartamentos") or {}).get("codigo")
         return (-int(p.get("anio") or 0), -mes_idx, clave_orden_apartamento(codigo))
     return sorted(periodos, key=clave)
@@ -177,15 +156,8 @@ def listar_periodos(apartamento_id=None, anio=None, mes=None, solo_activos=False
         q = q.eq("mes", mes)
     if solo_activos:
         q = q.is_("inquilino_historial_id", "null")
-    return _ordenar_periodos(_traer_todo(q.order("anio", desc=True).order("id")))
-
-
-def listar_cobros_por_anios(anios):
-    """Una sola consulta con (anio, mes, abonos) de los años indicados. Reemplaza las 12 consultas
-    separadas (una por mes) que hacía el gráfico del Dashboard."""
-    sb = get_client()
-    q = sb.table("periodos_alquiler").select("anio, mes, pagos(monto)").in_("anio", list(anios))
-    return _traer_todo(q.order("anio").order("id"))
+    res = q.order("anio", desc=True).execute()
+    return _ordenar_periodos(res.data or [])
 
 
 def obtener_periodo(apartamento_id, mes, anio):
@@ -290,7 +262,8 @@ def listar_periodos_electricidad(apartamento_id=None, anio=None, mes=None, solo_
         q = q.eq("mes", mes)
     if solo_activos:
         q = q.is_("inquilino_historial_id", "null")
-    return _ordenar_periodos(_traer_todo(q.order("anio", desc=True).order("id")))
+    res = q.order("anio", desc=True).execute()
+    return _ordenar_periodos(res.data or [])
 
 
 def obtener_periodo_electricidad(apartamento_id, mes, anio):
@@ -365,7 +338,8 @@ def listar_periodos_agua(apartamento_id=None, anio=None, mes=None):
         q = q.eq("anio", anio)
     if mes:
         q = q.eq("mes", mes)
-    return _ordenar_periodos(_traer_todo(q.order("anio", desc=True).order("id")))
+    res = q.order("anio", desc=True).execute()
+    return _ordenar_periodos(res.data or [])
 
 
 def obtener_periodo_agua(apartamento_id, mes, anio):
@@ -433,14 +407,6 @@ def listar_usuarios():
     sb = get_client()
     res = sb.table("usuarios").select("*").order("username").execute()
     return res.data or []
-
-
-def hay_usuarios():
-    """True si existe al menos un usuario. Pide 1 sola columna y 1 fila (antes se bajaba la
-    tabla completa, con los hashes de contraseña, cada vez que se dibujaba el login)."""
-    sb = get_client()
-    res = sb.table("usuarios").select("id").limit(1).execute()
-    return bool(res.data)
 
 
 def obtener_usuario_por_username(username):
@@ -514,7 +480,8 @@ def listar_compras(fecha_desde=None, fecha_hasta=None, categoria=None):
         q = q.lte("fecha_compra", fecha_hasta)
     if categoria:
         q = q.eq("categoria", categoria)
-    return _traer_todo(q.order("fecha_compra", desc=True).order("id"))
+    res = q.order("fecha_compra", desc=True).execute()
+    return res.data or []
 
 
 def crear_compra(payload: dict):
@@ -543,7 +510,8 @@ def listar_pagos_generales(fecha_desde=None, fecha_hasta=None, categoria=None):
         q = q.lte("fecha_pago", fecha_hasta)
     if categoria:
         q = q.eq("categoria", categoria)
-    return _traer_todo(q.order("fecha_pago", desc=True).order("id"))
+    res = q.order("fecha_pago", desc=True).execute()
+    return res.data or []
 
 
 def crear_pago_general(payload: dict):
@@ -572,7 +540,8 @@ def listar_ventas(fecha_desde=None, fecha_hasta=None, concepto=None):
         q = q.lte("fecha_venta", fecha_hasta)
     if concepto:
         q = q.eq("concepto", concepto)
-    return _traer_todo(q.order("fecha_venta", desc=True).order("id"))
+    res = q.order("fecha_venta", desc=True).execute()
+    return res.data or []
 
 
 def crear_venta(payload: dict):
@@ -632,6 +601,7 @@ def cambiar_estado_pendiente(pendiente_id, nuevo_estado: str):
     (si sale de 'Terminado' hacia otro estado, limpia la fecha de cierre)."""
     payload = {"estado": nuevo_estado}
     if nuevo_estado == "Terminado":
+        from datetime import datetime, timezone
         payload["fecha_completado"] = datetime.now(timezone.utc).isoformat()
     else:
         payload["fecha_completado"] = None
@@ -722,6 +692,9 @@ def eliminar_reunion(reunion_id):
 
 def subir_comprobante(archivo_bytes: bytes, nombre_archivo: str, carpeta: str = "compras") -> str:
     """Sube un archivo al bucket 'comprobantes' y devuelve su URL pública."""
+    import uuid
+    import mimetypes
+
     sb = get_client()
     extension = nombre_archivo.split(".")[-1] if "." in nombre_archivo else "bin"
     path = f"{carpeta}/{uuid.uuid4().hex}.{extension}"
