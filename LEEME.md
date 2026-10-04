@@ -1,27 +1,38 @@
-# Dashboard de moras + Reportes de estado de cuenta
+# Dashboard de moras + Módulo de Reportes + Inquilinos (solo lectura)
 
-Basado en TUS archivos originales. Copia estos 4 archivos junto a tu `app.py` actual (reemplazando
-`app.py`, `db.py` y `recibo.py`; `moras.py` es nuevo). No hay que ejecutar ningún SQL ni cambiar
-`requirements.txt`. Todo lo demás (otras páginas, `reportes.py`, `schema.sql`, fuentes, logo) queda igual.
+Basado en TUS archivos originales. Reemplaza `app.py`, `db.py`, `recibo.py` y `reportes.py`, y agrega
+`moras.py` (nuevo). No hay que ejecutar SQL ni cambiar `requirements.txt`.
 
-## Qué cambia
-- `app.py`: Dashboard con sección de moras (3 cuadros); nuevo módulo "📑 Reportes" para ambos roles.
-  Se reemplaza el bloque "⚠️ Alertas": las alertas de contrato se conservan, la mora de alquiler
-  vieja se sustituye por la nueva.
-- `db.py`: solo se AÑADE `listar_periodos_abiertos()`. Ninguna función existente se modificó.
-- `recibo.py`: solo se AÑADEN las funciones del reporte. Ninguna función existente se modificó.
-- `moras.py` (nuevo): todo el cálculo de deuda, sin depender de Streamlit ni de la base.
+## Qué incluye
+- **Dashboard**: moras de alquiler, electricidad y agua en 3 cuadros (Departamento, Inquilino, Meses
+  atrasados, Deuda total).
+- **📑 Módulo de Reportes** (menú propio, como Pendientes y Reuniones, para ambos roles):
+  - *Estado de cuenta*: reporte PDF/PNG por apartamento para entregar al inquilino (deuda real).
+  - *Actividad por usuario*: pagos, compras y ventas registrados por un usuario o el reporte general de
+    todos, por rango de fechas, en Excel y PDF.
+- **🏠 Inquilinos** (solo cobradores): consulta de solo lectura de los datos de cada apartamento. Los
+  administradores siguen usando "🏠 Apartamentos" para editar.
 
-## Reglas de cálculo
-- Solo inquilino actual de apartamentos "Ocupado". El reporte excluye contratos de "Anticrético"
-  (un tipo de contrato vacío se trata como alquiler).
-- Alquiler (deuda real): meses con saldo cuyo día de pago ya pasó + meses SIN ningún registro entre el
-  primer mes registrado (o la fecha de ingreso, si nunca hubo pagos) y hoy, valorados con el alquiler
-  mensual de la ficha. Día de pago: campo "Día de Pago"; si no hay, el día de la fecha de ingreso; si
-  tampoco, el 1. El mes en curso no es deuda hasta que pasa su día de pago (se muestra "Por vencer").
-- Electricidad y agua: toda factura registrada con saldo pendiente.
-- La fecha de "hoy" usa hora de Bolivia (UTC-4).
+## Archivos
+- `db.py` y `recibo.py`: solo se AÑADEN funciones; ninguna existente se modificó.
+- `reportes.py`: reescrito (ver abajo). Antes no estaba conectado a la app.
+- `app.py`: cambios en menú, Dashboard y 3 páginas nuevas.
+
+## Reglas y límites del reporte de actividad por usuario
+- Solo se pueden atribuir a un usuario **Pagos, Compras y Ventas** (guardan el campo "Encargado").
+  Los abonos de alquiler, electricidad y agua NO guardan quién los cobró, por eso no están.
+- Egresos = pagos + compras; Ingresos = ventas. Se muestran por separado (antes se sumaban juntos).
+- El usuario se identifica por el texto de "Encargado" con que se guardó cada registro. Si alguien
+  cambia su nombre, sus registros viejos quedan bajo el nombre anterior. Los registros de usuarios
+  que ya no existen aparecen con su nombre antiguo, y los que no tienen encargado en "(Sin encargado)",
+  para que los totales siempre cuadren.
+- Los textos que empiezan con = + - @ se guardan en el Excel como texto (no como fórmula).
+
+## Reglas del estado de cuenta (deuda real)
+Solo inquilino actual de apartamentos "Ocupado", sin contratos de "Anticrético". Alquiler: meses con saldo
+cuyo día de pago ya pasó + meses sin ningún registro desde el primer mes registrado (o la fecha de
+ingreso) hasta hoy. Electricidad: toda factura registrada con saldo. Hora de Bolivia (UTC-4).
 
 ## Pruebas (carpeta pruebas/)
-`python test_moras.py` · `python test_deuda_real.py` · `python test_recorte.py` (esta última necesita
-`recibo.py` con su logo y fuentes al lado).
+`python test_moras.py` · `python test_deuda_real.py` · `python test_recorte.py` · `python test_reportes.py`
+(las dos últimas necesitan `recibo.py` con su logo y fuentes al lado).
