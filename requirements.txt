@@ -2,6 +2,5 @@ streamlit>=1.38
 supabase>=2.6
 pandas>=2.0
 bcrypt>=4.0
-reportlab>=4.0
-Pillow>=10.0
-openpyxl>=3.1
+reportlab
+openpyxl
