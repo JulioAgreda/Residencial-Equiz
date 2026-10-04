@@ -8,6 +8,7 @@ import bcrypt
 import db
 import moras
 import recibo
+import reportes
 
 st.set_page_config(page_title="Residencial EQUIZ", page_icon="🏢", layout="wide")
 
@@ -151,6 +152,22 @@ def cargar_periodos_abiertos(tipo):
     return db.listar_periodos_abiertos(tipo)
 
 
+@st.cache_data(ttl=30)
+def cargar_actividad(desde, hasta):
+    """Pagos, compras y ventas del rango (completos, sin el tope de 1000 filas)."""
+    return {t: db.listar_actividad_rango(t, desde, hasta) for t in ("pagos_generales", "compras", "ventas")}
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _actividad_excel_cache(reps, desde, hasta, emitido_por):
+    return reportes.generar_excel_reporte(reps, desde, hasta, emitido_por=emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _actividad_pdf_cache(reps, desde, hasta, emitido_por):
+    return reportes.generar_pdf_reporte(reps, desde, hasta, emitido_por=emitido_por)
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _reporte_pdf_cache(datos):
     return recibo.generar_reporte_inquilino_pdf(datos)
@@ -227,6 +244,7 @@ def cargar_todos_los_usuarios():
 
 
 def limpiar_cache():
+    cargar_actividad.clear()
     cargar_apartamentos.clear()
     cargar_periodos.clear()
     cargar_periodos_electricidad.clear()
@@ -313,13 +331,15 @@ st.sidebar.caption(f'👤 {usuario_actual.get("nombre") or usuario_actual.get("u
 
 if es_admin:
     opciones_principal = ["📊 Dashboard", "🏠 Apartamentos", "💵 Pagos de Alquiler", "⚡ Electricidad",
-                          "💧 Agua", "📑 Reportes", "👥 Usuarios"]
+                          "💧 Agua", "👥 Usuarios"]
 else:
-    opciones_principal = ["📊 Dashboard", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua", "📑 Reportes"]
+    # "🏠 Inquilinos" es la consulta de solo lectura de los datos de cada apartamento
+    opciones_principal = ["📊 Dashboard", "🏠 Inquilinos", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua"]
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
 opciones_pendientes = ["(ninguno)", "✅ Pendientes"]
 opciones_reuniones = ["(ninguno)", "🗒️ Reuniones"]
+opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📊 Actividad por usuario"]
 
 # Los radios de abajo son independientes en el estado interno de Streamlit:
 # si eliges algo en uno, los demás no se "enteran" y siguen marcando su
@@ -331,24 +351,35 @@ def _al_elegir_principal():
     st.session_state["nav_movimientos"] = "(ninguno)"
     st.session_state["nav_pendientes"] = "(ninguno)"
     st.session_state["nav_reuniones"] = "(ninguno)"
+    st.session_state["nav_reportes"] = "(ninguno)"
 
 
 def _al_elegir_movimientos():
     if st.session_state["nav_movimientos"] != "(ninguno)":
         st.session_state["nav_pendientes"] = "(ninguno)"
         st.session_state["nav_reuniones"] = "(ninguno)"
+        st.session_state["nav_reportes"] = "(ninguno)"
 
 
 def _al_elegir_pendientes():
     if st.session_state["nav_pendientes"] != "(ninguno)":
         st.session_state["nav_movimientos"] = "(ninguno)"
         st.session_state["nav_reuniones"] = "(ninguno)"
+        st.session_state["nav_reportes"] = "(ninguno)"
 
 
 def _al_elegir_reuniones():
     if st.session_state["nav_reuniones"] != "(ninguno)":
         st.session_state["nav_movimientos"] = "(ninguno)"
         st.session_state["nav_pendientes"] = "(ninguno)"
+        st.session_state["nav_reportes"] = "(ninguno)"
+
+
+def _al_elegir_reportes():
+    if st.session_state["nav_reportes"] != "(ninguno)":
+        st.session_state["nav_movimientos"] = "(ninguno)"
+        st.session_state["nav_pendientes"] = "(ninguno)"
+        st.session_state["nav_reuniones"] = "(ninguno)"
 
 
 pagina_principal = st.sidebar.radio("Gestión del Residencial", opciones_principal, key="nav_principal",
@@ -365,6 +396,10 @@ st.sidebar.divider()
 st.sidebar.caption("🗒️ Módulo de Reuniones")
 pagina_reuniones = st.sidebar.radio("Reuniones", opciones_reuniones, key="nav_reuniones",
                                      label_visibility="collapsed", on_change=_al_elegir_reuniones)
+st.sidebar.divider()
+st.sidebar.caption("📑 Módulo de Reportes")
+pagina_reportes = st.sidebar.radio("Reportes", opciones_reportes, key="nav_reportes",
+                                    label_visibility="collapsed", on_change=_al_elegir_reportes)
 
 if pagina_movimientos != "(ninguno)":
     pagina = pagina_movimientos
@@ -372,6 +407,8 @@ elif pagina_pendientes != "(ninguno)":
     pagina = pagina_pendientes
 elif pagina_reuniones != "(ninguno)":
     pagina = pagina_reuniones
+elif pagina_reportes != "(ninguno)":
+    pagina = pagina_reportes
 else:
     pagina = pagina_principal
 st.sidebar.divider()
@@ -1668,8 +1705,8 @@ elif pagina == "💧 Agua":
 # ==================================================================
 # PÁGINA: PENDIENTES (tareas de colaboradores)
 # ==================================================================
-elif pagina == "📑 Reportes":
-    st.title("📑 Reportes")
+elif pagina == "📑 Estado de cuenta":
+    st.title("📑 Estado de cuenta")
     st.subheader("Estado de cuenta por apartamento")
     st.caption(
         "Reporte para entregar al inquilino con sus pagos realizados y su deuda real de alquiler y "
@@ -1773,6 +1810,164 @@ elif pagina == "📑 Reportes":
         with st.expander(f"Apartamentos sin reporte ({len(no_aplican)})"):
             for apt, motivo in no_aplican:
                 st.write(f'**{apt.get("codigo")}**: {motivo}')
+
+elif pagina == "📊 Actividad por usuario":
+    st.title("📊 Reporte de actividad por usuario")
+    st.caption(
+        "Pagos, compras y ventas registrados por cada usuario (campo «Encargado») entre dos fechas. "
+        "Los abonos de alquiler, electricidad y agua no guardan quién los cobró, por eso no aparecen aquí."
+    )
+    hoy_act = recibo.hoy_bolivia()
+    nombre_emisor = usuario_actual.get("nombre") or usuario_actual.get("username")
+    ca1, ca2 = st.columns(2)
+    with ca1:
+        act_desde = st.date_input("Desde", value=hoy_act.replace(day=1), format="DD/MM/YYYY", key="act_desde")
+    with ca2:
+        act_hasta = st.date_input("Hasta", value=hoy_act, format="DD/MM/YYYY", key="act_hasta")
+    if not act_desde or not act_hasta:
+        st.warning("Elige las dos fechas.")
+        st.stop()
+    if act_desde > act_hasta:
+        st.error("La fecha «Desde» no puede ser posterior a «Hasta».")
+        st.stop()
+
+    datos_act = cargar_actividad(str(act_desde), str(act_hasta))
+    activos = sorted({(u.get("nombre") or u.get("username")) for u in cargar_todos_los_usuarios()
+                      if u.get("activo")} - {None})
+    grupos = reportes.agrupar_actividad_por_usuario(
+        datos_act["pagos_generales"], datos_act["compras"], datos_act["ventas"], usuarios_extra=activos)
+
+    OPCION_TODOS = "📋 Todos los usuarios (reporte general)"
+    opcion = st.selectbox("Usuario", [OPCION_TODOS] + list(grupos.keys()), key="act_usuario")
+    elegidos = list(grupos.items()) if opcion == OPCION_TODOS else [(opcion, grupos[opcion])]
+    reps = [reportes.construir_reporte_usuario(n, d) for n, d in elegidos]
+
+    n_mov = sum(len(f) for _n, d in elegidos for f in d.values())
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Movimientos", n_mov)
+    k2.metric("Egresos (pagos + compras)", fmt_money(sum(r["total_egresos"] for r in reps)))
+    k3.metric("Ingresos (ventas)", fmt_money(sum(r["total_ingresos"] for r in reps)))
+
+    if n_mov == 0:
+        st.info("No hay pagos, compras ni ventas registrados en ese periodo para la selección.")
+    else:
+        cfg_bs = {c: st.column_config.NumberColumn(format="Bs %.2f")
+                  for c in ("Pagos realizados", "Compras realizadas", "Ventas realizadas",
+                            "Egresos", "Ingresos", "Monto")}
+        if len(reps) > 1:
+            with st.container(border=True):
+                st.markdown("**Resumen por usuario**")
+                st.dataframe(pd.DataFrame([{
+                    "Usuario": r["usuario"],
+                    "Pagos realizados": r["categorias"]["pagos_generales"]["total"],
+                    "Compras realizadas": r["categorias"]["compras"]["total"],
+                    "Ventas realizadas": r["categorias"]["ventas"]["total"],
+                    "Egresos": r["total_egresos"], "Ingresos": r["total_ingresos"],
+                } for r in reps]), use_container_width=True, hide_index=True, column_config=cfg_bs)
+
+        for r in reps:
+            with st.expander(f'{r["usuario"]} — egresos {fmt_money(r["total_egresos"])} · '
+                             f'ingresos {fmt_money(r["total_ingresos"])}', expanded=(len(reps) == 1)):
+                for clave, titulo, _tipo in reportes.CATEGORIAS:
+                    cat = r["categorias"][clave]
+                    st.markdown(f"**{titulo}** ({len(cat['filas'])})")
+                    if cat["filas"]:
+                        st.dataframe(pd.DataFrame(cat["filas"]), use_container_width=True, hide_index=True,
+                                     column_config=cfg_bs)
+                        st.caption(f"Subtotal: {fmt_money(cat['total'])}")
+                    else:
+                        st.caption("Sin registros en este periodo.")
+
+        # ---------- Descargas ----------
+        etiqueta_archivo = "general" if opcion == OPCION_TODOS else \
+            "".join(c if c.isalnum() else "_" for c in opcion).strip("_")
+        base_archivo = f"actividad_{etiqueta_archivo}_{act_desde:%Y-%m-%d}_{act_hasta:%Y-%m-%d}"
+        txt_desde, txt_hasta = f"{act_desde:%d/%m/%Y}", f"{act_hasta:%d/%m/%Y}"
+        d1, d2 = st.columns(2)
+        with d1:
+            st.download_button(
+                "📊 Descargar Excel", data=_actividad_excel_cache(reps, txt_desde, txt_hasta, nombre_emisor),
+                file_name=f"{base_archivo}.xlsx", key="act_xlsx", use_container_width=True,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        with d2:
+            st.download_button(
+                "📄 Descargar PDF", data=_actividad_pdf_cache(reps, txt_desde, txt_hasta, nombre_emisor),
+                file_name=f"{base_archivo}.pdf", mime="application/pdf", key="act_pdf", use_container_width=True)
+
+# ==================================================================
+# PÁGINA: INQUILINOS (solo lectura, para todos los usuarios)
+# ==================================================================
+elif pagina == "🏠 Inquilinos":
+    st.title("🏠 Inquilinos por apartamento")
+    st.caption("Consulta de datos. Es solo lectura: para corregir o actualizar un dato, avisa a un Administrador.")
+
+    def _md(valor):
+        """Texto del usuario seguro para st.markdown (sin interpretar *, _, $, etc.). Vacío -> —"""
+        texto = str(valor).strip() if valor not in (None, "") else ""
+        if not texto:
+            return "—"
+        for ch in "\\`*_[]$<>~|":
+            texto = texto.replace(ch, "\\" + ch)
+        return texto
+
+    def _f(valor):
+        fecha = parse_fecha(valor)
+        return fecha.strftime("%d/%m/%Y") if fecha else "—"
+
+    def _ficha(pares):
+        for etiqueta, valor in pares:
+            st.markdown(f"**{etiqueta}:** {valor}")
+
+    apartamentos = cargar_apartamentos()
+    if not apartamentos:
+        st.info("No hay apartamentos registrados todavía.")
+    else:
+        with st.container(border=True):
+            st.markdown("**Resumen de apartamentos**")
+            st.dataframe(pd.DataFrame([{
+                "Apartamento": a.get("codigo"), "Piso": a.get("piso"), "Estado": a.get("estado"),
+                "Inquilino": a.get("inquilino_nombre") or "—", "Celular": a.get("celular") or "—",
+                "Alquiler": float(a.get("monto_alquiler") or 0),
+                "Contrato": a.get("estado_contrato") or "—",
+            } for a in apartamentos]), use_container_width=True, hide_index=True,
+                column_config={"Alquiler": st.column_config.NumberColumn(format="Bs %.2f")})
+
+        etiquetas_inq = [f'{a["codigo"]} — {a.get("inquilino_nombre") or "vacío"}' for a in apartamentos]
+        idx_inq = st.selectbox("Apartamento", range(len(apartamentos)), format_func=lambda i: etiquetas_inq[i],
+                               key="inq_apartamento")
+        apt = apartamentos[idx_inq]
+
+        st.subheader(f'{apt["codigo"]} · {apt.get("piso") or ""}')
+        if apt.get("estado") != "Ocupado":
+            st.info("Este apartamento está desocupado.")
+
+        ci1, ci2 = st.columns(2)
+        with ci1:
+            with st.container(border=True):
+                st.markdown("**👤 Inquilino**")
+                _ficha([("Nombre", _md(apt.get("inquilino_nombre"))), ("Celular", _md(apt.get("celular"))),
+                        ("Cédula de identidad", _md(apt.get("cedula_identidad"))),
+                        ("Nacionalidad", _md(apt.get("nacionalidad"))),
+                        ("Fecha de nacimiento", _f(apt.get("fecha_nacimiento")))])
+            with st.container(border=True):
+                st.markdown("**👥 Referencia**")
+                _ficha([("Nombre", _md(apt.get("referencia_nombre"))),
+                        ("Parentesco", _md(apt.get("referencia_parentesco"))),
+                        ("Celular", _md(apt.get("referencia_celular")))])
+        with ci2:
+            with st.container(border=True):
+                st.markdown("**🏠 Ocupación y alquiler**")
+                _ficha([("Estado", _md(apt.get("estado"))), ("Fecha de ingreso", _f(apt.get("fecha_ingreso"))),
+                        ("Día de pago", _md(apt.get("dia_pago"))),
+                        ("Alquiler mensual", fmt_money(apt.get("monto_alquiler") or 0)),
+                        ("Garantía", _md(apt.get("garantia"))), ("Amoblado", _md(apt.get("amoblado"))),
+                        ("Detalle", _md(apt.get("detalle")))])
+            with st.container(border=True):
+                st.markdown("**📄 Contrato**")
+                _ficha([("Tipo", _md(apt.get("tipo_contrato"))), ("Estado", _md(apt.get("estado_contrato"))),
+                        ("Fecha inicio", _f(apt.get("contrato_fecha_inicio"))),
+                        ("Fecha fin", _f(apt.get("contrato_fecha_fin"))),
+                        ("Observaciones", _md(apt.get("contrato_observaciones")))])
 
 elif pagina == "✅ Pendientes":
     st.title("✅ Pendientes")
