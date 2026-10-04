@@ -6,6 +6,7 @@ from datetime import date, timedelta
 import calendar
 import bcrypt
 import db
+import compromisos
 import moras
 import recibo
 import reportes
@@ -153,6 +154,11 @@ def cargar_periodos_abiertos(tipo):
 
 
 @st.cache_data(ttl=30)
+def cargar_compromisos():
+    return db.listar_compromisos()
+
+
+@st.cache_data(ttl=30)
 def cargar_actividad(desde, hasta):
     """Pagos, compras y ventas del rango (completos, sin el tope de 1000 filas)."""
     return {t: db.listar_actividad_rango(t, desde, hasta) for t in ("pagos_generales", "compras", "ventas")}
@@ -244,6 +250,7 @@ def cargar_todos_los_usuarios():
 
 
 def limpiar_cache():
+    cargar_compromisos.clear()
     cargar_actividad.clear()
     cargar_apartamentos.clear()
     cargar_periodos.clear()
@@ -331,14 +338,14 @@ st.sidebar.caption(f'👤 {usuario_actual.get("nombre") or usuario_actual.get("u
 
 if es_admin:
     opciones_principal = ["📊 Dashboard", "🏠 Apartamentos", "💵 Pagos de Alquiler", "⚡ Electricidad",
-                          "💧 Agua", "👥 Usuarios"]
+                          "💧 Agua", "🤝 Compromisos de pago", "👥 Usuarios"]
 else:
     # "🏠 Inquilinos" es la consulta de solo lectura de los datos de cada apartamento
-    opciones_principal = ["📊 Dashboard", "🏠 Inquilinos", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua"]
+    opciones_principal = ["📊 Dashboard", "🏠 Inquilinos", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua",
+                          "🤝 Compromisos de pago"]
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
-opciones_pendientes = ["(ninguno)", "✅ Pendientes"]
-opciones_reuniones = ["(ninguno)", "🗒️ Reuniones"]
+opciones_administracion = ["(ninguno)", "✅ Pendientes", "🗒️ Reuniones"]
 opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📊 Actividad por usuario"]
 
 # Los radios de abajo son independientes en el estado interno de Streamlit:
@@ -347,39 +354,33 @@ opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📊 Actividad por u
 # sección (había que volver manualmente a "(ninguno)" primero). Estos
 # callbacks resetean los demás radios apenas se elige uno, para que el
 # cambio de sección sea siempre inmediato.
+_MODULOS_NAV = ["nav_movimientos", "nav_administracion", "nav_reportes"]
+
+
+def _reiniciar_modulos(excepto=None):
+    """Deja en '(ninguno)' todos los módulos del menú salvo 'excepto'."""
+    for clave in _MODULOS_NAV:
+        if clave != excepto:
+            st.session_state[clave] = "(ninguno)"
+
+
 def _al_elegir_principal():
-    st.session_state["nav_movimientos"] = "(ninguno)"
-    st.session_state["nav_pendientes"] = "(ninguno)"
-    st.session_state["nav_reuniones"] = "(ninguno)"
-    st.session_state["nav_reportes"] = "(ninguno)"
+    _reiniciar_modulos()
 
 
 def _al_elegir_movimientos():
     if st.session_state["nav_movimientos"] != "(ninguno)":
-        st.session_state["nav_pendientes"] = "(ninguno)"
-        st.session_state["nav_reuniones"] = "(ninguno)"
-        st.session_state["nav_reportes"] = "(ninguno)"
+        _reiniciar_modulos("nav_movimientos")
 
 
-def _al_elegir_pendientes():
-    if st.session_state["nav_pendientes"] != "(ninguno)":
-        st.session_state["nav_movimientos"] = "(ninguno)"
-        st.session_state["nav_reuniones"] = "(ninguno)"
-        st.session_state["nav_reportes"] = "(ninguno)"
-
-
-def _al_elegir_reuniones():
-    if st.session_state["nav_reuniones"] != "(ninguno)":
-        st.session_state["nav_movimientos"] = "(ninguno)"
-        st.session_state["nav_pendientes"] = "(ninguno)"
-        st.session_state["nav_reportes"] = "(ninguno)"
+def _al_elegir_administracion():
+    if st.session_state["nav_administracion"] != "(ninguno)":
+        _reiniciar_modulos("nav_administracion")
 
 
 def _al_elegir_reportes():
     if st.session_state["nav_reportes"] != "(ninguno)":
-        st.session_state["nav_movimientos"] = "(ninguno)"
-        st.session_state["nav_pendientes"] = "(ninguno)"
-        st.session_state["nav_reuniones"] = "(ninguno)"
+        _reiniciar_modulos("nav_reportes")
 
 
 pagina_principal = st.sidebar.radio("Gestión del Residencial", opciones_principal, key="nav_principal",
@@ -389,13 +390,9 @@ st.sidebar.caption("📒 Módulo de Movimientos")
 pagina_movimientos = st.sidebar.radio("Compras y Ventas", opciones_movimientos, key="nav_movimientos",
                                        label_visibility="collapsed", on_change=_al_elegir_movimientos)
 st.sidebar.divider()
-st.sidebar.caption("✅ Módulo de Pendientes")
-pagina_pendientes = st.sidebar.radio("Pendientes", opciones_pendientes, key="nav_pendientes",
-                                      label_visibility="collapsed", on_change=_al_elegir_pendientes)
-st.sidebar.divider()
-st.sidebar.caption("🗒️ Módulo de Reuniones")
-pagina_reuniones = st.sidebar.radio("Reuniones", opciones_reuniones, key="nav_reuniones",
-                                     label_visibility="collapsed", on_change=_al_elegir_reuniones)
+st.sidebar.caption("🗂️ Módulo Administración")
+pagina_administracion = st.sidebar.radio("Administración", opciones_administracion, key="nav_administracion",
+                                          label_visibility="collapsed", on_change=_al_elegir_administracion)
 st.sidebar.divider()
 st.sidebar.caption("📑 Módulo de Reportes")
 pagina_reportes = st.sidebar.radio("Reportes", opciones_reportes, key="nav_reportes",
@@ -403,10 +400,8 @@ pagina_reportes = st.sidebar.radio("Reportes", opciones_reportes, key="nav_repor
 
 if pagina_movimientos != "(ninguno)":
     pagina = pagina_movimientos
-elif pagina_pendientes != "(ninguno)":
-    pagina = pagina_pendientes
-elif pagina_reuniones != "(ninguno)":
-    pagina = pagina_reuniones
+elif pagina_administracion != "(ninguno)":
+    pagina = pagina_administracion
 elif pagina_reportes != "(ninguno)":
     pagina = pagina_reportes
 else:
@@ -1968,6 +1963,223 @@ elif pagina == "🏠 Inquilinos":
                         ("Fecha inicio", _f(apt.get("contrato_fecha_inicio"))),
                         ("Fecha fin", _f(apt.get("contrato_fecha_fin"))),
                         ("Observaciones", _md(apt.get("contrato_observaciones")))])
+
+elif pagina == "🤝 Compromisos de pago":
+    st.title("🤝 Compromisos de pago")
+    st.caption(
+        "Historial de los motivos de retraso que informa el inquilino y de los acuerdos de pago (compromiso, "
+        "fecha plazo y monto). Todos los usuarios pueden registrar y editar; solo el Administrador puede eliminar."
+    )
+    mensaje_flash = st.session_state.pop("compromiso_msg", None)
+    if mensaje_flash:
+        st.success(mensaje_flash)
+
+    hoy_c = recibo.hoy_bolivia()
+    nombre_c = usuario_actual.get("nombre") or usuario_actual.get("username")
+    apartamentos = cargar_apartamentos()
+    try:
+        todos_comp = cargar_compromisos()
+    except Exception as e:
+        st.error("No se pudo leer el historial de compromisos. Si es la primera vez que usas esta sección, "
+                 "ejecuta el archivo `migracion_compromisos_pago.sql` en el SQL Editor de Supabase.")
+        st.caption(f"Detalle técnico: {e}")
+        st.stop()
+
+    ocupados = [a for a in apartamentos if a.get("estado") == "Ocupado"]
+    codigo_por_id = {a["id"]: a.get("codigo") for a in apartamentos}
+
+    def _fmt_f(valor):
+        f = parse_fecha(valor)
+        return f.strftime("%d/%m/%Y") if f else "—"
+
+    def _codigo_de(c):
+        return (c.get("apartamentos") or {}).get("codigo") or codigo_por_id.get(c["apartamento_id"]) or "—"
+
+    n_form = st.session_state.get("comp_form_n", 0)   # cambia al guardar: así el formulario se limpia solo si salió bien
+    tab_nuevo_c, tab_hist_c = st.tabs(["➕ Nuevo compromiso", "📋 Historial y edición"])
+
+    # ---------------- Nuevo compromiso ----------------
+    with tab_nuevo_c:
+        if not ocupados:
+            st.info("No hay apartamentos ocupados.")
+        else:
+            etiquetas_c = [f'{a["codigo"]} — {a.get("inquilino_nombre") or "sin nombre"}' for a in ocupados]
+            i_c = st.selectbox("Apartamento", range(len(ocupados)), format_func=lambda i: etiquetas_c[i],
+                               key="comp_apto")
+            apt_c = ocupados[i_c]
+
+            # Contexto: deuda actual, con la misma regla del Dashboard y del estado de cuenta
+            alq_c = [p for p in cargar_periodos_abiertos("alquiler") if p["apartamento_id"] == apt_c["id"]]
+            elec_c = [p for p in cargar_periodos_abiertos("electricidad") if p["apartamento_id"] == apt_c["id"]]
+            d_c = moras.deuda_real_inquilino(apt_c, alq_c, elec_c, hoy_c)
+            if d_c["aplica"]:
+                m_atr = d_c["alquiler"]["meses_atrasados"]
+                st.info(
+                    f'Deuda actual — alquiler: {fmt_money(d_c["alquiler"]["deuda"])} '
+                    f'({m_atr} mes{"es" if m_atr != 1 else ""} atrasado{"s" if m_atr != 1 else ""}) · '
+                    f'electricidad: {fmt_money(d_c["electricidad"]["deuda"])} · '
+                    f'**total: {fmt_money(d_c["deuda_total"])}**')
+            else:
+                st.caption(d_c["motivo"])
+            abiertos = [c for c in todos_comp if c["apartamento_id"] == apt_c["id"]
+                        and compromisos.estado_efectivo(c, hoy_c) in ("Pendiente", "Vencido")]
+            if abiertos:
+                st.warning(f'Este apartamento ya tiene {len(abiertos)} compromiso(s) pendiente(s) o vencido(s). '
+                           'Revisa el historial antes de registrar otro.')
+
+            with st.form(f"form_nuevo_compromiso_{n_form}"):
+                fecha_reg = st.date_input("Fecha del registro", value=hoy_c, format="DD/MM/YYYY",
+                                          key=f"cn_fecha_{n_form}")
+                motivo = st.text_area("Motivo del retraso (lo que informó el inquilino)", max_chars=2000,
+                                      key=f"cn_motivo_{n_form}")
+                compromiso_txt = st.text_area(
+                    "Compromiso asumido (opcional)", max_chars=2000, key=f"cn_comp_{n_form}",
+                    placeholder='Ej. "Pagará la mitad esta semana y el resto el 30"')
+                cp1, cp2 = st.columns(2)
+                with cp1:
+                    plazo = st.date_input("Fecha plazo (opcional)", value=None, format="DD/MM/YYYY",
+                                          key=f"cn_plazo_{n_form}")
+                with cp2:
+                    monto = st.number_input("Monto acordado a pagar (Bs)", min_value=0.0, step=10.0,
+                                            format="%.2f", value=0.0, key=f"cn_monto_{n_form}")
+                st.caption(f"Se guardará como registrado por: **{nombre_c}**")
+                guardar_c = st.form_submit_button("💾 Guardar compromiso")
+
+            if guardar_c:
+                errores = compromisos.validar_compromiso(motivo, compromiso_txt, fecha_reg, plazo, monto)
+                for err in errores:
+                    st.error(err)
+                if not errores:
+                    try:
+                        db.crear_compromiso(compromisos.armar_registro(
+                            motivo, compromiso_txt, fecha_reg, plazo, monto, "Pendiente", nombre_c, apartamento=apt_c))
+                        limpiar_cache()
+                        st.session_state["comp_form_n"] = n_form + 1
+                        st.session_state["compromiso_msg"] = f'Compromiso registrado para {apt_c["codigo"]}.'
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"No se pudo guardar: {e}")
+
+    # ---------------- Historial y edición ----------------
+    with tab_hist_c:
+        ids_con_datos = {c["apartamento_id"] for c in todos_comp}
+        apts_filtro = [a for a in apartamentos if a.get("estado") == "Ocupado" or a["id"] in ids_con_datos]
+        nombres_apt = {a["id"]: f'{a["codigo"]} — {a.get("inquilino_nombre") or "sin inquilino"}' for a in apts_filtro}
+        f1, f2 = st.columns(2)
+        with f1:
+            filtro_id = st.selectbox("Apartamento", [None] + [a["id"] for a in apts_filtro],
+                                     format_func=lambda i: "Todos los apartamentos" if i is None else nombres_apt[i],
+                                     key="comp_filtro_apto")
+        with f2:
+            filtro_estado = st.selectbox("Estado", ["Todos", "Pendiente", "Vencido", "Cumplido", "Incumplido"],
+                                         key="comp_filtro_estado")
+
+        base_c = [c for c in todos_comp if filtro_id is None or c["apartamento_id"] == filtro_id]
+        pend_c = [c for c in base_c if compromisos.estado_efectivo(c, hoy_c) in ("Pendiente", "Vencido")]
+        venc_c = [c for c in base_c if compromisos.estado_efectivo(c, hoy_c) == compromisos.ESTADO_VENCIDO]
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Pendientes", len(pend_c))
+        k2.metric("Vencidos", len(venc_c))
+        k3.metric("Monto acordado por cobrar", fmt_money(sum(float(c.get("monto_comprometido") or 0) for c in pend_c)))
+
+        filtrados = [c for c in base_c if filtro_estado == "Todos"
+                     or compromisos.estado_efectivo(c, hoy_c) == filtro_estado]
+        filtrados = (compromisos.ordenar_por_plazo(filtrados) if filtro_estado in ("Pendiente", "Vencido")
+                     else compromisos.ordenar_historial(filtrados))
+
+        if not filtrados:
+            st.info("No hay compromisos registrados con ese filtro.")
+        else:
+            iconos = {"Pendiente": "🟡 Pendiente", "Vencido": "🔴 Vencido",
+                      "Cumplido": "🟢 Cumplido", "Incumplido": "⚫ Incumplido"}
+            st.dataframe(pd.DataFrame([{
+                "Registro": _fmt_f(c.get("fecha_registro")),
+                "Apartamento": _codigo_de(c),
+                "Inquilino": c.get("inquilino_nombre") or "—",
+                "Motivo del retraso": c.get("motivo_retraso") or "—",
+                "Compromiso": c.get("compromiso") or "—",
+                "Fecha plazo": _fmt_f(c.get("fecha_plazo")),
+                "Monto acordado": float(c["monto_comprometido"]) if c.get("monto_comprometido") is not None else None,
+                "Estado": iconos[compromisos.estado_efectivo(c, hoy_c)],
+                "Registrado por": c.get("registrado_por") or "—",
+                "Editado por": c.get("editado_por") or "—",
+            } for c in filtrados]), use_container_width=True, hide_index=True,
+                column_config={
+                    "Motivo del retraso": st.column_config.TextColumn(width="large"),
+                    "Compromiso": st.column_config.TextColumn(width="large"),
+                    "Monto acordado": st.column_config.NumberColumn(format="Bs %.2f"),
+                })
+
+            st.divider()
+            st.markdown("### ✏️ Editar un compromiso")
+            por_id = {c["id"]: c for c in filtrados}
+
+            def _etiqueta_comp(cid):
+                c = por_id[cid]
+                motivo_corto = (c.get("motivo_retraso") or "").replace("\n", " ")
+                if len(motivo_corto) > 45:
+                    motivo_corto = motivo_corto[:45] + "…"
+                return f'{_fmt_f(c.get("fecha_registro"))} · {_codigo_de(c)} · {motivo_corto}'
+
+            cid = st.selectbox("Compromiso", list(por_id.keys()), format_func=_etiqueta_comp, key="comp_editar_sel")
+            c_sel = por_id[cid]
+            with st.form(f"form_edit_compromiso_{cid}"):
+                e_fecha = st.date_input("Fecha del registro", value=parse_fecha(c_sel.get("fecha_registro")) or hoy_c,
+                                        format="DD/MM/YYYY", key=f"ce_fecha_{cid}")
+                e_motivo = st.text_area("Motivo del retraso", value=c_sel.get("motivo_retraso") or "",
+                                        max_chars=2000, key=f"ce_motivo_{cid}")
+                e_comp = st.text_area("Compromiso asumido", value=c_sel.get("compromiso") or "",
+                                      max_chars=2000, key=f"ce_comp_{cid}")
+                ce1, ce2 = st.columns(2)
+                with ce1:
+                    e_plazo = st.date_input("Fecha plazo (opcional)", value=parse_fecha(c_sel.get("fecha_plazo")),
+                                            format="DD/MM/YYYY", key=f"ce_plazo_{cid}")
+                    quitar_plazo = (st.checkbox("Quitar la fecha plazo", key=f"ce_quitar_{cid}")
+                                    if c_sel.get("fecha_plazo") else False)
+                with ce2:
+                    e_monto = st.number_input("Monto acordado a pagar (Bs)", min_value=0.0, step=10.0, format="%.2f",
+                                              value=float(c_sel.get("monto_comprometido") or 0), key=f"ce_monto_{cid}")
+                estado_actual = c_sel.get("estado") if c_sel.get("estado") in compromisos.ESTADOS else "Pendiente"
+                e_estado = st.selectbox("Estado", compromisos.ESTADOS, index=compromisos.ESTADOS.index(estado_actual),
+                                        key=f"ce_estado_{cid}")
+                st.caption(f'Registrado por **{c_sel.get("registrado_por") or "—"}** · '
+                           f'última edición por **{c_sel.get("editado_por") or "—"}**')
+                if es_admin:
+                    confirmar_borrar = st.checkbox("Confirmo que quiero eliminar este compromiso",
+                                                   key=f"ce_confirmar_{cid}")
+                    cg, cd = st.columns(2)
+                    guardar_e = cg.form_submit_button("💾 Guardar cambios", use_container_width=True)
+                    eliminar_e = cd.form_submit_button("🗑️ Eliminar", use_container_width=True)
+                else:
+                    confirmar_borrar, eliminar_e = False, False
+                    guardar_e = st.form_submit_button("💾 Guardar cambios", use_container_width=True)
+
+            if guardar_e:
+                plazo_final = None if quitar_plazo else e_plazo
+                errores = compromisos.validar_compromiso(e_motivo, e_comp, e_fecha, plazo_final, e_monto)
+                for err in errores:
+                    st.error(err)
+                if not errores:
+                    try:
+                        db.actualizar_compromiso(cid, compromisos.armar_registro(
+                            e_motivo, e_comp, e_fecha, plazo_final, e_monto, e_estado, nombre_c))
+                        limpiar_cache()
+                        st.session_state["compromiso_msg"] = "Compromiso actualizado."
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"No se pudo actualizar: {e}")
+
+            if eliminar_e and es_admin:
+                if not confirmar_borrar:
+                    st.warning("Marca la casilla de confirmación para poder eliminar.")
+                else:
+                    try:
+                        db.eliminar_compromiso(cid)
+                        limpiar_cache()
+                        st.session_state["compromiso_msg"] = "Compromiso eliminado."
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"No se pudo eliminar: {e}")
 
 elif pagina == "✅ Pendientes":
     st.title("✅ Pendientes")
