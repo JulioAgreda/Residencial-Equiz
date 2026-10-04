@@ -1,38 +1,36 @@
-# Dashboard de moras + Módulo de Reportes + Inquilinos (solo lectura)
+# Cambios sobre tu proyecto original
 
-Basado en TUS archivos originales. Reemplaza `app.py`, `db.py`, `recibo.py` y `reportes.py`, y agrega
-`moras.py` (nuevo). No hay que ejecutar SQL ni cambiar `requirements.txt`.
+## Instalación
+1. Reemplaza `app.py`, `db.py`, `recibo.py` y `reportes.py`; agrega `moras.py` y `compromisos.py` (nuevos).
+2. **Ejecuta una vez `migracion_compromisos_pago.sql`** en el SQL Editor de Supabase (solo crea una tabla
+   nueva; no toca nada existente). Sin esto, la sección "Compromisos de pago" muestra un aviso y el resto
+   de la app funciona normal. No hace falta cambiar `requirements.txt`.
 
 ## Qué incluye
-- **Dashboard**: moras de alquiler, electricidad y agua en 3 cuadros (Departamento, Inquilino, Meses
-  atrasados, Deuda total).
-- **📑 Módulo de Reportes** (menú propio, como Pendientes y Reuniones, para ambos roles):
-  - *Estado de cuenta*: reporte PDF/PNG por apartamento para entregar al inquilino (deuda real).
-  - *Actividad por usuario*: pagos, compras y ventas registrados por un usuario o el reporte general de
-    todos, por rango de fechas, en Excel y PDF.
-- **🏠 Inquilinos** (solo cobradores): consulta de solo lectura de los datos de cada apartamento. Los
-  administradores siguen usando "🏠 Apartamentos" para editar.
+- **Dashboard**: moras de alquiler, electricidad y agua en 3 cuadros.
+- **🤝 Compromisos de pago** (menú principal, ambos roles): historial por apartamento del motivo de retraso
+  que informa el inquilino, el compromiso asumido, la fecha plazo y el monto acordado, con estado
+  (Pendiente / Cumplido / Incumplido; un Pendiente con plazo pasado se ve como Vencido).
+  Todos los usuarios registran y editan; solo el Administrador elimina (con casilla de confirmación).
+  Guarda quién registró y quién editó por última vez.
+- **🗂️ Módulo Administración**: agrupa Pendientes y Reuniones (antes eran dos módulos separados).
+- **📑 Módulo de Reportes**: Estado de cuenta (PDF/PNG para el inquilino) y Actividad por usuario (Excel/PDF).
+- **🏠 Inquilinos** (cobradores): consulta de solo lectura de los datos de cada apartamento.
 
-## Archivos
-- `db.py` y `recibo.py`: solo se AÑADEN funciones; ninguna existente se modificó.
-- `reportes.py`: reescrito (ver abajo). Antes no estaba conectado a la app.
-- `app.py`: cambios en menú, Dashboard y 3 páginas nuevas.
+## Qué NO se tocó
+Las páginas Apartamentos, Pagos de Alquiler, Electricidad, Agua, Usuarios, Compras, Pagos, Ventas, Pendientes
+y Reuniones son idénticas a tu original (comparado bloque por bloque). En `db.py` y `recibo.py` solo se
+añadieron funciones; ninguna existente se modificó.
 
-## Reglas y límites del reporte de actividad por usuario
-- Solo se pueden atribuir a un usuario **Pagos, Compras y Ventas** (guardan el campo "Encargado").
-  Los abonos de alquiler, electricidad y agua NO guardan quién los cobró, por eso no están.
-- Egresos = pagos + compras; Ingresos = ventas. Se muestran por separado (antes se sumaban juntos).
-- El usuario se identifica por el texto de "Encargado" con que se guardó cada registro. Si alguien
-  cambia su nombre, sus registros viejos quedan bajo el nombre anterior. Los registros de usuarios
-  que ya no existen aparecen con su nombre antiguo, y los que no tienen encargado en "(Sin encargado)",
-  para que los totales siempre cuadren.
-- Los textos que empiezan con = + - @ se guardan en el Excel como texto (no como fórmula).
-
-## Reglas del estado de cuenta (deuda real)
-Solo inquilino actual de apartamentos "Ocupado", sin contratos de "Anticrético". Alquiler: meses con saldo
-cuyo día de pago ya pasó + meses sin ningún registro desde el primer mes registrado (o la fecha de
-ingreso) hasta hoy. Electricidad: toda factura registrada con saldo. Hora de Bolivia (UTC-4).
+## Reglas
+- Compromisos: el motivo es obligatorio; si hay monto debe haber fecha plazo; el plazo no puede ser anterior
+  a la fecha del registro. Se guarda el nombre del inquilino de ese momento (el inquilino puede cambiar).
+- Actividad por usuario: solo Pagos, Compras y Ventas (los abonos de alquiler/electricidad/agua no guardan
+  quién los cobró). Egresos = pagos + compras; Ingresos = ventas.
+- Estado de cuenta (deuda real): solo inquilino actual de apartamentos "Ocupado", sin "Anticrético". Alquiler:
+  meses con saldo cuyo día de pago ya pasó + meses sin ningún registro desde el primer mes registrado (o la
+  fecha de ingreso) hasta hoy. Electricidad: toda factura con saldo. Hora de Bolivia (UTC-4).
 
 ## Pruebas (carpeta pruebas/)
-`python test_moras.py` · `python test_deuda_real.py` · `python test_recorte.py` · `python test_reportes.py`
+`python test_moras.py` · `test_deuda_real.py` · `test_compromisos.py` · `test_recorte.py` · `test_reportes.py`
 (las dos últimas necesitan `recibo.py` con su logo y fuentes al lado).
