@@ -141,6 +141,11 @@ separado, o ya corriste algunas de estas):
   y `ventas`, y configura el bucket de almacenamiento `comprobantes` para
   los adjuntos.
 
+### Rendimiento: índices
+
+Ejecuta una vez `migracion_indices_rendimiento.sql` en el SQL Editor. Solo crea
+índices (no toca datos) y acelera los filtros por fecha y por periodo activo.
+
 Nota: `schema.sql` es distinto — solo se usa si algún día empiezas un
 proyecto de Supabase **completamente nuevo** desde cero (incluye también
 la creación de `apartamentos`). Para tu proyecto actual, usa
@@ -161,20 +166,24 @@ en Streamlit Cloud. Pasos:
    `residencial-equiz-backups`).
 2. Sube ahí únicamente la carpeta `.github/workflows/backup-diario.yml`
    (no hace falta subir el resto del código).
-3. En Supabase, ve a Project Settings → Database → Connection string →
-   copia la URI y reemplaza `[YOUR-PASSWORD]` por la contraseña real de tu
-   base de datos (la que pusiste al crear el proyecto; si no la recuerdas,
-   puedes resetearla ahí mismo).
+3. En Supabase, ve a Project Settings → Database → Connection string y
+   elige la pestaña **Session pooler** (puerto 5432). **No uses "Direct
+   connection"**: esa solo funciona por IPv6 y GitHub Actions no tiene IPv6,
+   por lo que el respaldo fallaría. Copia la URI y reemplaza
+   `[YOUR-PASSWORD]` por la contraseña real de tu base de datos (la que
+   pusiste al crear el proyecto; si no la recuerdas, puedes resetearla ahí
+   mismo).
 4. En ese repositorio de backups → Settings → Secrets and variables →
    Actions → New repository secret. Nombre: `SUPABASE_DB_URL`. Valor: la
    URI completa del paso anterior.
 5. Ve a la pestaña "Actions" del repositorio, entra al workflow "Backup
    diario de la base de datos" y usa "Run workflow" para probarlo una vez
    manualmente. Si corre sin errores, revisa la carpeta `backups/` — debe
-   aparecer un archivo `backup-AAAA-MM-DD.sql`.
+   aparecer un archivo `backup-AAAA-MM-DD.sql.gz` (comprimido; pesa mucho menos
+   que el `.sql` plano).
 6. A partir de ahí corre solo, todos los días, y borra automáticamente los
    respaldos de más de 30 días para no acumular espacio.
 
 Para restaurar un backup en caso de emergencia, se usa `psql` con ese
-mismo archivo `.sql` contra tu base de datos — avísame si llegas a
+mismo archivo contra tu base de datos (`gunzip -c backup-AAAA-MM-DD.sql.gz | psql "URI"`) — avísame si llegas a
 necesitarlo y te guío en el momento.
