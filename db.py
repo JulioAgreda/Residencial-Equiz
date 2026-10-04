@@ -701,3 +701,36 @@ def subir_comprobante(archivo_bytes: bytes, nombre_archivo: str, carpeta: str = 
     content_type = mimetypes.guess_type(nombre_archivo)[0] or "application/octet-stream"
     sb.storage.from_("comprobantes").upload(path, archivo_bytes, {"content-type": content_type})
     return sb.storage.from_("comprobantes").get_public_url(path)
+
+
+# ---------- Moras (Dashboard): periodos abiertos con sus abonos ----------
+
+_TABLAS_MORA = {
+    "alquiler": ("periodos_alquiler", "pagos"),
+    "electricidad": ("periodos_electricidad", "pagos_electricidad"),
+    "agua": ("periodos_agua", "pagos_agua"),
+}
+
+
+def listar_periodos_abiertos(tipo):
+    """Todos los periodos del inquilino ACTUAL (sin los cerrados de inquilinos que ya salieron),
+    con solo las columnas necesarias para calcular deuda. tipo: 'alquiler' | 'electricidad' | 'agua'.
+    PostgREST corta en 1000 filas por consulta sin avisar; aquí se pide por páginas hasta traer
+    todo, para que ninguna deuda quede fuera del cálculo."""
+    tabla, tabla_pagos = _TABLAS_MORA[tipo]
+    sb = get_client()
+    filas, inicio, tam = [], 0, 1000
+    while True:
+        res = (
+            sb.table(tabla)
+            .select(f"id, apartamento_id, mes, anio, monto_esperado, {tabla_pagos}(monto, fecha)")
+            .is_("inquilino_historial_id", "null")
+            .order("id")
+            .range(inicio, inicio + tam - 1)
+            .execute()
+        )
+        datos = res.data or []
+        filas.extend(datos)
+        if len(datos) < tam:
+            return filas
+        inicio += tam
