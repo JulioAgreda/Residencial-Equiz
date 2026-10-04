@@ -734,3 +734,34 @@ def listar_periodos_abiertos(tipo):
         if len(datos) < tam:
             return filas
         inicio += tam
+
+
+# ---------- Reporte de actividad por usuario ----------
+
+_TABLAS_ACTIVIDAD = {
+    "pagos_generales": "fecha_pago",
+    "compras": "fecha_compra",
+    "ventas": "fecha_venta",
+}
+
+
+def listar_actividad_rango(tabla, fecha_desde, fecha_hasta):
+    """Todos los registros de 'pagos_generales', 'compras' o 'ventas' entre dos fechas (ambas
+    inclusive). PostgREST corta en 1000 filas por consulta sin avisar; aquí se pide por páginas
+    hasta traer todo, para que un reporte de varios meses nunca quede incompleto."""
+    campo_fecha = _TABLAS_ACTIVIDAD[tabla]
+    sb = get_client()
+    filas, inicio, tam = [], 0, 1000
+    while True:
+        res = (
+            sb.table(tabla).select("*")
+            .gte(campo_fecha, str(fecha_desde)).lte(campo_fecha, str(fecha_hasta))
+            .order(campo_fecha).order("id")
+            .range(inicio, inicio + tam - 1)
+            .execute()
+        )
+        datos = res.data or []
+        filas.extend(datos)
+        if len(datos) < tam:
+            return filas
+        inicio += tam
