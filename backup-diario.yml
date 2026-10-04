@@ -6,76 +6,32 @@ on:
     - cron: "0 8 * * *"
   workflow_dispatch: {}   # permite ejecutarlo manualmente desde la pestaña "Actions"
 
-# Necesario para que el bot pueda hacer "git push" aunque el repo tenga permisos de solo lectura por defecto.
-permissions:
-  contents: write
-
-# Evita que dos ejecuciones (ej. una manual y una programada) se pisen al hacer push.
-concurrency:
-  group: backup-diario
-  cancel-in-progress: false
-
-env:
-  DIAS_A_CONSERVAR: 30
-
 jobs:
   backup:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
       - name: Descargar el repositorio de backups
         uses: actions/checkout@v4
 
-      # El pg_dump de Ubuntu suele ser más viejo que el PostgreSQL de Supabase y se
-      # niega a respaldar ("server version mismatch"). Se instala el cliente oficial 17,
-      # que sabe respaldar servidores de versiones anteriores.
-      - name: Instalar cliente de PostgreSQL 17
-        run: |
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client-17
+      - name: Instalar cliente de PostgreSQL
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
 
-      # IMPORTANTE: usa en SUPABASE_DB_URL la cadena "Session pooler" (puerto 5432, IPv4) de
-      # Supabase, no la "Direct connection": esa solo tiene IPv6 y los runners de GitHub no.
-      - name: Generar el respaldo (pg_dump comprimido)
+      - name: Generar el respaldo (pg_dump)
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
-          set -euo pipefail
           mkdir -p backups
           FECHA=$(date +'%Y-%m-%d')
-          DESTINO="backups/backup-$FECHA.sql.gz"
-          /usr/lib/postgresql/17/bin/pg_dump "$SUPABASE_DB_URL" --no-owner --no-privileges -F p | gzip -9 > "$DESTINO"
-          # Un respaldo vacío o diminuto significa que algo falló: mejor que el workflow marque error.
-          TAM=$(stat -c%s "$DESTINO")
-          echo "Respaldo generado: $DESTINO ($TAM bytes)"
-          if [ "$TAM" -lt 1024 ]; then
-            echo "::error::El respaldo es sospechosamente pequeño; se descarta."
-            rm -f "$DESTINO"
-            exit 1
-          fi
+          pg_dump "$SUPABASE_DB_URL" --no-owner --no-privileges -F p -f "backups/backup-$FECHA.sql"
 
-      # Antes se usaba "find -mtime +30", pero tras el checkout TODOS los archivos tienen la
-      # fecha de hoy, así que nunca se borraba nada. Ahora se usa la fecha del nombre del archivo.
-      - name: Borrar respaldos con más de ${{ env.DIAS_A_CONSERVAR }} días
+      - name: Borrar respaldos con más de 30 días (mantener el repo liviano)
         run: |
-          set -euo pipefail
-          LIMITE=$(date -d "${DIAS_A_CONSERVAR} days ago" +%Y-%m-%d)
-          for f in backups/backup-*.sql backups/backup-*.sql.gz; do
-            [ -e "$f" ] || continue
-            d="${f#backups/backup-}"; d="${d%%.*}"
-            if [[ "$d" < "$LIMITE" ]]; then
-              echo "Borrando $f (anterior a $LIMITE)"
-              rm -f "$f"
-            fi
-          done
+          find backups -name "backup-*.sql" -mtime +30 -delete
 
       - name: Subir el respaldo al repositorio
         run: |
           git config user.name "backup-bot"
           git config user.email "backup-bot@users.noreply.github.com"
-          git add -A backups/
+          git add backups/
           git diff --cached --quiet || git commit -m "Backup automático $(date +'%Y-%m-%d')"
           git push
