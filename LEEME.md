@@ -1,10 +1,12 @@
 # Cambios sobre tu proyecto original
 
 ## Instalación
-1. Reemplaza `app.py`, `db.py`, `recibo.py` y `reportes.py`; agrega `moras.py` y `compromisos.py` (nuevos).
-2. **Ejecuta una vez `migracion_compromisos_pago.sql`** en el SQL Editor de Supabase (solo crea una tabla
-   nueva; no toca nada existente). Sin esto, la sección "Compromisos de pago" muestra un aviso y el resto
-   de la app funciona normal. No hace falta cambiar `requirements.txt`.
+1. Reemplaza `app.py`, `db.py`, `recibo.py` y `reportes.py`; agrega `moras.py`, `compromisos.py` y `estados.py` (nuevos).
+2. En el SQL Editor de Supabase ejecuta, una vez cada uno (ambos son seguros y repetibles):
+   - `migracion_compromisos_pago.sql`: crea la tabla de compromisos de pago.
+   - `migracion_estados_movimientos.sql`: agrega las columnas de estado a Compras, Pagos y Ventas.
+   Si se despliega la app ANTES de ejecutarlos, nada se rompe: esas secciones muestran un aviso y funcionan
+   sin el campo nuevo hasta que se ejecute el SQL. No hace falta cambiar `requirements.txt`.
 
 ## Qué incluye
 - **Dashboard**: moras de alquiler, electricidad y agua en 3 cuadros.
@@ -17,9 +19,21 @@
 - **📑 Módulo de Reportes**: Estado de cuenta (PDF/PNG para el inquilino) y Actividad por usuario (Excel/PDF).
 - **🏠 Inquilinos** (cobradores): consulta de solo lectura de los datos de cada apartamento.
 
+## Compras, Pagos y Ventas: sin adjunto + estado
+- **Compras**: se quitó "Adjuntar comprobante" (ya no se suben archivos). El "N° de comprobante" (texto) se
+  conserva. Los comprobantes ya subidos siguen accesibles con un enlace de solo lectura al editar la compra.
+  **Pagos** ya no tenía adjunto.
+- **Estado de devolución** (Compras y Pagos): No aplica / Pendiente de devolución / Se realizó devolución.
+- **Estado de entrega** (Ventas): No aplica / Pendiente de entrega / Se realizó entrega.
+- "No aplica" es el valor por defecto (y el de todos los registros que ya existían).
+- En el historial de cada una: columna Estado, filtro por estado y el monto "Pendiente de devolución/entrega".
+  El reporte de Actividad por usuario también incluye la columna Estado.
+- Los archivos ya subidos siguen ocupando espacio en Supabase Storage (bucket `comprobantes`): quitar la opción
+  evita que crezca, pero no libera lo ya subido. Eliminar una compra tampoco borra su archivo.
+
 ## Qué NO se tocó
-Las páginas Apartamentos, Pagos de Alquiler, Electricidad, Agua, Usuarios, Compras, Pagos, Ventas, Pendientes
-y Reuniones son idénticas a tu original (comparado bloque por bloque). En `db.py` y `recibo.py` solo se
+Las páginas Apartamentos, Pagos de Alquiler, Electricidad, Agua, Usuarios, Pendientes y Reuniones son idénticas
+a tu original (comparado bloque por bloque). Compras, Pagos y Ventas solo cambian en lo descrito arriba. En `db.py` y `recibo.py` solo se
 añadieron funciones; ninguna existente se modificó.
 
 ## Reglas
@@ -32,5 +46,6 @@ añadieron funciones; ninguna existente se modificó.
   fecha de ingreso) hasta hoy. Electricidad: toda factura con saldo. Hora de Bolivia (UTC-4).
 
 ## Pruebas (carpeta pruebas/)
-`python test_moras.py` · `test_deuda_real.py` · `test_compromisos.py` · `test_recorte.py` · `test_reportes.py`
-(las dos últimas necesitan `recibo.py` con su logo y fuentes al lado).
+`python test_moras.py` · `test_deuda_real.py` · `test_compromisos.py` · `test_estados.py` · `test_recorte.py` ·
+`test_reportes.py` (`test_estados.py` necesita `migracion_estados_movimientos.sql` en la misma carpeta o una arriba;
+`test_recorte.py` y `test_reportes.py` necesitan `recibo.py` con su logo y fuentes al lado).
