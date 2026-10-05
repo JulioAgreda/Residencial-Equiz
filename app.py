@@ -7,6 +7,7 @@ import calendar
 import bcrypt
 import db
 import compromisos
+import estados
 import moras
 import recibo
 import reportes
@@ -153,6 +154,19 @@ def cargar_periodos_abiertos(tipo):
     return db.listar_periodos_abiertos(tipo)
 
 
+AVISO_MIGRACION_ESTADOS = (
+    "El campo **Estado** todavía no está activo en la base de datos: ejecuta el archivo "
+    "`migracion_estados_movimientos.sql` en el SQL Editor de Supabase. Mientras tanto, esta sección "
+    "funciona normal, sin ese campo."
+)
+
+
+@st.cache_data(ttl=60)
+def estado_disponible(tabla, columna):
+    """¿Ya existe la columna de estado? (si aún no se ejecutó la migración, la app sigue funcionando sin ella)"""
+    return db.columna_disponible(tabla, columna)
+
+
 @st.cache_data(ttl=30)
 def cargar_compromisos():
     return db.listar_compromisos()
@@ -250,6 +264,7 @@ def cargar_todos_los_usuarios():
 
 
 def limpiar_cache():
+    estado_disponible.clear()
     cargar_compromisos.clear()
     cargar_actividad.clear()
     cargar_apartamentos.clear()
@@ -2651,6 +2666,9 @@ elif pagina == "👥 Usuarios":
 elif pagina == "🧾 Compras":
     st.title("🧾 Compras (Gastos)")
     st.caption("Registro de salidas de dinero del edificio: reparaciones, artículos de limpieza, servicios, etc.")
+    compras_con_estado = estado_disponible("compras", "estado_devolucion")
+    if not compras_con_estado:
+        st.warning(AVISO_MIGRACION_ESTADOS)
 
     nombre_encargado = usuario_actual.get("nombre") or usuario_actual.get("username")
 
@@ -2669,7 +2687,8 @@ elif pagina == "🧾 Compras":
             with col2:
                 proveedor = st.text_input("Proveedor (tienda o técnico)")
                 numero_comprobante = st.text_input("Número de comprobante (factura/recibo)")
-                archivo = st.file_uploader("Adjuntar comprobante (foto o PDF)", type=["pdf", "png", "jpg", "jpeg"])
+                if compras_con_estado:
+                    estado_compra = st.selectbox("Estado", estados.ESTADOS_DEVOLUCION, key="compra_estado")
             descripcion = st.text_area("Descripción detallada",
                                         placeholder='Ej. "Compra de 4 focos LED para el pasillo del piso 3"')
 
@@ -2681,12 +2700,7 @@ elif pagina == "🧾 Compras":
                     st.error("El monto total debe ser mayor a 0.")
                 else:
                     try:
-                        archivo_url = None
-                        archivo_nombre = None
-                        if archivo is not None:
-                            archivo_url = db.subir_comprobante(archivo.getvalue(), archivo.name, carpeta="compras")
-                            archivo_nombre = archivo.name
-                        db.crear_compra({
+                        nueva_compra = {
                             "fecha_compra": str(fecha_compra),
                             "categoria": categoria_otro if categoria_sel == "Otro" and categoria_otro else categoria_sel,
                             "descripcion": descripcion or None,
@@ -2694,17 +2708,18 @@ elif pagina == "🧾 Compras":
                             "metodo_pago": metodo_pago_otro if metodo_pago_sel == "Otro" and metodo_pago_otro else metodo_pago_sel,
                             "proveedor": proveedor or None,
                             "numero_comprobante": numero_comprobante or None,
-                            "archivo_url": archivo_url,
-                            "archivo_nombre": archivo_nombre,
                             "encargado": nombre_encargado,
-                        })
+                        }
+                        if compras_con_estado:
+                            nueva_compra["estado_devolucion"] = estado_compra
+                        db.crear_compra(nueva_compra)
                         st.success("Compra registrada.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al guardar: {e}")
 
     with tab_historial:
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             filtro_desde = st.date_input("Desde", value=date.today().replace(day=1), format="DD/MM/YYYY",
                                           key="compras_desde")
@@ -2712,23 +2727,33 @@ elif pagina == "🧾 Compras":
             filtro_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY", key="compras_hasta")
         with col3:
             filtro_categoria = st.selectbox("Categoría", ["Todas"] + CATEGORIAS_GASTO, key="compras_cat")
+        with col4:
+            filtro_estado = (st.selectbox("Estado", ["Todos"] + estados.ESTADOS_DEVOLUCION, key="compras_estado_filtro")
+                             if compras_con_estado else "Todos")
 
         compras = db.listar_compras(
             fecha_desde=str(filtro_desde), fecha_hasta=str(filtro_hasta),
             categoria=None if filtro_categoria == "Todas" else filtro_categoria,
         )
+        compras = estados.filtrar_por_estado(compras, "estado_devolucion", filtro_estado, estados.ESTADOS_DEVOLUCION)
 
         if not compras:
             st.info("No hay compras que coincidan con el filtro.")
         else:
             total = sum(float(c["monto_total"]) for c in compras)
-            st.metric("Total gastado en el periodo", fmt_money(total))
+            mc1, mc2 = st.columns(2)
+            mc1.metric("Total gastado en el periodo", fmt_money(total))
+            if compras_con_estado:
+                mc2.metric("Pendiente de devolución", fmt_money(estados.monto_pendiente(
+                    compras, "estado_devolucion", "monto_total", estados.PENDIENTE_DEVOLUCION)))
             st.dataframe(
                 pd.DataFrame([{
                     "Fecha": c["fecha_compra"], "Categoría": c["categoria"],
                     "Descripción": c.get("descripcion") or "", "Monto": c["monto_total"],
                     "Proveedor": c.get("proveedor") or "", "Comprobante N°": c.get("numero_comprobante") or "",
                     "Encargado": c.get("encargado") or "",
+                    **({"Estado": estados.normalizar(c.get("estado_devolucion"), estados.ESTADOS_DEVOLUCION)}
+                       if compras_con_estado else {}),
                 } for c in compras]),
                 use_container_width=True, hide_index=True,
             )
@@ -2750,6 +2775,11 @@ elif pagina == "🧾 Compras":
                     e_metodo = st.text_input("Método de pago", value=c.get("metodo_pago") or "")
                     e_proveedor = st.text_input("Proveedor", value=c.get("proveedor") or "")
                     e_comprobante = st.text_input("N° de comprobante", value=c.get("numero_comprobante") or "")
+                    if compras_con_estado:
+                        e_estado = st.selectbox(
+                            "Estado", estados.ESTADOS_DEVOLUCION,
+                            index=estados.indice(c.get("estado_devolucion"), estados.ESTADOS_DEVOLUCION),
+                            key=f'compra_estado_edit_{c["id"]}')
 
                     if es_admin:
                         colg, cold = st.columns(2)
@@ -2761,12 +2791,15 @@ elif pagina == "🧾 Compras":
 
                     if g:
                         try:
-                            db.actualizar_compra(c["id"], {
+                            cambios_compra = {
                                 "fecha_compra": str(e_fecha), "categoria": e_categoria,
                                 "descripcion": e_descripcion or None, "monto_total": e_monto,
                                 "metodo_pago": e_metodo or None, "proveedor": e_proveedor or None,
                                 "numero_comprobante": e_comprobante or None,
-                            })
+                            }
+                            if compras_con_estado:
+                                cambios_compra["estado_devolucion"] = e_estado
+                            db.actualizar_compra(c["id"], cambios_compra)
                             st.success("Compra actualizada.")
                             st.rerun()
                         except Exception as e:
@@ -2787,6 +2820,9 @@ elif pagina == "💳 Pagos":
     st.title("💳 Pagos")
     st.caption("Pagos generales del edificio que no requieren comprobante adjunto: "
                "sueldos, servicios, pagos a proveedores, etc.")
+    pagos_con_estado = estado_disponible("pagos_generales", "estado_devolucion")
+    if not pagos_con_estado:
+        st.warning(AVISO_MIGRACION_ESTADOS)
 
     nombre_encargado = usuario_actual.get("nombre") or usuario_actual.get("username")
 
@@ -2804,6 +2840,8 @@ elif pagina == "💳 Pagos":
                 metodo_pago_sel = st.selectbox("Método de pago", METODOS_PAGO_MOVIMIENTOS)
                 metodo_pago_otro = st.text_input("Especificar método de pago") if metodo_pago_sel == "Otro" else ""
                 beneficiario = st.text_input("Beneficiario (a quién se le pagó)")
+                if pagos_con_estado:
+                    estado_pago = st.selectbox("Estado", estados.ESTADOS_DEVOLUCION, key="pago_estado")
             descripcion = st.text_area("Descripción",
                                         placeholder='Ej. "Pago de factura de luz de áreas comunes, septiembre"')
 
@@ -2815,7 +2853,7 @@ elif pagina == "💳 Pagos":
                     st.error("El monto pagado debe ser mayor a 0.")
                 else:
                     try:
-                        db.crear_pago_general({
+                        nuevo_pago = {
                             "fecha_pago": str(fecha_pago),
                             "categoria": categoria_otro if categoria_sel == "Otro" and categoria_otro else categoria_sel,
                             "descripcion": descripcion or None,
@@ -2823,14 +2861,17 @@ elif pagina == "💳 Pagos":
                             "metodo_pago": metodo_pago_otro if metodo_pago_sel == "Otro" and metodo_pago_otro else metodo_pago_sel,
                             "beneficiario": beneficiario or None,
                             "encargado": nombre_encargado,
-                        })
+                        }
+                        if pagos_con_estado:
+                            nuevo_pago["estado_devolucion"] = estado_pago
+                        db.crear_pago_general(nuevo_pago)
                         st.success("Pago registrado.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al guardar: {e}")
 
     with tab_historial:
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             filtro_desde = st.date_input("Desde", value=date.today().replace(day=1), format="DD/MM/YYYY",
                                           key="pagos_gen_desde")
@@ -2838,23 +2879,34 @@ elif pagina == "💳 Pagos":
             filtro_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY", key="pagos_gen_hasta")
         with col3:
             filtro_categoria = st.selectbox("Categoría", ["Todas"] + CATEGORIAS_PAGO, key="pagos_gen_cat")
+        with col4:
+            filtro_estado = (st.selectbox("Estado", ["Todos"] + estados.ESTADOS_DEVOLUCION, key="pagos_gen_estado_filtro")
+                             if pagos_con_estado else "Todos")
 
         pagos_generales = db.listar_pagos_generales(
             fecha_desde=str(filtro_desde), fecha_hasta=str(filtro_hasta),
             categoria=None if filtro_categoria == "Todas" else filtro_categoria,
         )
+        pagos_generales = estados.filtrar_por_estado(
+            pagos_generales, "estado_devolucion", filtro_estado, estados.ESTADOS_DEVOLUCION)
 
         if not pagos_generales:
             st.info("No hay pagos que coincidan con el filtro.")
         else:
             total = sum(float(pg["monto"]) for pg in pagos_generales)
-            st.metric("Total pagado en el periodo", fmt_money(total))
+            mp1, mp2 = st.columns(2)
+            mp1.metric("Total pagado en el periodo", fmt_money(total))
+            if pagos_con_estado:
+                mp2.metric("Pendiente de devolución", fmt_money(estados.monto_pendiente(
+                    pagos_generales, "estado_devolucion", "monto", estados.PENDIENTE_DEVOLUCION)))
             st.dataframe(
                 pd.DataFrame([{
                     "Fecha": pg["fecha_pago"], "Categoría": pg["categoria"],
                     "Descripción": pg.get("descripcion") or "", "Monto": pg["monto"],
                     "Método de pago": pg.get("metodo_pago") or "", "Beneficiario": pg.get("beneficiario") or "",
                     "Encargado": pg.get("encargado") or "",
+                    **({"Estado": estados.normalizar(pg.get("estado_devolucion"), estados.ESTADOS_DEVOLUCION)}
+                       if pagos_con_estado else {}),
                 } for pg in pagos_generales]),
                 use_container_width=True, hide_index=True,
             )
@@ -2872,6 +2924,11 @@ elif pagina == "💳 Pagos":
                     e_monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0, value=float(pg["monto"]))
                     e_metodo = st.text_input("Método de pago", value=pg.get("metodo_pago") or "")
                     e_beneficiario = st.text_input("Beneficiario", value=pg.get("beneficiario") or "")
+                    if pagos_con_estado:
+                        e_estado = st.selectbox(
+                            "Estado", estados.ESTADOS_DEVOLUCION,
+                            index=estados.indice(pg.get("estado_devolucion"), estados.ESTADOS_DEVOLUCION),
+                            key=f'pago_estado_edit_{pg["id"]}')
 
                     if es_admin:
                         colg, cold = st.columns(2)
@@ -2883,11 +2940,14 @@ elif pagina == "💳 Pagos":
 
                     if g:
                         try:
-                            db.actualizar_pago_general(pg["id"], {
+                            cambios_pago = {
                                 "fecha_pago": str(e_fecha), "categoria": e_categoria,
                                 "descripcion": e_descripcion or None, "monto": e_monto,
                                 "metodo_pago": e_metodo or None, "beneficiario": e_beneficiario or None,
-                            })
+                            }
+                            if pagos_con_estado:
+                                cambios_pago["estado_devolucion"] = e_estado
+                            db.actualizar_pago_general(pg["id"], cambios_pago)
                             st.success("Pago actualizado.")
                             st.rerun()
                         except Exception as e:
@@ -2907,6 +2967,9 @@ elif pagina == "💳 Pagos":
 elif pagina == "💸 Ventas":
     st.title("💸 Ventas (Ingresos extraordinarios)")
     st.caption("Venta de activos, cobro por uso de áreas comunes, parqueos de visita, copias de llaves, etc.")
+    ventas_con_estado = estado_disponible("ventas", "estado_entrega")
+    if not ventas_con_estado:
+        st.warning(AVISO_MIGRACION_ESTADOS)
 
     nombre_encargado = usuario_actual.get("nombre") or usuario_actual.get("username")
 
@@ -2925,6 +2988,8 @@ elif pagina == "💸 Ventas":
                 forma_cobro_otro = st.text_input("Especificar forma de cobro") if forma_cobro_sel == "Otro" else ""
                 comprador = st.text_input("Comprador (residente, depto. o tercero)")
                 recibo_emitido = st.text_input("N° de recibo emitido")
+                if ventas_con_estado:
+                    estado_venta = st.selectbox("Estado", estados.ESTADOS_ENTREGA, key="venta_estado")
             descripcion = st.text_area("Descripción",
                                         placeholder='Ej. "Alquiler del salón de eventos al departamento 402"')
 
@@ -2936,7 +3001,7 @@ elif pagina == "💸 Ventas":
                     st.error("El monto recibido debe ser mayor a 0.")
                 else:
                     try:
-                        db.crear_venta({
+                        nueva_venta = {
                             "fecha_venta": str(fecha_venta),
                             "concepto": concepto_otro if concepto_sel == "Otro" and concepto_otro else concepto_sel,
                             "descripcion": descripcion or None,
@@ -2945,14 +3010,17 @@ elif pagina == "💸 Ventas":
                             "comprador": comprador or None,
                             "recibo_emitido": recibo_emitido or None,
                             "encargado": nombre_encargado,
-                        })
+                        }
+                        if ventas_con_estado:
+                            nueva_venta["estado_entrega"] = estado_venta
+                        db.crear_venta(nueva_venta)
                         st.success("Venta registrada.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al guardar: {e}")
 
     with tab_historial:
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             filtro_desde = st.date_input("Desde", value=date.today().replace(day=1), format="DD/MM/YYYY",
                                           key="ventas_desde")
@@ -2960,23 +3028,33 @@ elif pagina == "💸 Ventas":
             filtro_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY", key="ventas_hasta")
         with col3:
             filtro_concepto = st.selectbox("Concepto", ["Todos"] + CONCEPTOS_VENTA, key="ventas_concepto")
+        with col4:
+            filtro_estado = (st.selectbox("Estado", ["Todos"] + estados.ESTADOS_ENTREGA, key="ventas_estado_filtro")
+                             if ventas_con_estado else "Todos")
 
         ventas = db.listar_ventas(
             fecha_desde=str(filtro_desde), fecha_hasta=str(filtro_hasta),
             concepto=None if filtro_concepto == "Todos" else filtro_concepto,
         )
+        ventas = estados.filtrar_por_estado(ventas, "estado_entrega", filtro_estado, estados.ESTADOS_ENTREGA)
 
         if not ventas:
             st.info("No hay ventas que coincidan con el filtro.")
         else:
             total = sum(float(v["monto"]) for v in ventas)
-            st.metric("Total recibido en el periodo", fmt_money(total))
+            mv1, mv2 = st.columns(2)
+            mv1.metric("Total recibido en el periodo", fmt_money(total))
+            if ventas_con_estado:
+                mv2.metric("Pendiente de entrega", fmt_money(estados.monto_pendiente(
+                    ventas, "estado_entrega", "monto", estados.PENDIENTE_ENTREGA)))
             st.dataframe(
                 pd.DataFrame([{
                     "Fecha": v["fecha_venta"], "Concepto": v["concepto"],
                     "Descripción": v.get("descripcion") or "", "Monto": v["monto"],
                     "Comprador": v.get("comprador") or "", "Recibo N°": v.get("recibo_emitido") or "",
                     "Encargado": v.get("encargado") or "",
+                    **({"Estado": estados.normalizar(v.get("estado_entrega"), estados.ESTADOS_ENTREGA)}
+                       if ventas_con_estado else {}),
                 } for v in ventas]),
                 use_container_width=True, hide_index=True,
             )
@@ -2994,6 +3072,11 @@ elif pagina == "💸 Ventas":
                     e_forma_cobro = st.text_input("Forma de cobro", value=v.get("forma_cobro") or "")
                     e_comprador = st.text_input("Comprador", value=v.get("comprador") or "")
                     e_recibo = st.text_input("N° de recibo", value=v.get("recibo_emitido") or "")
+                    if ventas_con_estado:
+                        e_estado = st.selectbox(
+                            "Estado", estados.ESTADOS_ENTREGA,
+                            index=estados.indice(v.get("estado_entrega"), estados.ESTADOS_ENTREGA),
+                            key=f'venta_estado_edit_{v["id"]}')
 
                     if es_admin:
                         colg, cold = st.columns(2)
@@ -3005,12 +3088,15 @@ elif pagina == "💸 Ventas":
 
                     if g:
                         try:
-                            db.actualizar_venta(v["id"], {
+                            cambios_venta = {
                                 "fecha_venta": str(e_fecha), "concepto": e_concepto,
                                 "descripcion": e_descripcion or None, "monto": e_monto,
                                 "forma_cobro": e_forma_cobro or None, "comprador": e_comprador or None,
                                 "recibo_emitido": e_recibo or None,
-                            })
+                            }
+                            if ventas_con_estado:
+                                cambios_venta["estado_entrega"] = e_estado
+                            db.actualizar_venta(v["id"], cambios_venta)
                             st.success("Venta actualizada.")
                             st.rerun()
                         except Exception as e:
