@@ -66,24 +66,33 @@ def _txt(valor):
     return str(valor).strip() if valor not in (None, "") else ""
 
 
+def _estado_txt(valor):
+    """Texto del estado para el reporte: '—' si no aplica (o si el registro es anterior al campo)."""
+    texto = _txt(valor)
+    return texto if texto and texto != "No aplica" else "—"
+
+
 def fila_pago_general(r):
     return {"Fecha": _fmt_fecha(r.get("fecha_pago")), "Categoría": _txt(r.get("categoria")),
             "Descripción": _txt(r.get("descripcion")), "Beneficiario": _txt(r.get("beneficiario")),
-            "Método de pago": _txt(r.get("metodo_pago")), "Monto": float(r.get("monto") or 0)}
+            "Método de pago": _txt(r.get("metodo_pago")), "Estado": _estado_txt(r.get("estado_devolucion")),
+            "Monto": float(r.get("monto") or 0)}
 
 
 def fila_compra(r):
     return {"Fecha": _fmt_fecha(r.get("fecha_compra")), "Categoría": _txt(r.get("categoria")),
             "Descripción": _txt(r.get("descripcion")), "Proveedor": _txt(r.get("proveedor")),
             "Comprobante N°": _txt(r.get("numero_comprobante")),
-            "Método de pago": _txt(r.get("metodo_pago")), "Monto": float(r.get("monto_total") or 0)}
+            "Método de pago": _txt(r.get("metodo_pago")), "Estado": _estado_txt(r.get("estado_devolucion")),
+            "Monto": float(r.get("monto_total") or 0)}
 
 
 def fila_venta(r):
     return {"Fecha": _fmt_fecha(r.get("fecha_venta")), "Concepto": _txt(r.get("concepto")),
             "Descripción": _txt(r.get("descripcion")), "Comprador": _txt(r.get("comprador")),
             "Recibo N°": _txt(r.get("recibo_emitido")),
-            "Forma de cobro": _txt(r.get("forma_cobro")), "Monto": float(r.get("monto") or 0)}
+            "Forma de cobro": _txt(r.get("forma_cobro")), "Estado": _estado_txt(r.get("estado_entrega")),
+            "Monto": float(r.get("monto") or 0)}
 
 
 def agrupar_actividad_por_usuario(pagos_generales, compras, ventas, usuarios_extra=()):
