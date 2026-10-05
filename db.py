@@ -803,3 +803,20 @@ def actualizar_compromiso(compromiso_id, payload: dict):
 def eliminar_compromiso(compromiso_id):
     sb = get_client()
     return sb.table("compromisos_pago").delete().eq("id", compromiso_id).execute()
+
+
+# ---------- Estados de Compras / Pagos / Ventas ----------
+
+def columna_disponible(tabla, columna):
+    """True si la columna existe en la tabla. Sirve para que la app siga funcionando si todavía no se
+    ejecutó la migración SQL que la crea. Solo un error de 'columna inexistente' da False: un fallo de
+    red u otro error se vuelve a lanzar (no se debe ocultar un problema real como si faltara la migración)."""
+    sb = get_client()
+    try:
+        sb.table(tabla).select(columna).limit(1).execute()
+        return True
+    except Exception as e:
+        texto = str(e).lower()
+        if "42703" in texto or "pgrst204" in texto or "does not exist" in texto or "could not find" in texto:
+            return False
+        raise
