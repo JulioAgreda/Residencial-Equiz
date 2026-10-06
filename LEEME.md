@@ -1,7 +1,7 @@
 # Cambios sobre tu proyecto original
 
 ## Instalación
-1. Reemplaza `app.py`, `db.py`, `recibo.py` y `reportes.py`; agrega `moras.py`, `compromisos.py` y `estados.py` (nuevos).
+1. Reemplaza `app.py`, `db.py`, `recibo.py` y `reportes.py`; agrega `moras.py`, `compromisos.py`, `estados.py` y `consumo.py` (nuevos).
 2. En el SQL Editor de Supabase ejecuta, una vez cada uno (ambos son seguros y repetibles):
    - `migracion_compromisos_pago.sql`: crea la tabla de compromisos de pago.
    - `migracion_estados_movimientos.sql`: agrega las columnas de estado a Compras, Pagos y Ventas.
@@ -31,9 +31,20 @@
 - Los archivos ya subidos siguen ocupando espacio en Supabase Storage (bucket `comprobantes`): quitar la opción
   evita que crezca, pero no libera lo ya subido. Eliminar una compra tampoco borra su archivo.
 
+## Consumo de luz y agua en números enteros
+- El **consumo** (lectura actual − lectura anterior) se redondea al entero más cercano (34,5 → 35; 34,49 → 34);
+  el **monto** es ese consumo entero × la tarifa, con 2 decimales. Las lecturas se guardan tal como se escriben.
+- Se aplica al registrar o editar una lectura de electricidad o de agua, y en los historiales y el Top 5 del
+  Dashboard. Si la diferencia de lecturas no es entera, el formulario muestra una nota con el redondeo.
+- Redondeo normal (no el "del banquero" de Python, que redondea 2,5 a 2) y resta decimal exacta (con floats,
+  758,56 − 461,06 da 297,4999… y se cobraría 1 unidad de menos).
+- **Los periodos ya guardados NO se recalcularon:** conservan su monto. En sus historiales el Consumo ahora se
+  ve redondeado, así que en un periodo antiguo con diferencia decimal el monto guardado puede no coincidir con
+  consumo entero × tarifa. Se corrige solo al volver a guardar esa lectura.
+
 ## Qué NO se tocó
-Las páginas Apartamentos, Pagos de Alquiler, Electricidad, Agua, Usuarios, Pendientes y Reuniones son idénticas
-a tu original (comparado bloque por bloque). Compras, Pagos y Ventas solo cambian en lo descrito arriba. En `db.py` y `recibo.py` solo se
+Las páginas Apartamentos, Pagos de Alquiler, Usuarios, Pendientes y Reuniones son idénticas a tu original
+(comparado bloque por bloque). Compras, Pagos, Ventas, Electricidad y Agua solo cambian en lo descrito arriba. En `db.py` y `recibo.py` solo se
 añadieron funciones; ninguna existente se modificó.
 
 ## Reglas
@@ -46,6 +57,6 @@ añadieron funciones; ninguna existente se modificó.
   fecha de ingreso) hasta hoy. Electricidad: toda factura con saldo. Hora de Bolivia (UTC-4).
 
 ## Pruebas (carpeta pruebas/)
-`python test_moras.py` · `test_deuda_real.py` · `test_compromisos.py` · `test_estados.py` · `test_recorte.py` ·
+`python test_moras.py` · `test_deuda_real.py` · `test_compromisos.py` · `test_estados.py` · `test_consumo.py` · `test_recorte.py` ·
 `test_reportes.py` (`test_estados.py` necesita `migracion_estados_movimientos.sql` en la misma carpeta o una arriba;
 `test_recorte.py` y `test_reportes.py` necesitan `recibo.py` con su logo y fuentes al lado).
