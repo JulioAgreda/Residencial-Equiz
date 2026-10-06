@@ -218,11 +218,14 @@ def total_pagado(periodo):
     return sum(float(p["monto"]) for p in (periodo.get("pagos") or []))
 
 
-def mostrar_botones_recibo(pago, periodo, apartamento, total_pagado_periodo, key_sufijo):
-    """Muestra dos botones de descarga (PDF y PNG) para el recibo de un abono
-    de alquiler. Se usa tanto en la vista normal como en el historial."""
+def mostrar_botones_recibo(pago, periodo, apartamento, total_pagado_periodo, key_sufijo, servicio=None):
+    """Muestra dos botones de descarga (PDF y PNG) para el recibo de un abono de alquiler
+    (servicio=None) o de un servicio ('electricidad' / 'agua'). Se usa tanto en la vista normal
+    como en el historial."""
     try:
-        datos_recibo = recibo.construir_datos_recibo(
+        constructor = (recibo.construir_datos_recibo if servicio is None
+                       else lambda *a, **k: recibo.construir_datos_recibo_servicio(servicio, *a, **k))
+        datos_recibo = constructor(
             pago, periodo, apartamento, total_pagado_periodo,
             recibido_por=usuario_actual.get("nombre") or usuario_actual.get("username"),
         )
@@ -1269,6 +1272,9 @@ elif pagina == "⚡ Electricidad":
                 st.subheader(f"Abonos ya registrados — {mes} {int(anio)}")
                 for p in sorted(abonos, key=lambda x: x["fecha"]):
                     with st.expander(f'{p["fecha"]} — {fmt_money(p["monto"])} — {p.get("metodo_pago") or ""}'):
+                        mostrar_botones_recibo(p, periodo, apt, sum(float(x["monto"]) for x in abonos),
+                                               key_sufijo=f'elec_{p["id"]}', servicio="electricidad")
+                        st.divider()
                         with st.form(f'form_editar_pago_elec_{p["id"]}'):
                             colf, colm = st.columns(2)
                             with colf:
@@ -1383,6 +1389,11 @@ elif pagina == "⚡ Electricidad":
                 else:
                     for p in sorted(detalle_abonos, key=lambda x: x["fecha"]):
                         with st.expander(f'{p["fecha"]} — {fmt_money(p["monto"])} — {p.get("metodo_pago") or ""}'):
+                            mostrar_botones_recibo(
+                                p, detalle_periodo, detalle_periodo.get("apartamentos"),
+                                sum(float(x["monto"]) for x in detalle_abonos),
+                                key_sufijo=f'elec_hist_{p["id"]}', servicio="electricidad")
+                            st.divider()
                             with st.form(f'form_editar_pago_elec_hist_{p["id"]}'):
                                 colf, colm = st.columns(2)
                                 with colf:
@@ -1564,6 +1575,9 @@ elif pagina == "💧 Agua":
                 st.subheader(f"Abonos ya registrados — {mes} {int(anio)}")
                 for p in sorted(abonos, key=lambda x: x["fecha"]):
                     with st.expander(f'{p["fecha"]} — {fmt_money(p["monto"])} — {p.get("metodo_pago") or ""}'):
+                        mostrar_botones_recibo(p, periodo, apt, sum(float(x["monto"]) for x in abonos),
+                                               key_sufijo=f'agua_{p["id"]}', servicio="agua")
+                        st.divider()
                         with st.form(f'form_editar_pago_agua_{p["id"]}'):
                             colf, colm = st.columns(2)
                             with colf:
@@ -1678,6 +1692,11 @@ elif pagina == "💧 Agua":
                 else:
                     for p in sorted(detalle_abonos, key=lambda x: x["fecha"]):
                         with st.expander(f'{p["fecha"]} — {fmt_money(p["monto"])} — {p.get("metodo_pago") or ""}'):
+                            mostrar_botones_recibo(
+                                p, detalle_periodo, detalle_periodo.get("apartamentos"),
+                                sum(float(x["monto"]) for x in detalle_abonos),
+                                key_sufijo=f'agua_hist_{p["id"]}', servicio="agua")
+                            st.divider()
                             with st.form(f'form_editar_pago_agua_hist_{p["id"]}'):
                                 colf, colm = st.columns(2)
                                 with colf:
