@@ -7,6 +7,7 @@ import calendar
 import bcrypt
 import db
 import compromisos
+import consumo as calc_consumo
 import estados
 import moras
 import recibo
@@ -569,7 +570,7 @@ if pagina == "📊 Dashboard":
         filas_elec = []
         for p in periodos_elec_sel:
             apt_info = p.get("apartamentos") or {}
-            consumo = float(p["kwh_actual"]) - float(p["kwh_anterior"])
+            consumo = calc_consumo.calcular_consumo(p["kwh_anterior"], p["kwh_actual"])
             filas_elec.append({
                 "Apartamento": apt_info.get("codigo"),
                 "Inquilino": apt_info.get("inquilino_nombre") or "—",
@@ -585,7 +586,7 @@ if pagina == "📊 Dashboard":
         filas_agua = []
         for p in periodos_agua_sel:
             apt_info = p.get("apartamentos") or {}
-            consumo = float(p["lectura_actual"]) - float(p["lectura_anterior"])
+            consumo = calc_consumo.calcular_consumo(p["lectura_anterior"], p["lectura_actual"])
             filas_agua.append({
                 "Apartamento": apt_info.get("codigo"),
                 "Inquilino": apt_info.get("inquilino_nombre") or "—",
@@ -1189,9 +1190,12 @@ elif pagina == "⚡ Electricidad":
                 tarifa_kwh = st.number_input("Tarifa por Kwh (Bs)", min_value=0.0, step=0.01, format="%.4f",
                                               value=tarifa_default)
 
-            consumo = max(kwh_actual - kwh_anterior, 0)
-            monto_calculado = consumo * tarifa_kwh
-            st.caption(f"Consumo: {consumo:g} Kwh  ×  Bs {tarifa_kwh:.4f}  =  **{fmt_money(monto_calculado)}**")
+            consumo = calc_consumo.calcular_consumo(kwh_anterior, kwh_actual)   # número entero (redondeo normal)
+            monto_calculado = calc_consumo.calcular_monto(consumo, tarifa_kwh)
+            st.caption(f"Consumo: {consumo} Kwh  ×  Bs {tarifa_kwh:.4f}  =  **{fmt_money(monto_calculado)}**")
+            nota_redondeo = calc_consumo.nota_redondeo(kwh_anterior, kwh_actual)
+            if nota_redondeo:
+                st.caption(f"ℹ️ El consumo se redondea a número entero: {nota_redondeo}.")
 
             guardar_lectura = st.form_submit_button("💾 Guardar lectura")
             if guardar_lectura:
@@ -1344,7 +1348,7 @@ elif pagina == "⚡ Electricidad":
                     "Año": p["anio"],
                     "Kwh anterior": p["kwh_anterior"],
                     "Kwh actual": p["kwh_actual"],
-                    "Consumo": float(p["kwh_actual"]) - float(p["kwh_anterior"]),
+                    "Consumo": calc_consumo.calcular_consumo(p["kwh_anterior"], p["kwh_actual"]),
                     "Esperado": p["monto_esperado"],
                     "Pagado": pagado,
                     "Deuda": deuda,
@@ -1481,9 +1485,12 @@ elif pagina == "💧 Agua":
                 tarifa_agua = st.number_input("Tarifa por m³ (Bs)", min_value=0.0, step=0.01, format="%.4f",
                                                value=tarifa_default)
 
-            consumo = max(lectura_actual - lectura_anterior, 0)
-            monto_calculado = consumo * tarifa_agua
-            st.caption(f"Consumo: {consumo:g} m³  ×  Bs {tarifa_agua:.4f}  =  **{fmt_money(monto_calculado)}**")
+            consumo = calc_consumo.calcular_consumo(lectura_anterior, lectura_actual)   # número entero (redondeo normal)
+            monto_calculado = calc_consumo.calcular_monto(consumo, tarifa_agua)
+            st.caption(f"Consumo: {consumo} m³  ×  Bs {tarifa_agua:.4f}  =  **{fmt_money(monto_calculado)}**")
+            nota_redondeo = calc_consumo.nota_redondeo(lectura_anterior, lectura_actual)
+            if nota_redondeo:
+                st.caption(f"ℹ️ El consumo se redondea a número entero: {nota_redondeo}.")
 
             guardar_lectura = st.form_submit_button("💾 Guardar lectura")
             if guardar_lectura:
@@ -1636,7 +1643,7 @@ elif pagina == "💧 Agua":
                     "Año": p["anio"],
                     "Lectura anterior": p["lectura_anterior"],
                     "Lectura actual": p["lectura_actual"],
-                    "Consumo": float(p["lectura_actual"]) - float(p["lectura_anterior"]),
+                    "Consumo": calc_consumo.calcular_consumo(p["lectura_anterior"], p["lectura_actual"]),
                     "Esperado": p["monto_esperado"],
                     "Pagado": pagado,
                     "Deuda": deuda,
