@@ -13,6 +13,8 @@ import re
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
+import consumo as _consumo
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A5, letter
 from reportlab.lib.styles import getSampleStyleSheet
@@ -109,6 +111,75 @@ def construir_datos_recibo(pago, periodo, apartamento, total_pagado_periodo, rec
 
 
 # ============================================================
+# Recibos de LUZ y AGUA: mismo formato que el de alquiler + lecturas del medidor
+# ============================================================
+
+SERVICIOS = {
+    "electricidad": {"titulo": "Recibo de Pago de Electricidad", "prefijo": "REC-L", "unidad": "Kwh",
+                     "campo_anterior": "kwh_anterior", "campo_actual": "kwh_actual", "campo_tarifa": "tarifa_kwh"},
+    "agua": {"titulo": "Recibo de Pago de Agua", "prefijo": "REC-A", "unidad": "m³",
+             "campo_anterior": "lectura_anterior", "campo_actual": "lectura_actual", "campo_tarifa": "tarifa_agua"},
+}
+
+
+def _fmt_num(valor):
+    """6509 -> '6,509'; 1200.1 -> '1,200.1'; 12.50 -> '12.5'."""
+    texto = f"{float(valor):,.2f}"
+    return texto.rstrip("0").rstrip(".")
+
+
+def _fmt_tarifa(valor):
+    """1.3 -> '1.30'; 1.2345 -> '1.2345' (mínimo 2 decimales, máximo 4)."""
+    texto = f"{float(valor or 0):.4f}"
+    while texto.endswith("0") and len(texto.split(".")[1]) > 2:
+        texto = texto[:-1]
+    return texto
+
+
+def _detalle_lecturas(cfg, periodo):
+    """Filas (etiqueta, valor) con las lecturas del medidor. El consumo y la tarifa solo se imprimen si
+    el monto guardado de ese periodo corresponde a esa cuenta: los periodos guardados antes de redondear
+    el cobro a boliviano entero tienen otro monto, y un recibo no debe mostrar números que no cuadran."""
+    periodo = periodo or {}
+    anterior, actual = periodo.get(cfg["campo_anterior"]), periodo.get(cfg["campo_actual"])
+    if anterior is None or actual is None:
+        return []
+    unidad = cfg["unidad"]
+    filas = [("Lectura anterior:", f"{_fmt_num(anterior)} {unidad}"),
+             ("Lectura actual:", f"{_fmt_num(actual)} {unidad}")]
+    tarifa = float(periodo.get(cfg["campo_tarifa"]) or 0)
+    consumo_entero = _consumo.calcular_consumo(anterior, actual)
+    if abs(_consumo.calcular_monto(consumo_entero, tarifa) - float(periodo.get("monto_esperado") or 0)) < 0.005:
+        filas += [("Consumo:", f"{consumo_entero} {unidad}"),
+                  ("Tarifa:", f"Bs {_fmt_tarifa(tarifa)} por {unidad}")]
+    return filas
+
+
+@lru_cache(maxsize=1)
+def _fuente_pdf_unicode():
+    """Nombre de una fuente incrustada que sí dibuja caracteres como '³' (la Helvetica estándar de los PDF no
+    lo dibuja de forma fiable: 'm³' se vería 'm'). Si no se puede cargar, se usa Helvetica."""
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        pdfmetrics.registerFont(TTFont("DejaVuSans-Recibo", os.path.join(_DIR, "assets", "fonts", "DejaVuSans.ttf")))
+        return "DejaVuSans-Recibo"
+    except Exception:
+        return "Helvetica"
+
+
+def construir_datos_recibo_servicio(servicio, pago, periodo, apartamento, total_pagado_periodo, recibido_por):
+    """Como construir_datos_recibo, para un abono de 'electricidad' o 'agua'. El número lleva prefijo propio
+    (REC-L / REC-A) porque cada servicio tiene su propia tabla de abonos y los ids se repetirían entre ellas."""
+    cfg = SERVICIOS[servicio]
+    datos = construir_datos_recibo(pago, periodo, apartamento, total_pagado_periodo, recibido_por)
+    datos["numero_recibo"] = f'{cfg["prefijo"]}-{int(pago["id"]):06d}'
+    datos["titulo"] = cfg["titulo"]
+    datos["detalle"] = _detalle_lecturas(cfg, periodo)
+    return datos
+
+
+# ============================================================
 # PDF — formato compacto, tipo comprobante
 # ============================================================
 
@@ -135,7 +206,7 @@ def generar_recibo_pdf(datos: dict) -> bytes:
     c.drawString(texto_x, y - 6 * mm, NOMBRE_RESIDENCIAL)
     c.setFont("Helvetica", 8.5)
     c.setFillColor(colors.Color(0.33, 0.33, 0.33))
-    c.drawString(texto_x, y - 11.5 * mm, "Recibo de Pago de Alquiler")
+    c.drawString(texto_x, y - 11.5 * mm, datos.get("titulo", "Recibo de Pago de Alquiler"))
     c.setFillColor(colors.black)
     y -= logo_h + 3 * mm
 
@@ -148,11 +219,11 @@ def generar_recibo_pdf(datos: dict) -> bytes:
     c.drawRightString(ancho - margen, y, f'Emitido: {datos["fecha_emision"]}')
     y -= 7 * mm
 
-    def fila(etiqueta, valor, negrita_valor=False, tam=9.5):
+    def fila(etiqueta, valor, negrita_valor=False, tam=9.5, fuente_valor=None):
         nonlocal y
         c.setFont("Helvetica-Bold", tam)
         c.drawString(margen, y, etiqueta)
-        c.setFont("Helvetica-Bold" if negrita_valor else "Helvetica", tam)
+        c.setFont(fuente_valor or ("Helvetica-Bold" if negrita_valor else "Helvetica"), tam)
         c.drawRightString(ancho - margen, y, str(valor))
         y -= 6 * mm
 
@@ -165,6 +236,14 @@ def generar_recibo_pdf(datos: dict) -> bytes:
     y -= 1 * mm
     c.line(margen, y, ancho - margen, y)
     y -= 6 * mm
+
+    if datos.get("detalle"):          # p. ej. lecturas del medidor en los recibos de luz y agua
+        necesita_unicode = any("³" in str(v) for _e, v in datos["detalle"])
+        for etiqueta, valor in datos["detalle"]:
+            fila(etiqueta, valor, fuente_valor=_fuente_pdf_unicode() if necesita_unicode else None)
+        y -= 1 * mm
+        c.line(margen, y, ancho - margen, y)
+        y -= 6 * mm
 
     fila("Monto esperado del mes:", _fmt_bs(datos["monto_esperado"]))
     fila("Total pagado a la fecha:", _fmt_bs(datos["total_pagado_periodo"]))
@@ -238,7 +317,7 @@ def generar_recibo_png(datos: dict) -> bytes:
             pass
 
     draw.text((texto_x, y + 6), NOMBRE_RESIDENCIAL, font=f_titulo, fill="black")
-    draw.text((texto_x, y + 42), "Recibo de Pago de Alquiler", font=f_sub, fill="#555555")
+    draw.text((texto_x, y + 42), datos.get("titulo", "Recibo de Pago de Alquiler"), font=f_sub, fill="#555555")
     y += max(logo_alto, 70) + 14
 
     draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
@@ -267,6 +346,13 @@ def generar_recibo_png(datos: dict) -> bytes:
     y += 6
     draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
     y += 20
+
+    if datos.get("detalle"):          # p. ej. lecturas del medidor en los recibos de luz y agua
+        for etiqueta, valor in datos["detalle"]:
+            y = fila(etiqueta, valor, y)
+        y += 6
+        draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
+        y += 20
 
     y = fila("Monto esperado del mes:", _fmt_bs(datos["monto_esperado"]), y)
     y = fila("Total pagado a la fecha:", _fmt_bs(datos["total_pagado_periodo"]), y)
