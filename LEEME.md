@@ -44,6 +44,16 @@
   ese apartamento/mes en Electricidad o Agua y pulsa «Guardar lectura» de nuevo: pasa a monto entero y los abonos
   ya registrados se conservan.
 
+## Recibos de pago de electricidad y agua
+- Cada abono de **Electricidad** y de **Agua** tiene ahora botones «Descargar recibo (PDF / PNG)», en el registro y
+  en el historial, igual que los de alquiler: mismo diseño, con las lecturas del medidor entre los datos del pago
+  (lectura anterior, lectura actual, consumo y tarifa).
+- Numeración propia para que no se repita entre servicios: alquiler `REC-000012`, luz `REC-L-000012`, agua `REC-A-000012`.
+- Si el monto guardado de un periodo no corresponde a consumo × tarifa (periodos guardados antes de redondear el
+  cobro a entero), el recibo imprime solo las lecturas y no el consumo ni la tarifa, para no mostrar números que no
+  cuadran. Se corrige volviendo a guardar la lectura.
+- El recibo de alquiler no cambió (comparado píxel a píxel con la versión anterior).
+
 ## Qué NO se tocó
 Las páginas Apartamentos, Pagos de Alquiler, Usuarios, Pendientes y Reuniones son idénticas a tu original
 (comparado bloque por bloque). Compras, Pagos, Ventas, Electricidad y Agua solo cambian en lo descrito arriba. En `db.py` y `recibo.py` solo se
@@ -59,6 +69,6 @@ añadieron funciones; ninguna existente se modificó.
   fecha de ingreso) hasta hoy. Electricidad: toda factura con saldo. Hora de Bolivia (UTC-4).
 
 ## Pruebas (carpeta pruebas/)
-`python test_moras.py` · `test_deuda_real.py` · `test_compromisos.py` · `test_estados.py` · `test_consumo.py` · `test_recorte.py` ·
+`python test_moras.py` · `test_deuda_real.py` · `test_compromisos.py` · `test_estados.py` · `test_consumo.py` · `test_recibo_servicios.py` · `test_recorte.py` ·
 `test_reportes.py` (`test_estados.py` necesita `migracion_estados_movimientos.sql` en la misma carpeta o una arriba;
 `test_recorte.py` y `test_reportes.py` necesitan `recibo.py` con su logo y fuentes al lado).
