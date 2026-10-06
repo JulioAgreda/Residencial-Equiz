@@ -31,16 +31,18 @@
 - Los archivos ya subidos siguen ocupando espacio en Supabase Storage (bucket `comprobantes`): quitar la opción
   evita que crezca, pero no libera lo ya subido. Eliminar una compra tampoco borra su archivo.
 
-## Consumo de luz y agua en números enteros
-- El **consumo** (lectura actual − lectura anterior) se redondea al entero más cercano (34,5 → 35; 34,49 → 34);
-  el **monto** es ese consumo entero × la tarifa, con 2 decimales. Las lecturas se guardan tal como se escriben.
-- Se aplica al registrar o editar una lectura de electricidad o de agua, y en los historiales y el Top 5 del
-  Dashboard. Si la diferencia de lecturas no es entera, el formulario muestra una nota con el redondeo.
-- Redondeo normal (no el "del banquero" de Python, que redondea 2,5 a 2) y resta decimal exacta (con floats,
-  758,56 − 461,06 da 297,4999… y se cobraría 1 unidad de menos).
-- **Los periodos ya guardados NO se recalcularon:** conservan su monto. En sus historiales el Consumo ahora se
-  ve redondeado, así que en un periodo antiguo con diferencia decimal el monto guardado puede no coincidir con
-  consumo entero × tarifa. Se corrige solo al volver a guardar esa lectura.
+## Luz y agua: consumo y monto en números enteros
+- El **consumo** (lectura actual − lectura anterior) se redondea al entero más cercano (34,5 → 35; 34,49 → 34).
+- El **monto a cobrar** (consumo entero × tarifa) se redondea al **boliviano entero**: 59 Kwh × Bs 1,30 = 76,70 → **Bs 77**.
+  El formulario muestra el paso: «Consumo: 59 Kwh × Bs 1.3000 = Bs 76.70 → **Bs 77.00** (redondeado al entero)».
+- Las lecturas se guardan tal como se escriben; se guarda como deuda (`monto_esperado`) el monto entero.
+- Se aplica al registrar o editar una lectura, y el consumo también en los historiales y el Top 5 del Dashboard.
+- Redondeo normal (no el «del banquero» de Python, que redondea 2,5 a 2) y cuentas decimales exactas (con floats,
+  758,56 − 461,06 da 297,4999… y se cobraría 1 unidad de menos). El monto se redondea desde el producto exacto,
+  no en dos pasos (0,495 → 0, no 0,50 → 1).
+- **Los periodos ya guardados NO se recalcularon** (conservan su monto, p. ej. 76,70). Para actualizar uno, abre
+  ese apartamento/mes en Electricidad o Agua y pulsa «Guardar lectura» de nuevo: pasa a monto entero y los abonos
+  ya registrados se conservan.
 
 ## Qué NO se tocó
 Las páginas Apartamentos, Pagos de Alquiler, Usuarios, Pendientes y Reuniones son idénticas a tu original
