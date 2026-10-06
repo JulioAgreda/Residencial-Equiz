@@ -130,6 +130,16 @@ def fmt_money(v):
         return "Bs 0.00"
 
 
+def detalle_monto_servicio(consumo, tarifa):
+    """Resultado de consumo × tarifa para mostrar en pantalla: 'Bs 76.70 → **Bs 77.00** (redondeado al entero)'
+    si el redondeo cambia el monto, o solo '**Bs 77.00**' si ya era entero."""
+    exacto = calc_consumo.monto_exacto(consumo, tarifa)
+    final = calc_consumo.calcular_monto(consumo, tarifa)
+    if abs(exacto - final) > 0.004:
+        return f"{fmt_money(exacto)} → **{fmt_money(final)}** (redondeado al entero)"
+    return f"**{fmt_money(final)}**"
+
+
 @st.cache_data(ttl=30)
 def cargar_apartamentos():
     return db.listar_apartamentos()
@@ -1192,7 +1202,7 @@ elif pagina == "⚡ Electricidad":
 
             consumo = calc_consumo.calcular_consumo(kwh_anterior, kwh_actual)   # número entero (redondeo normal)
             monto_calculado = calc_consumo.calcular_monto(consumo, tarifa_kwh)
-            st.caption(f"Consumo: {consumo} Kwh  ×  Bs {tarifa_kwh:.4f}  =  **{fmt_money(monto_calculado)}**")
+            st.caption(f"Consumo: {consumo} Kwh  ×  Bs {tarifa_kwh:.4f}  =  {detalle_monto_servicio(consumo, tarifa_kwh)}")
             nota_redondeo = calc_consumo.nota_redondeo(kwh_anterior, kwh_actual)
             if nota_redondeo:
                 st.caption(f"ℹ️ El consumo se redondea a número entero: {nota_redondeo}.")
@@ -1487,7 +1497,7 @@ elif pagina == "💧 Agua":
 
             consumo = calc_consumo.calcular_consumo(lectura_anterior, lectura_actual)   # número entero (redondeo normal)
             monto_calculado = calc_consumo.calcular_monto(consumo, tarifa_agua)
-            st.caption(f"Consumo: {consumo} m³  ×  Bs {tarifa_agua:.4f}  =  **{fmt_money(monto_calculado)}**")
+            st.caption(f"Consumo: {consumo} m³  ×  Bs {tarifa_agua:.4f}  =  {detalle_monto_servicio(consumo, tarifa_agua)}")
             nota_redondeo = calc_consumo.nota_redondeo(lectura_anterior, lectura_actual)
             if nota_redondeo:
                 st.caption(f"ℹ️ El consumo se redondea a número entero: {nota_redondeo}.")
