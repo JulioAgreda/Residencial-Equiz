@@ -10,6 +10,7 @@ import compromisos
 import consumo as calc_consumo
 import estados
 import moras
+import servicios_basicos
 import recibo
 import reportes
 
@@ -179,6 +180,11 @@ def estado_disponible(tabla, columna):
 
 
 @st.cache_data(ttl=30)
+def cargar_servicios_basicos():
+    return db.listar_servicios_basicos()
+
+
+@st.cache_data(ttl=30)
 def cargar_compromisos():
     return db.listar_compromisos()
 
@@ -278,6 +284,7 @@ def cargar_todos_los_usuarios():
 
 
 def limpiar_cache():
+    cargar_servicios_basicos.clear()
     estado_disponible.clear()
     cargar_compromisos.clear()
     cargar_actividad.clear()
@@ -374,7 +381,7 @@ else:
                           "🤝 Compromisos de pago"]
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
-opciones_administracion = ["(ninguno)", "✅ Pendientes", "🗒️ Reuniones"]
+opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "🗒️ Reuniones"]
 opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📊 Actividad por usuario"]
 
 # Los radios de abajo son independientes en el estado interno de Streamlit:
@@ -2231,6 +2238,131 @@ elif pagina == "🤝 Compromisos de pago":
                         st.rerun()
                     except Exception as e:
                         st.error(f"No se pudo eliminar: {e}")
+
+elif pagina == "🔌 Servicios Básicos":
+    st.title("🔌 Servicios Básicos")
+    st.caption("Datos de contacto de los proveedores de servicios básicos del edificio "
+               "(electricidad, agua, internet, gas, etc.).")
+    mensaje_flash = st.session_state.pop("servicio_msg", None)
+    if mensaje_flash:
+        st.success(mensaje_flash)
+    try:
+        servicios = servicios_basicos.ordenar(cargar_servicios_basicos())
+    except Exception as e:
+        st.error("No se pudo leer la lista de servicios básicos.")
+        st.caption(f"Detalle técnico: {e}")
+        st.stop()
+    usuarios_por_id_sb = {u["id"]: (u.get("nombre") or u.get("username")) for u in cargar_todos_los_usuarios()}
+    n_form_sb = st.session_state.get("serv_form_n", 0)   # cambia al guardar: el formulario se limpia solo si salió bien
+
+    tab_nuevo_sb, tab_lista_sb = st.tabs(["➕ Nuevo servicio", "📋 Lista"])
+
+    # ---------------- Nuevo servicio ----------------
+    with tab_nuevo_sb:
+        with st.form(f"form_nuevo_servicio_{n_form_sb}"):
+            sb_nombre = st.text_input("Nombre del Servicio", placeholder='Ej. "Electricidad", "Agua", "Internet"',
+                                      max_chars=100, key=f"sbn_nombre_{n_form_sb}")
+            sb_empresa = st.text_input("Empresa proveedora", max_chars=150, key=f"sbn_empresa_{n_form_sb}")
+            sbc1, sbc2 = st.columns(2)
+            with sbc1:
+                sb_telefono = st.text_input("Teléfono", max_chars=50, key=f"sbn_tel_{n_form_sb}")
+            with sbc2:
+                sb_codigo = st.text_input("Código (cliente / cuenta / NIS)", max_chars=80, key=f"sbn_cod_{n_form_sb}")
+            sb_titular = st.text_input("Titular", max_chars=150, key=f"sbn_titular_{n_form_sb}")
+            sb_obs = st.text_area("Observación", max_chars=2000, key=f"sbn_obs_{n_form_sb}")
+            guardar_sb = st.form_submit_button("💾 Guardar servicio")
+        if guardar_sb:
+            errores_sb = servicios_basicos.validar_servicio(sb_nombre, sb_empresa, sb_telefono, sb_codigo, sb_titular, sb_obs)
+            for err in errores_sb:
+                st.error(err)
+            if not errores_sb:
+                try:
+                    db.crear_servicio_basico(servicios_basicos.armar_registro(
+                        sb_nombre, sb_empresa, sb_telefono, sb_codigo, sb_titular, sb_obs,
+                        creado_por=usuario_actual.get("id")))
+                    limpiar_cache()
+                    st.session_state["serv_form_n"] = n_form_sb + 1
+                    st.session_state["servicio_msg"] = "Servicio guardado."
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"No se pudo guardar: {e}")
+
+    # ---------------- Lista ----------------
+    with tab_lista_sb:
+        if not servicios:
+            st.info("Todavía no hay servicios registrados.")
+        else:
+            texto_sb = st.text_input("Buscar", placeholder="Servicio, empresa, teléfono, código o titular",
+                                     key="serv_buscar")
+            visibles = servicios_basicos.filtrar(servicios, texto_sb)
+            if not visibles:
+                st.info("Ningún servicio coincide con la búsqueda.")
+            else:
+                st.dataframe(pd.DataFrame([{
+                    "Servicio": x.get("nombre_servicio") or "", "Empresa proveedora": x.get("empresa_proveedor") or "",
+                    "Teléfono": x.get("telefono") or "", "Código": x.get("codigo") or "", "Titular": x.get("titular") or "",
+                    "Observación": x.get("observacion") or "",
+                    "Registrado por": usuarios_por_id_sb.get(x.get("creado_por")) or "—",
+                } for x in visibles]), use_container_width=True, hide_index=True,
+                    column_config={"Observación": st.column_config.TextColumn(width="large")})
+
+                st.divider()
+                st.markdown("### ✏️ Editar un servicio")
+                por_id_sb = {x["id"]: x for x in visibles}
+                id_sb = st.selectbox(
+                    "Servicio", list(por_id_sb.keys()), key="serv_editar_sel",
+                    format_func=lambda i: f'{por_id_sb[i].get("nombre_servicio")} — {por_id_sb[i].get("empresa_proveedor") or "sin empresa"}')
+                x_sel = por_id_sb[id_sb]
+                with st.form(f"form_editar_servicio_{id_sb}"):
+                    e_nombre = st.text_input("Nombre del Servicio", value=x_sel.get("nombre_servicio") or "",
+                                             max_chars=100, key=f"sbe_nombre_{id_sb}")
+                    e_empresa = st.text_input("Empresa proveedora", value=x_sel.get("empresa_proveedor") or "",
+                                              max_chars=150, key=f"sbe_empresa_{id_sb}")
+                    ec1, ec2 = st.columns(2)
+                    with ec1:
+                        e_telefono = st.text_input("Teléfono", value=x_sel.get("telefono") or "", max_chars=50,
+                                                   key=f"sbe_tel_{id_sb}")
+                    with ec2:
+                        e_codigo = st.text_input("Código (cliente / cuenta / NIS)", value=x_sel.get("codigo") or "",
+                                                 max_chars=80, key=f"sbe_cod_{id_sb}")
+                    e_titular = st.text_input("Titular", value=x_sel.get("titular") or "", max_chars=150,
+                                              key=f"sbe_titular_{id_sb}")
+                    e_obs = st.text_area("Observación", value=x_sel.get("observacion") or "", max_chars=2000,
+                                         key=f"sbe_obs_{id_sb}")
+                    if es_admin:
+                        confirmar_borrar_sb = st.checkbox("Confirmo que quiero eliminar este servicio",
+                                                          key=f"sbe_confirmar_{id_sb}")
+                        cgs, cds = st.columns(2)
+                        guardar_e_sb = cgs.form_submit_button("💾 Guardar cambios", use_container_width=True)
+                        eliminar_e_sb = cds.form_submit_button("🗑️ Eliminar", use_container_width=True)
+                    else:
+                        confirmar_borrar_sb, eliminar_e_sb = False, False
+                        guardar_e_sb = st.form_submit_button("💾 Guardar cambios", use_container_width=True)
+
+                if guardar_e_sb:
+                    errores_e = servicios_basicos.validar_servicio(e_nombre, e_empresa, e_telefono, e_codigo, e_titular, e_obs)
+                    for err in errores_e:
+                        st.error(err)
+                    if not errores_e:
+                        try:
+                            db.actualizar_servicio_basico(id_sb, servicios_basicos.armar_registro(
+                                e_nombre, e_empresa, e_telefono, e_codigo, e_titular, e_obs))
+                            limpiar_cache()
+                            st.session_state["servicio_msg"] = "Servicio actualizado."
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"No se pudo actualizar: {e}")
+                if eliminar_e_sb and es_admin:
+                    if not confirmar_borrar_sb:
+                        st.warning("Marca la casilla de confirmación para poder eliminar.")
+                    else:
+                        try:
+                            db.eliminar_servicio_basico(id_sb)
+                            limpiar_cache()
+                            st.session_state["servicio_msg"] = "Servicio eliminado."
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"No se pudo eliminar: {e}")
 
 elif pagina == "✅ Pendientes":
     st.title("✅ Pendientes")
