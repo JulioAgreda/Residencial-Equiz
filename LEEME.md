@@ -1,7 +1,12 @@
+> ⚠️ **Lee `0_LEER_PRIMERO.txt` antes de instalar.** Instala todos los archivos juntos. El `app.py` que recibí era más viejo que tu
+> aplicación en línea: la página **Servicios Básicos** la reconstruí (réplica, no tu código original) y tu versión podría
+> tener otras pantallas que esta no tiene. Revisa tus menús antes de reemplazar; el cambio se puede revertir desde el
+> historial de GitHub.
+
 # Cambios sobre tu proyecto original
 
 ## Instalación
-1. Reemplaza `app.py`, `db.py`, `recibo.py` y `reportes.py`; agrega `moras.py`, `compromisos.py`, `estados.py` y `consumo.py` (nuevos).
+1. Reemplaza `app.py`, `db.py`, `recibo.py` y `reportes.py`; agrega `moras.py`, `compromisos.py`, `estados.py`, `consumo.py` y `servicios_basicos.py` (nuevos).
 2. En el SQL Editor de Supabase ejecuta, una vez cada uno (ambos son seguros y repetibles):
    - `migracion_compromisos_pago.sql`: crea la tabla de compromisos de pago.
    - `migracion_estados_movimientos.sql`: agrega las columnas de estado a Compras, Pagos y Ventas.
@@ -15,7 +20,7 @@
   (Pendiente / Cumplido / Incumplido; un Pendiente con plazo pasado se ve como Vencido).
   Todos los usuarios registran y editan; solo el Administrador elimina (con casilla de confirmación).
   Guarda quién registró y quién editó por última vez.
-- **🗂️ Módulo Administración**: agrupa Pendientes y Reuniones (antes eran dos módulos separados).
+- **🗂️ Módulo Administración**: agrupa Pendientes, **Servicios Básicos** (reconstruido) y Reuniones (antes eran módulos separados).
 - **📑 Módulo de Reportes**: Estado de cuenta (PDF/PNG para el inquilino) y Actividad por usuario (Excel/PDF).
 - **🏠 Inquilinos** (cobradores): consulta de solo lectura de los datos de cada apartamento.
 
@@ -69,6 +74,6 @@ añadieron funciones; ninguna existente se modificó.
   fecha de ingreso) hasta hoy. Electricidad: toda factura con saldo. Hora de Bolivia (UTC-4).
 
 ## Pruebas (carpeta pruebas/)
-`python test_moras.py` · `test_deuda_real.py` · `test_compromisos.py` · `test_estados.py` · `test_consumo.py` · `test_recibo_servicios.py` · `test_recorte.py` ·
+`python test_moras.py` · `test_deuda_real.py` · `test_compromisos.py` · `test_estados.py` · `test_consumo.py` · `test_servicios_basicos.py` · `test_recibo_servicios.py` · `test_recorte.py` ·
 `test_reportes.py` (`test_estados.py` necesita `migracion_estados_movimientos.sql` en la misma carpeta o una arriba;
 `test_recorte.py` y `test_reportes.py` necesitan `recibo.py` con su logo y fuentes al lado).
