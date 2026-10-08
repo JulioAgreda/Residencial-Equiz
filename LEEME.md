@@ -6,10 +6,11 @@
 # Cambios sobre tu proyecto original
 
 ## Instalación
-1. Reemplaza `app.py`, `db.py`, `recibo.py` y `reportes.py`; agrega `moras.py`, `compromisos.py`, `estados.py`, `consumo.py` y `servicios_basicos.py` (nuevos).
+1. Reemplaza `app.py`, `db.py`, `recibo.py` y `reportes.py`; agrega `moras.py`, `compromisos.py`, `estados.py`, `consumo.py`, `servicios_basicos.py` y `aire_acondicionado.py` (nuevos).
 2. En el SQL Editor de Supabase ejecuta, una vez cada uno (ambos son seguros y repetibles):
    - `migracion_compromisos_pago.sql`: crea la tabla de compromisos de pago.
    - `migracion_estados_movimientos.sql`: agrega las columnas de estado a Compras, Pagos y Ventas.
+   - `migracion_aire_acondicionado.sql`: agrega la columna de aire acondicionado a Apartamentos.
    Si se despliega la app ANTES de ejecutarlos, nada se rompe: esas secciones muestran un aviso y funcionan
    sin el campo nuevo hasta que se ejecute el SQL. No hace falta cambiar `requirements.txt`.
 
@@ -58,6 +59,18 @@
   cobro a entero), el recibo imprime solo las lecturas y no el consumo ni la tarifa, para no mostrar números que no
   cuadran. Se corrige volviendo a guardar la lectura.
 - El recibo de alquiler no cambió (comparado píxel a píxel con la versión anterior).
+
+## Periodos con mes ilegible
+- El mes de un periodo se lee con tolerancia (mayúsculas, espacios, «Setiembre»). Si algún periodo tiene un mes o año
+  que no se puede leer, el Dashboard y el Estado de cuenta muestran un aviso: sus pagos y deudas no entran en el
+  cálculo hasta que se corrija el dato en Supabase. Antes se omitían sin avisar.
+
+## Aire acondicionado en Apartamentos
+- Nuevo dato por apartamento: **❄️ Cuenta con aire acondicionado** (casilla Sí/No), al **crear** y al **editar** un apartamento.
+  También se ve (solo lectura) en la página «Inquilinos» de los cobradores, y la importación CSV acepta una columna
+  opcional `aire_acondicionado` (Sí / No).
+- Todos los apartamentos que ya existen quedan en **No** hasta que se edite cada uno.
+- Si la app se instala antes de ejecutar el SQL, la página muestra un aviso y crear/editar/importar funcionan como antes.
 
 ## Qué NO se tocó
 Las páginas Apartamentos, Pagos de Alquiler, Usuarios, Pendientes y Reuniones son idénticas a tu original

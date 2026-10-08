@@ -6,6 +6,7 @@ from datetime import date, timedelta
 import calendar
 import bcrypt
 import db
+import aire_acondicionado
 import compromisos
 import consumo as calc_consumo
 import estados
@@ -172,6 +173,12 @@ AVISO_MIGRACION_ESTADOS = (
     "funciona normal, sin ese campo."
 )
 
+
+AVISO_MIGRACION_AIRE = (
+    "El dato **Aire acondicionado** todavía no está activo en la base de datos: ejecuta el archivo "
+    "`migracion_aire_acondicionado.sql` en el SQL Editor de Supabase. Mientras tanto, los apartamentos "
+    "funcionan normal, sin ese dato."
+)
 
 AVISO_PERIODOS_ILEGIBLES = (
     "⚠️ Hay **{n}** periodo(s) de pagos con un mes o año que la app no reconoce. **Sus pagos y deudas NO se están "
@@ -681,6 +688,9 @@ elif pagina == "🏠 Apartamentos":
         st.error("No tienes permiso para acceder a esta sección.")
         st.stop()
     st.title("🏠 Gestión de Apartamentos")
+    apt_con_aire = estado_disponible("apartamentos", "aire_acondicionado")
+    if not apt_con_aire:
+        st.warning(AVISO_MIGRACION_AIRE)
 
     tab_lista, tab_nuevo, tab_importar = st.tabs(["📋 Lista y edición", "➕ Nuevo apartamento", "📥 Importar CSV"])
 
@@ -720,6 +730,10 @@ elif pagina == "🏠 Apartamentos":
                     amoblado = st.text_area("Amoblado", value=apt.get("amoblado") or "", height=70)
                     detalle = st.text_area("Detalle (ej. incluye agua/internet)", value=apt.get("detalle") or "",
                                             height=70)
+                    if apt_con_aire:
+                        tiene_aire = st.checkbox("❄️ Cuenta con aire acondicionado",
+                                                 value=aire_acondicionado.a_bool(apt.get("aire_acondicionado")),
+                                                 key=f'aire_edit_{apt["id"]}')
                     _opciones_dia_pago = ["(sin definir)"] + [str(d) for d in range(1, 32)]
                     _dia_pago_actual = apt.get("dia_pago")
                     _idx_dia_pago = _opciones_dia_pago.index(str(_dia_pago_actual)) if _dia_pago_actual else 0
@@ -788,6 +802,8 @@ elif pagina == "🏠 Apartamentos":
                         "contrato_fecha_fin": str(contrato_fecha_fin) if contrato_fecha_fin else None,
                         "contrato_observaciones": contrato_observaciones or None,
                     }
+                    if apt_con_aire:
+                        payload["aire_acondicionado"] = bool(tiene_aire)
                     try:
                         db.actualizar_apartamento(apt["id"], payload)
                         limpiar_cache()
@@ -823,6 +839,8 @@ elif pagina == "🏠 Apartamentos":
                 detalle = st.text_input("Detalle (ej. incluye agua/internet)")
                 dia_pago_sel = st.selectbox("Día de Pago (día fijo del mes)",
                                              ["(sin definir)"] + [str(d) for d in range(1, 32)])
+                if apt_con_aire:
+                    tiene_aire_nuevo = st.checkbox("❄️ Cuenta con aire acondicionado", key="aire_nuevo")
 
             st.divider()
             st.markdown("**📄 Datos del contrato**")
@@ -863,6 +881,8 @@ elif pagina == "🏠 Apartamentos":
                         "contrato_fecha_fin": str(contrato_fecha_fin) if contrato_fecha_fin else None,
                         "contrato_observaciones": contrato_observaciones or None,
                     }
+                    if apt_con_aire:
+                        payload["aire_acondicionado"] = bool(tiene_aire_nuevo)
                     try:
                         db.crear_apartamento(payload)
                         limpiar_cache()
@@ -875,6 +895,7 @@ elif pagina == "🏠 Apartamentos":
         st.write(
             "Sube un archivo CSV con columnas: `codigo, piso, estado, inquilino_nombre, celular, "
             "cedula_identidad, nacionalidad, fecha_ingreso, garantia, amoblado, detalle, monto_alquiler`. "
+            "Opcionalmente también `aire_acondicionado` (Sí / No). "
             "Se recomienda usar la plantilla generada a partir de tu Excel y revisar/corregir los datos antes de importar."
         )
         archivo = st.file_uploader("Archivo CSV", type=["csv"])
@@ -888,6 +909,11 @@ elif pagina == "🏠 Apartamentos":
                     payload = {k: (None if pd.isna(v) or v == "" else v) for k, v in row.to_dict().items()}
                     if "codigo" not in payload or not payload["codigo"]:
                         continue
+                    if "aire_acondicionado" in payload:
+                        if apt_con_aire:
+                            payload["aire_acondicionado"] = aire_acondicionado.a_bool(payload["aire_acondicionado"])
+                        else:
+                            payload.pop("aire_acondicionado")      # la columna aún no existe: se omite en vez de fallar
                     try:
                         db.crear_apartamento(payload)
                         creados += 1
@@ -2028,6 +2054,7 @@ elif pagina == "🏠 Inquilinos":
                 "Apartamento": a.get("codigo"), "Piso": a.get("piso"), "Estado": a.get("estado"),
                 "Inquilino": a.get("inquilino_nombre") or "—", "Celular": a.get("celular") or "—",
                 "Alquiler": float(a.get("monto_alquiler") or 0),
+                "Aire acond.": aire_acondicionado.texto(a.get("aire_acondicionado")),
                 "Contrato": a.get("estado_contrato") or "—",
             } for a in apartamentos]), use_container_width=True, hide_index=True,
                 column_config={"Alquiler": st.column_config.NumberColumn(format="Bs %.2f")})
@@ -2060,6 +2087,7 @@ elif pagina == "🏠 Inquilinos":
                 _ficha([("Estado", _md(apt.get("estado"))), ("Fecha de ingreso", _f(apt.get("fecha_ingreso"))),
                         ("Día de pago", _md(apt.get("dia_pago"))),
                         ("Alquiler mensual", fmt_money(apt.get("monto_alquiler") or 0)),
+                        ("Aire acondicionado", aire_acondicionado.texto(apt.get("aire_acondicionado"))),
                         ("Garantía", _md(apt.get("garantia"))), ("Amoblado", _md(apt.get("amoblado"))),
                         ("Detalle", _md(apt.get("detalle")))])
             with st.container(border=True):
