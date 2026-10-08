@@ -173,6 +173,13 @@ AVISO_MIGRACION_ESTADOS = (
 )
 
 
+AVISO_PERIODOS_ILEGIBLES = (
+    "⚠️ Hay **{n}** periodo(s) de pagos con un mes o año que la app no reconoce. **Sus pagos y deudas NO se están "
+    "contando** en estos reportes. Corrígelos en Supabase (tablas `periodos_alquiler`, `periodos_electricidad` o "
+    "`periodos_agua`): el mes debe ser uno de Enero … Diciembre."
+)
+
+
 @st.cache_data(ttl=60)
 def estado_disponible(tabla, columna):
     """¿Ya existe la columna de estado? (si aún no se ejecutó la migración, la app sigue funcionando sin ella)"""
@@ -481,6 +488,9 @@ if pagina == "📊 Dashboard":
     def _total(filas):
         return sum(f["Deuda total"] for f in filas)
 
+    n_ilegibles = sum(moras.contar_ilegibles(cargar_periodos_abiertos(t)) for t in ("alquiler", "electricidad", "agua"))
+    if n_ilegibles:
+        st.warning(AVISO_PERIODOS_ILEGIBLES.format(n=n_ilegibles))
     st.subheader("🚨 Moras (deudas pendientes)")
     m1, m2, m3, m4 = st.columns(4)
     m1.metric(f"💵 Alquiler ({len(mora_alquiler)} deptos.)", fmt_money(_total(mora_alquiler)))
@@ -1774,6 +1784,11 @@ elif pagina == "📑 Estado de cuenta":
         alq_por_apt.setdefault(p["apartamento_id"], []).append(p)
     for p in cargar_periodos_abiertos("electricidad"):
         elec_por_apt.setdefault(p["apartamento_id"], []).append(p)
+
+    n_ilegibles = (moras.contar_ilegibles(cargar_periodos_abiertos("alquiler"))
+                   + moras.contar_ilegibles(cargar_periodos_abiertos("electricidad")))
+    if n_ilegibles:
+        st.warning(AVISO_PERIODOS_ILEGIBLES.format(n=n_ilegibles))
 
     reportes, no_aplican = [], []
     for apt in apartamentos:

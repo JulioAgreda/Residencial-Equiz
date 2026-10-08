@@ -15,11 +15,26 @@ Reglas:
     cobró al registrarla). No se inventan meses sin lectura.
 """
 import calendar
+import unicodedata
 from datetime import date
 
 MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
          "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
-_MES_NUM = {m: i + 1 for i, m in enumerate(MESES)}
+
+
+def _normalizar(texto):
+    """Minúsculas, sin acentos ni espacios sobrantes: ' Octubre ' y 'octubre' son el mismo mes."""
+    texto = unicodedata.normalize("NFD", str(texto or ""))
+    return "".join(c for c in texto if unicodedata.category(c) != "Mn").strip().casefold()
+
+
+_MES_NUM = {_normalizar(m): i + 1 for i, m in enumerate(MESES)}
+_MES_NUM["setiembre"] = 9          # variante válida de "Septiembre"
+
+
+def _mes_num(texto):
+    """Número de mes (1-12) de un nombre de mes, tolerando mayúsculas, espacios y 'Setiembre'; None si no se reconoce."""
+    return _MES_NUM.get(_normalizar(texto))
 
 _TOLERANCIA = 0.009  # evita contar como deuda diferencias de centavos por redondeo
 
@@ -96,7 +111,7 @@ def calcular_mora_consumo(apartamentos, periodos, campo_pagos, hoy=None):
     deudas = {}
     for p in periodos:
         apt = por_id.get(p.get("apartamento_id"))
-        mes_num = _MES_NUM.get(p.get("mes"))
+        mes_num = _mes_num(p.get("mes"))
         if not apt or not mes_num:
             continue
         saldo = float(p.get("monto_esperado") or 0) - _pagado(p, campo_pagos)
@@ -150,13 +165,19 @@ def _estado_por_saldo(esperado, pagado):
 
 
 def _clave_periodo(p):
-    mes_num = _MES_NUM.get(p.get("mes"))
+    mes_num = _mes_num(p.get("mes"))
     if not mes_num:
         return None
     try:
         return int(p["anio"]), mes_num
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def contar_ilegibles(periodos):
+    """Cuántos periodos tienen un mes o año que no se puede leer. Esos periodos NO entran en ningún cálculo (ni sus
+    pagos ni su deuda), por eso la app avisa cuando hay alguno en lugar de omitirlos sin decir nada."""
+    return sum(1 for p in (periodos or []) if _clave_periodo(p) is None)
 
 
 def deuda_real_inquilino(apt, periodos_alquiler, periodos_electricidad, hoy=None):
