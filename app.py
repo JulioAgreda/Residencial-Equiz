@@ -1856,6 +1856,38 @@ elif pagina == "📑 Estado de cuenta":
                                mime="image/png", key="rep_png", use_container_width=True)
         st.image(png_rep, width=640)
 
+        # ---------- Transparencia: qué pagos lee este reporte (para comparar con la realidad) ----------
+        with st.expander("🔎 Ver los pagos que usa este reporte (los 10 más recientes)"):
+            def _abonos_leidos(periodos, campo_pagos):
+                filas = [{"Fecha": f'{f:%d/%m/%Y}' if (f := parse_fecha(pg.get("fecha"))) else str(pg.get("fecha")),
+                          "Periodo": f'{p.get("mes")} {p.get("anio")}', "Monto": float(pg.get("monto") or 0),
+                          "_orden": str(pg.get("fecha") or "")}
+                         for p in periodos for pg in (p.get(campo_pagos) or [])]
+                return sorted(filas, key=lambda x: x["_orden"], reverse=True)
+
+            def _tabla_abonos(titulo, periodos, campo_pagos):
+                claves = sorted(k for k in (moras._clave_periodo(p) for p in periodos) if k)
+                st.markdown(f"**{titulo}**")
+                if claves:
+                    st.caption(f"{len(periodos)} periodo(s) leídos, de {moras.MESES[claves[0][1] - 1]} {claves[0][0]} "
+                               f"a {moras.MESES[claves[-1][1] - 1]} {claves[-1][0]}.")
+                else:
+                    st.caption("No hay periodos registrados para este inquilino.")
+                filas = _abonos_leidos(periodos, campo_pagos)[:10]
+                if filas:
+                    st.dataframe(pd.DataFrame(filas).drop(columns=["_orden"]), use_container_width=True, hide_index=True,
+                                 column_config={"Monto": st.column_config.NumberColumn(format="Bs %.2f")})
+                else:
+                    st.caption("Sin pagos registrados.")
+
+            xa, xb = st.columns(2)
+            with xa:
+                _tabla_abonos("Alquiler", alq_por_apt.get(apt_sel["id"], []), "pagos")
+            with xb:
+                _tabla_abonos("Electricidad", elec_por_apt.get(apt_sel["id"], []), "pagos_electricidad")
+            st.caption("«Último pago» es la fecha más reciente de esta lista. Si falta un pago que sí hiciste, revisa que esté "
+                       "registrado en «Pagos de Alquiler» con esa fecha y dentro del periodo del inquilino actual.")
+
         # ---------- Todos los apartamentos en un solo ZIP ----------
         st.divider()
         st.markdown("### Descargar todos los reportes")
