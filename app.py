@@ -180,6 +180,12 @@ AVISO_MIGRACION_AIRE = (
     "funcionan normal, sin ese dato."
 )
 
+AVISO_MIGRACION_AIRE_PROPIEDAD = (
+    "Falta activar **«¿de quién es el aire acondicionado?»**: vuelve a ejecutar completo el archivo "
+    "`migracion_aire_acondicionado.sql` en el SQL Editor de Supabase (es repetible). Mientras tanto solo se "
+    "guarda si tiene aire o no."
+)
+
 AVISO_PERIODOS_ILEGIBLES = (
     "⚠️ Hay **{n}** periodo(s) de pagos con un mes o año que la app no reconoce. **Sus pagos y deudas NO se están "
     "contando** en estos reportes. Corrígelos en Supabase (tablas `periodos_alquiler`, `periodos_electricidad` o "
@@ -689,8 +695,11 @@ elif pagina == "🏠 Apartamentos":
         st.stop()
     st.title("🏠 Gestión de Apartamentos")
     apt_con_aire = estado_disponible("apartamentos", "aire_acondicionado")
+    apt_con_propiedad = apt_con_aire and estado_disponible("apartamentos", "aire_acondicionado_propiedad")
     if not apt_con_aire:
         st.warning(AVISO_MIGRACION_AIRE)
+    elif not apt_con_propiedad:
+        st.warning(AVISO_MIGRACION_AIRE_PROPIEDAD)
 
     tab_lista, tab_nuevo, tab_importar = st.tabs(["📋 Lista y edición", "➕ Nuevo apartamento", "📥 Importar CSV"])
 
@@ -734,6 +743,12 @@ elif pagina == "🏠 Apartamentos":
                         tiene_aire = st.checkbox("❄️ Cuenta con aire acondicionado",
                                                  value=aire_acondicionado.a_bool(apt.get("aire_acondicionado")),
                                                  key=f'aire_edit_{apt["id"]}')
+                        if apt_con_propiedad:
+                            propiedad_aire = st.selectbox(
+                                "Si tiene aire: ¿de quién es?", aire_acondicionado.OPCIONES_PROPIEDAD,
+                                index=aire_acondicionado.indice_propiedad(apt.get("aire_acondicionado_propiedad")),
+                                format_func=aire_acondicionado.etiqueta_propiedad,
+                                key=f'aire_prop_edit_{apt["id"]}')
                     _opciones_dia_pago = ["(sin definir)"] + [str(d) for d in range(1, 32)]
                     _dia_pago_actual = apt.get("dia_pago")
                     _idx_dia_pago = _opciones_dia_pago.index(str(_dia_pago_actual)) if _dia_pago_actual else 0
@@ -804,13 +819,19 @@ elif pagina == "🏠 Apartamentos":
                     }
                     if apt_con_aire:
                         payload["aire_acondicionado"] = bool(tiene_aire)
-                    try:
-                        db.actualizar_apartamento(apt["id"], payload)
-                        limpiar_cache()
-                        st.success("Apartamento actualizado.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al actualizar: {e}")
+                    if apt_con_propiedad:
+                        payload["aire_acondicionado_propiedad"] = aire_acondicionado.propiedad_a_guardar(tiene_aire, propiedad_aire)
+                    error_aire = aire_acondicionado.validar(tiene_aire, propiedad_aire) if apt_con_propiedad else None
+                    if error_aire:
+                        st.error(error_aire)
+                    else:
+                        try:
+                            db.actualizar_apartamento(apt["id"], payload)
+                            limpiar_cache()
+                            st.success("Apartamento actualizado.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al actualizar: {e}")
 
                 if eliminar:
                     try:
@@ -841,6 +862,10 @@ elif pagina == "🏠 Apartamentos":
                                              ["(sin definir)"] + [str(d) for d in range(1, 32)])
                 if apt_con_aire:
                     tiene_aire_nuevo = st.checkbox("❄️ Cuenta con aire acondicionado", key="aire_nuevo")
+                    if apt_con_propiedad:
+                        propiedad_aire_nuevo = st.selectbox(
+                            "Si tiene aire: ¿de quién es?", aire_acondicionado.OPCIONES_PROPIEDAD,
+                            format_func=aire_acondicionado.etiqueta_propiedad, key="aire_prop_nuevo")
 
             st.divider()
             st.markdown("**📄 Datos del contrato**")
@@ -883,19 +908,28 @@ elif pagina == "🏠 Apartamentos":
                     }
                     if apt_con_aire:
                         payload["aire_acondicionado"] = bool(tiene_aire_nuevo)
-                    try:
-                        db.crear_apartamento(payload)
-                        limpiar_cache()
-                        st.success(f"Apartamento {codigo} creado.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al crear (¿código repetido?): {e}")
+                    if apt_con_propiedad:
+                        payload["aire_acondicionado_propiedad"] = aire_acondicionado.propiedad_a_guardar(
+                            tiene_aire_nuevo, propiedad_aire_nuevo)
+                    error_aire = (aire_acondicionado.validar(tiene_aire_nuevo, propiedad_aire_nuevo)
+                                  if apt_con_propiedad else None)
+                    if error_aire:
+                        st.error(error_aire)
+                    else:
+                        try:
+                            db.crear_apartamento(payload)
+                            limpiar_cache()
+                            st.success(f"Apartamento {codigo} creado.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al crear (¿código repetido?): {e}")
 
     with tab_importar:
         st.write(
             "Sube un archivo CSV con columnas: `codigo, piso, estado, inquilino_nombre, celular, "
             "cedula_identidad, nacionalidad, fecha_ingreso, garantia, amoblado, detalle, monto_alquiler`. "
-            "Opcionalmente también `aire_acondicionado` (Sí / No). "
+            "Opcionalmente también `aire_acondicionado` (Sí / No) y `aire_acondicionado_propiedad` "
+            "(Del edificio / Del inquilino; solo se guarda si `aire_acondicionado` es Sí). "
             "Se recomienda usar la plantilla generada a partir de tu Excel y revisar/corregir los datos antes de importar."
         )
         archivo = st.file_uploader("Archivo CSV", type=["csv"])
@@ -914,6 +948,12 @@ elif pagina == "🏠 Apartamentos":
                             payload["aire_acondicionado"] = aire_acondicionado.a_bool(payload["aire_acondicionado"])
                         else:
                             payload.pop("aire_acondicionado")      # la columna aún no existe: se omite en vez de fallar
+                    if "aire_acondicionado_propiedad" in payload or "aire_acondicionado" in payload:
+                        if apt_con_propiedad:
+                            payload["aire_acondicionado_propiedad"] = aire_acondicionado.propiedad_a_guardar(
+                                payload.get("aire_acondicionado"), payload.get("aire_acondicionado_propiedad"))
+                        else:
+                            payload.pop("aire_acondicionado_propiedad", None)
                     try:
                         db.crear_apartamento(payload)
                         creados += 1
@@ -2054,7 +2094,8 @@ elif pagina == "🏠 Inquilinos":
                 "Apartamento": a.get("codigo"), "Piso": a.get("piso"), "Estado": a.get("estado"),
                 "Inquilino": a.get("inquilino_nombre") or "—", "Celular": a.get("celular") or "—",
                 "Alquiler": float(a.get("monto_alquiler") or 0),
-                "Aire acond.": aire_acondicionado.texto(a.get("aire_acondicionado")),
+                "Aire acond.": aire_acondicionado.resumen(a.get("aire_acondicionado"), a.get("aire_acondicionado_propiedad"),
+                                                          con_propiedad="aire_acondicionado_propiedad" in a),
                 "Contrato": a.get("estado_contrato") or "—",
             } for a in apartamentos]), use_container_width=True, hide_index=True,
                 column_config={"Alquiler": st.column_config.NumberColumn(format="Bs %.2f")})
@@ -2087,7 +2128,9 @@ elif pagina == "🏠 Inquilinos":
                 _ficha([("Estado", _md(apt.get("estado"))), ("Fecha de ingreso", _f(apt.get("fecha_ingreso"))),
                         ("Día de pago", _md(apt.get("dia_pago"))),
                         ("Alquiler mensual", fmt_money(apt.get("monto_alquiler") or 0)),
-                        ("Aire acondicionado", aire_acondicionado.texto(apt.get("aire_acondicionado"))),
+                        ("Aire acondicionado", aire_acondicionado.descripcion(
+                            apt.get("aire_acondicionado"), apt.get("aire_acondicionado_propiedad"),
+                            con_propiedad="aire_acondicionado_propiedad" in apt)),
                         ("Garantía", _md(apt.get("garantia"))), ("Amoblado", _md(apt.get("amoblado"))),
                         ("Detalle", _md(apt.get("detalle")))])
             with st.container(border=True):

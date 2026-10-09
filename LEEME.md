@@ -66,11 +66,16 @@
   cálculo hasta que se corrija el dato en Supabase. Antes se omitían sin avisar.
 
 ## Aire acondicionado en Apartamentos
-- Nuevo dato por apartamento: **❄️ Cuenta con aire acondicionado** (casilla Sí/No), al **crear** y al **editar** un apartamento.
-  También se ve (solo lectura) en la página «Inquilinos» de los cobradores, y la importación CSV acepta una columna
-  opcional `aire_acondicionado` (Sí / No).
-- Todos los apartamentos que ya existen quedan en **No** hasta que se edite cada uno.
-- Si la app se instala antes de ejecutar el SQL, la página muestra un aviso y crear/editar/importar funcionan como antes.
+- Dato por apartamento: **❄️ Cuenta con aire acondicionado** (Sí/No) y, si lo tiene, **¿de quién es?**:
+  *Del edificio (activo propio)* o *Del inquilino (se lo lleva al retirarse)*. Se registra al **crear** y al **editar** un
+  apartamento; si marcas que tiene aire, es obligatorio indicar de quién es. Si se desmarca el aire, la propiedad se limpia sola.
+- Se ve (solo lectura) en la página «Inquilinos»: «Sí — del edificio (activo propio)», «Sí — del inquilino (se lo lleva al
+  retirarse)», «Sí — falta indicar de quién es» o «No». La importación CSV acepta las columnas opcionales
+  `aire_acondicionado` (Sí / No) y `aire_acondicionado_propiedad` (Del edificio / Del inquilino).
+- **Ejecuta `migracion_aire_acondicionado.sql`** (si ya ejecutaste una versión anterior, vuelve a ejecutarlo completo: es repetible).
+- Los apartamentos que ya existen quedan en **No**; los que ya marcaste con aire antes de esta versión aparecerán como
+  «falta indicar de quién es» hasta que los edites.
+- Si la app se instala antes del SQL, la página muestra un aviso y crear/editar/importar funcionan como antes.
 
 ## Qué NO se tocó
 Las páginas Apartamentos, Pagos de Alquiler, Usuarios, Pendientes y Reuniones son idénticas a tu original
