@@ -6,11 +6,12 @@
 # Cambios sobre tu proyecto original
 
 ## Instalación
-1. Reemplaza `app.py`, `db.py`, `recibo.py` y `reportes.py`; agrega `moras.py`, `compromisos.py`, `estados.py`, `consumo.py`, `servicios_basicos.py` y `aire_acondicionado.py` (nuevos).
+1. Reemplaza `app.py`, `db.py`, `recibo.py` y `reportes.py`; agrega `moras.py`, `compromisos.py`, `estados.py`, `consumo.py`, `servicios_basicos.py`, `aire_acondicionado.py` y `accesos.py` (nuevos).
 2. En el SQL Editor de Supabase ejecuta, una vez cada uno (ambos son seguros y repetibles):
    - `migracion_compromisos_pago.sql`: crea la tabla de compromisos de pago.
    - `migracion_estados_movimientos.sql`: agrega las columnas de estado a Compras, Pagos y Ventas.
    - `migracion_aire_acondicionado.sql`: agrega la columna de aire acondicionado a Apartamentos.
+   - `migracion_acceso_apartamentos.sql`: agrega el acceso por apartamento a los usuarios.
    Si se despliega la app ANTES de ejecutarlos, nada se rompe: esas secciones muestran un aviso y funcionan
    sin el campo nuevo hasta que se ejecute el SQL. No hace falta cambiar `requirements.txt`.
 
@@ -76,6 +77,20 @@
 - Los apartamentos que ya existen quedan en **No**; los que ya marcaste con aire antes de esta versión aparecerán como
   «falta indicar de quién es» hasta que los edites.
 - Si la app se instala antes del SQL, la página muestra un aviso y crear/editar/importar funcionan como antes.
+
+## Acceso de cada usuario a ciertos apartamentos
+- En **Usuarios → 🏢 Acceso a apartamentos**, el administrador elige para cada usuario: **«Todos los apartamentos»** (valor
+  por defecto: nadie pierde acceso al activar la función) o **«Solo los apartamentos asignados»**, y marca cuáles.
+- El **administrador siempre ve todo**. Un usuario restringido ve únicamente sus apartamentos en todas las pantallas:
+  Dashboard (moras, alertas y totales), Pagos de Alquiler, Electricidad, Agua, Inquilinos, Compromisos de pago, Estado de
+  cuenta y Pendientes (los pendientes «Generales», sin apartamento, los ve cualquiera). El filtro se aplica en la capa que
+  carga los datos, no pantalla por pantalla, para que ninguna se quede sin filtrar.
+- Al guardar, el cambio vale de inmediato. Un usuario restringido ve en la barra lateral «🔒 Acceso a N apartamento(s)».
+- Compras, Pagos, Ventas, Servicios Básicos y Reuniones no pertenecen a un apartamento, así que no cambian. El reporte
+  «Actividad por usuario» tampoco (muestra pagos, compras y ventas, no datos de apartamentos).
+- No se puede dejar a un usuario «solo asignados» sin ninguno: para impedir que alguien entre, desactívalo en «Lista y edición».
+- **Importante:** esto limita lo que MUESTRA la aplicación, igual que los roles actuales. No es seguridad a nivel de base de
+  datos: quien tenga la clave de Supabase puede leer las tablas directamente.
 
 ## Qué NO se tocó
 Las páginas Apartamentos, Pagos de Alquiler, Usuarios, Pendientes y Reuniones son idénticas a tu original

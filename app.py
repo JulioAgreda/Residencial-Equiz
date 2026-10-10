@@ -6,6 +6,7 @@ from datetime import date, timedelta
 import calendar
 import bcrypt
 import db
+import accesos
 import aire_acondicionado
 import compromisos
 import consumo as calc_consumo
@@ -142,29 +143,51 @@ def detalle_monto_servicio(consumo, tarifa):
     return f"**{fmt_money(final)}**"
 
 
+def _solo_permitidos(cargador, campo="apartamento_id", permitir_vacio=False):
+    """Envuelve un cargador en caché para que cada usuario vea SOLO los datos de sus apartamentos asignados.
+    La caché guarda los datos de todos (se comparte entre usuarios); el filtro se aplica DESPUÉS, por usuario.
+    Así ninguna pantalla puede olvidarse de filtrar: todas leen a través de estos cargadores."""
+    def filtrado(*args, **kwargs):
+        return accesos.filtrar(cargador(*args, **kwargs), ids_apartamentos_permitidos(), campo, permitir_vacio)
+    filtrado.clear = cargador.clear          # limpiar_cache() sigue funcionando igual
+    return filtrado
+
+
+def _solo_mis_apartamentos(registros, campo="apartamento_id", permitir_vacio=False):
+    """Filtro para lecturas directas a la base que no pasan por un cargador."""
+    return accesos.filtrar(registros, ids_apartamentos_permitidos(), campo, permitir_vacio)
+
+
 @st.cache_data(ttl=30)
-def cargar_apartamentos():
+def _cargar_apartamentos_todos():
     return db.listar_apartamentos()
 
 
 @st.cache_data(ttl=30)
-def cargar_periodos(apartamento_id=None, anio=None, mes=None):
+def _cargar_periodos_todos(apartamento_id=None, anio=None, mes=None):
     return db.listar_periodos(apartamento_id=apartamento_id, anio=anio, mes=mes)
 
 
 @st.cache_data(ttl=30)
-def cargar_periodos_electricidad(anio=None, mes=None):
+def _cargar_periodos_electricidad_todos(anio=None, mes=None):
     return db.listar_periodos_electricidad(anio=anio, mes=mes)
 
 
 @st.cache_data(ttl=30)
-def cargar_periodos_agua(anio=None, mes=None):
+def _cargar_periodos_agua_todos(anio=None, mes=None):
     return db.listar_periodos_agua(anio=anio, mes=mes)
 
 
 @st.cache_data(ttl=60)
-def cargar_periodos_abiertos(tipo):
+def _cargar_periodos_abiertos_todos(tipo):
     return db.listar_periodos_abiertos(tipo)
+
+
+cargar_apartamentos = _solo_permitidos(_cargar_apartamentos_todos, campo="id")
+cargar_periodos = _solo_permitidos(_cargar_periodos_todos)
+cargar_periodos_electricidad = _solo_permitidos(_cargar_periodos_electricidad_todos)
+cargar_periodos_agua = _solo_permitidos(_cargar_periodos_agua_todos)
+cargar_periodos_abiertos = _solo_permitidos(_cargar_periodos_abiertos_todos)
 
 
 AVISO_MIGRACION_ESTADOS = (
@@ -186,6 +209,25 @@ AVISO_MIGRACION_AIRE_PROPIEDAD = (
     "guarda si tiene aire o no."
 )
 
+@st.cache_data(ttl=30)
+def cargar_accesos_apartamentos():
+    """{usuario_id: {"todos": bool, "ids": set}}; se relee cada 30 s (y al instante cuando el administrador guarda un cambio)."""
+    return accesos.construir_accesos(db.listar_usuarios(), db.listar_accesos_apartamentos())
+
+
+def acceso_por_apartamento_activo():
+    return estado_disponible("usuarios", "acceso_todos_apartamentos") and estado_disponible("usuarios_apartamentos", "usuario_id")
+
+
+def ids_apartamentos_permitidos():
+    """None = ve todos los apartamentos; si no, el conjunto de ids que puede ver el usuario actual.
+    El administrador siempre ve todos. Sin la migración SQL no hay restricciones (funciona como antes)."""
+    if es_admin:
+        return None
+    activo = acceso_por_apartamento_activo()
+    return accesos.resolver(es_admin, usuario_actual.get("id"), cargar_accesos_apartamentos() if activo else {}, activo)
+
+
 AVISO_PERIODOS_ILEGIBLES = (
     "⚠️ Hay **{n}** periodo(s) de pagos con un mes o año que la app no reconoce. **Sus pagos y deudas NO se están "
     "contando** en estos reportes. Corrígelos en Supabase (tablas `periodos_alquiler`, `periodos_electricidad` o "
@@ -205,8 +247,11 @@ def cargar_servicios_basicos():
 
 
 @st.cache_data(ttl=30)
-def cargar_compromisos():
+def _cargar_compromisos_todos():
     return db.listar_compromisos()
+
+
+cargar_compromisos = _solo_permitidos(_cargar_compromisos_todos)
 
 
 @st.cache_data(ttl=30)
@@ -279,8 +324,12 @@ def mostrar_botones_recibo(pago, periodo, apartamento, total_pagado_periodo, key
 
 
 @st.cache_data(ttl=30)
-def cargar_pendientes(estado=None, prioridad=None, asignado_a=None):
+def _cargar_pendientes_todos(estado=None, prioridad=None, asignado_a=None):
     return db.listar_pendientes(estado=estado, prioridad=prioridad, asignado_a=asignado_a)
+
+
+# un pendiente «General» (sin apartamento) lo ve cualquiera; uno ligado a un apartamento, solo quien tiene acceso a él
+cargar_pendientes = _solo_permitidos(_cargar_pendientes_todos, permitir_vacio=True)
 
 
 @st.cache_data(ttl=30)
@@ -304,6 +353,7 @@ def cargar_todos_los_usuarios():
 
 
 def limpiar_cache():
+    cargar_accesos_apartamentos.clear()
     cargar_servicios_basicos.clear()
     estado_disponible.clear()
     cargar_compromisos.clear()
@@ -391,6 +441,10 @@ def ultimos_n_meses(n=12):
 # ------------------------------------------------------------------
 st.sidebar.title("🏢 Residencial EQUIZ")
 st.sidebar.caption(f'👤 {usuario_actual.get("nombre") or usuario_actual.get("username")} · {usuario_actual.get("rol")}')
+_permitidos_barra = ids_apartamentos_permitidos()
+if _permitidos_barra is not None:
+    st.sidebar.caption(f"🔒 Acceso a {len(_permitidos_barra)} apartamento(s) asignado(s)" if _permitidos_barra
+                       else "🔒 No tienes apartamentos asignados: pídele al administrador que te asigne")
 
 if es_admin:
     opciones_principal = ["📊 Dashboard", "🏠 Apartamentos", "💵 Pagos de Alquiler", "⚡ Electricidad",
@@ -1121,11 +1175,11 @@ elif pagina == "💵 Pagos de Alquiler":
         if filtro_apt != "Todos":
             apt_id = next(a["id"] for a in apartamentos if a["codigo"] == filtro_apt)
 
-        periodos = db.listar_periodos(
+        periodos = _solo_mis_apartamentos(db.listar_periodos(
             apartamento_id=apt_id,
             anio=None if filtro_anio == "Todos" else filtro_anio,
             mes=None if filtro_mes == "Todos" else filtro_mes,
-        )
+        ))
 
         if not periodos:
             st.info("No hay periodos que coincidan con el filtro.")
@@ -1426,11 +1480,11 @@ elif pagina == "⚡ Electricidad":
         if filtro_apt != "Todos":
             apt_id = next(a["id"] for a in apartamentos if a["codigo"] == filtro_apt)
 
-        periodos_elec = db.listar_periodos_electricidad(
+        periodos_elec = _solo_mis_apartamentos(db.listar_periodos_electricidad(
             apartamento_id=apt_id,
             anio=None if filtro_anio == "Todos" else filtro_anio,
             mes=None if filtro_mes == "Todos" else filtro_mes,
-        )
+        ))
 
         if not periodos_elec:
             st.info("No hay periodos que coincidan con el filtro.")
@@ -1729,11 +1783,11 @@ elif pagina == "💧 Agua":
         if filtro_apt != "Todos":
             apt_id = next(a["id"] for a in apartamentos if a["codigo"] == filtro_apt)
 
-        periodos_agua = db.listar_periodos_agua(
+        periodos_agua = _solo_mis_apartamentos(db.listar_periodos_agua(
             apartamento_id=apt_id,
             anio=None if filtro_anio == "Todos" else filtro_anio,
             mes=None if filtro_mes == "Todos" else filtro_mes,
-        )
+        ))
 
         if not periodos_agua:
             st.info("No hay periodos que coincidan con el filtro.")
@@ -2870,7 +2924,65 @@ elif pagina == "👥 Usuarios":
     st.title("👥 Usuarios")
     st.caption("Administra quién puede entrar al sistema y con qué rol.")
 
-    tab_lista, tab_nuevo = st.tabs(["📋 Lista y edición", "➕ Nuevo usuario"])
+    tab_lista, tab_nuevo, tab_acceso = st.tabs(["📋 Lista y edición", "➕ Nuevo usuario", "🏢 Acceso a apartamentos"])
+
+    with tab_acceso:
+        st.caption("Define qué apartamentos puede ver y gestionar cada usuario. Los administradores siempre ven todos. "
+                   "Un usuario con «Todos los apartamentos» (el valor por defecto) no tiene restricciones.")
+        if not acceso_por_apartamento_activo():
+            st.warning("Esta función todavía no está activa: ejecuta el archivo `migracion_acceso_apartamentos.sql` "
+                       "en el SQL Editor de Supabase. Mientras tanto todos los usuarios ven todos los apartamentos.")
+        else:
+            todos_los_apts = cargar_apartamentos()          # el administrador ve todos
+            usuarios_acc = db.listar_usuarios()
+            mapa_accesos = accesos.construir_accesos(usuarios_acc, db.listar_accesos_apartamentos())
+            ids_existentes = {a["id"] for a in todos_los_apts}
+            with st.container(border=True):
+                st.markdown("**Acceso actual de cada usuario**")
+                st.dataframe(pd.DataFrame([{
+                    "Usuario": u["username"], "Nombre": u.get("nombre") or "", "Rol": u["rol"],
+                    "Activo": "Sí" if u.get("activo", True) else "No",
+                    "Apartamentos": accesos.resumen(
+                        {**mapa_accesos.get(u["id"], {"todos": True, "ids": set()}),
+                         "ids": mapa_accesos.get(u["id"], {"ids": set()})["ids"] & ids_existentes},
+                        len(todos_los_apts), es_admin=(u["rol"] == "Administrador")),
+                } for u in usuarios_acc]), use_container_width=True, hide_index=True)
+
+            candidatos = [u for u in usuarios_acc if u["rol"] != "Administrador"]
+            if not candidatos:
+                st.info("Todos los usuarios son administradores, que siempre ven todos los apartamentos.")
+            else:
+                mensaje_acc = st.session_state.pop("acceso_msg", None)
+                if mensaje_acc:
+                    st.success(mensaje_acc)
+                i_acc = st.selectbox("Usuario", range(len(candidatos)), key="acc_usuario",
+                                     format_func=lambda i: f'{candidatos[i]["username"]} — {candidatos[i].get("nombre") or ""}')
+                u_acc = candidatos[i_acc]
+                cfg_acc = mapa_accesos.get(u_acc["id"], {"todos": True, "ids": set()})
+                etiqueta_apt = {a["id"]: f'{a["codigo"]} — {a.get("inquilino_nombre") or "sin inquilino"}' for a in todos_los_apts}
+                MODO_TODOS, MODO_SOLO = "Todos los apartamentos", "Solo los apartamentos asignados"
+                with st.form(f'form_acceso_{u_acc["id"]}'):
+                    modo = st.radio("Acceso", [MODO_TODOS, MODO_SOLO], index=0 if cfg_acc["todos"] else 1,
+                                    key=f'acc_modo_{u_acc["id"]}')
+                    elegidos = st.multiselect(
+                        "Apartamentos asignados (se usan solo con «Solo los apartamentos asignados»)",
+                        options=[a["id"] for a in todos_los_apts], format_func=lambda i: etiqueta_apt[i],
+                        default=[i for i in sorted(cfg_acc["ids"]) if i in ids_existentes], key=f'acc_ids_{u_acc["id"]}')
+                    guardar_acc = st.form_submit_button("💾 Guardar acceso")
+                if guardar_acc:
+                    if modo == MODO_SOLO and not elegidos:
+                        st.error("Elige al menos un apartamento, o selecciona «Todos los apartamentos». "
+                                 "Para impedir que alguien entre, desactiva al usuario en «Lista y edición».")
+                    else:
+                        try:
+                            db.guardar_acceso_apartamentos(u_acc["id"], modo == MODO_TODOS, elegidos)
+                            limpiar_cache()
+                            st.session_state["acceso_msg"] = (
+                                f'Acceso de {u_acc["username"]} actualizado: '
+                                + ("todos los apartamentos." if modo == MODO_TODOS else f"{len(elegidos)} apartamento(s) asignado(s)."))
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"No se pudo guardar: {e}")
 
     with tab_lista:
         usuarios = db.listar_usuarios()

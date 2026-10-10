@@ -820,3 +820,38 @@ def columna_disponible(tabla, columna):
         if "42703" in texto or "pgrst204" in texto or "does not exist" in texto or "could not find" in texto:
             return False
         raise
+
+
+# ---------- Acceso de cada usuario a ciertos apartamentos ----------
+
+def listar_accesos_apartamentos():
+    """Todas las asignaciones (usuario_id, apartamento_id). Se pide por páginas: PostgREST corta en 1000 filas."""
+    sb = get_client()
+    filas, inicio, tam = [], 0, 1000
+    while True:
+        res = (sb.table("usuarios_apartamentos").select("usuario_id, apartamento_id")
+               .order("usuario_id").order("apartamento_id").range(inicio, inicio + tam - 1).execute())
+        datos = res.data or []
+        filas.extend(datos)
+        if len(datos) < tam:
+            return filas
+        inicio += tam
+
+
+def guardar_acceso_apartamentos(usuario_id, acceso_todos, apartamento_ids=()):
+    """Guarda a qué apartamentos accede un usuario.
+    Si acceso_todos es falso, primero se sincronizan las asignaciones (solo se agregan y se quitan las diferencias) y
+    AL FINAL se marca al usuario como restringido: si algo falla a medias, nunca queda restringido con una lista vacía
+    por accidente. Si acceso_todos es verdadero, las asignaciones guardadas no se tocan (se ignoran)."""
+    sb = get_client()
+    if not acceso_todos:
+        res = sb.table("usuarios_apartamentos").select("apartamento_id").eq("usuario_id", usuario_id).execute()
+        actuales = {r["apartamento_id"] for r in (res.data or [])}
+        nuevos = {int(a) for a in apartamento_ids}
+        if nuevos - actuales:
+            sb.table("usuarios_apartamentos").insert(
+                [{"usuario_id": usuario_id, "apartamento_id": a} for a in sorted(nuevos - actuales)]).execute()
+        if actuales - nuevos:
+            sb.table("usuarios_apartamentos").delete().eq("usuario_id", usuario_id).in_(
+                "apartamento_id", sorted(actuales - nuevos)).execute()
+    sb.table("usuarios").update({"acceso_todos_apartamentos": bool(acceso_todos)}).eq("id", usuario_id).execute()

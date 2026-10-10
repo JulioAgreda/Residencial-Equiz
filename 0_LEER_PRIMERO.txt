@@ -1,0 +1,30 @@
+LEER ANTES DE INSTALAR
+
+1) SERVICIOS BÁSICOS (reconstruido)
+   Tu formulario de Servicios Básicos no estaba en el app.py que recibí. Lo reconstruí con la captura que enviaste y los
+   nombres reales de las columnas de tu tabla `servicios_basicos`. Quedó en el "Módulo Administración", junto a
+   Pendientes y Reuniones, con los mismos campos, textos y pestañas ("Nuevo servicio" / "Lista").
+   - Es una réplica, NO tu código original. La pestaña "Lista" nunca la vi: la diseñé yo (tabla, búsqueda, edición y
+     eliminación; todos los usuarios editan y solo el Administrador elimina, con casilla de confirmación).
+   - Los largos máximos de los campos son conservadores (no conozco los límites exactos de tus varchar).
+   - Compara con tu pantalla actual y dime qué ajustar.
+
+2) INSTALA TODOS LOS ARCHIVOS JUNTOS (o ninguno)
+   app.py depende de: db.py, recibo.py, reportes.py (versión nueva), moras.py, compromisos.py, estados.py, consumo.py y
+   servicios_basicos.py, aire_acondicionado.py y accesos.py. Además ejecuta en Supabase, una vez cada uno: migracion_compromisos_pago.sql,
+   migracion_estados_movimientos.sql, migracion_aire_acondicionado.sql y migracion_acceso_apartamentos.sql
+   (esta última se ha ampliado: si ya la ejecutaste antes, vuelve a ejecutarla completa; es repetible). (Si falta alguno de los SQL, esas secciones muestran un aviso y el resto funciona.)
+
+3) REVISA QUE NO FALTE NADA DE TU APLICACIÓN ACTUAL
+   El app.py que recibí era más viejo que tu aplicación en línea, así que tu versión podría tener pantallas o botones
+   que el mío no tiene. Por las funciones de tu db.py que ese app.py no usaba, sospecho (sin poder confirmarlo) de:
+     - salida de inquilinos / historial de inquilinos (página Apartamentos),
+     - un reporte por usuario que incluya cobros de alquiler y luz.
+   Antes de reemplazar, abre tu aplicación y revisa cada menú y botón. Si algo no está en la versión nueva, avísame
+   (lo mejor es que me envíes tu app.py actual) y lo incorporo.
+
+4) SE PUEDE REVERTIR
+   GitHub guarda el historial: si algo falta, abre app.py > History y restaura el archivo anterior en un minuto.
+   Tus datos no corren riesgo: los cambios a la base solo agregan una tabla y columnas nuevas, no borran nada.
+
+5) db.py TAMBIÉN CAMBIÓ: reemplázalo junto con app.py (se añadieron funciones para el acceso por apartamento).
