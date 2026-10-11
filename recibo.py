@@ -133,21 +133,31 @@ def _fmt_tarifa(valor):
     return texto
 
 
-def _detalle_lecturas(cfg, periodo):
+def _detalle_lecturas(cfg, periodo, servicio=None):
     """Filas (etiqueta, valor) con las lecturas del medidor. El consumo y la tarifa solo se imprimen si
     el monto guardado de ese periodo corresponde a esa cuenta: los periodos guardados antes de redondear
-    el cobro a boliviano entero tienen otro monto, y un recibo no debe mostrar números que no cuadran."""
+    el cobro a boliviano entero tienen otro monto, y un recibo no debe mostrar números que no cuadran.
+    Si el periodo tiene dos medidores de luz, se imprimen las lecturas de cada uno y el consumo total."""
     periodo = periodo or {}
+    if servicio is None:
+        servicio = next(k for k, v in SERVICIOS.items() if v is cfg)
     anterior, actual = periodo.get(cfg["campo_anterior"]), periodo.get(cfg["campo_actual"])
     if anterior is None or actual is None:
         return []
     unidad = cfg["unidad"]
-    filas = [("Lectura anterior:", f"{_fmt_num(anterior)} {unidad}"),
-             ("Lectura actual:", f"{_fmt_num(actual)} {unidad}")]
+    pares = _consumo.pares_lecturas(periodo, servicio)
+    if len(pares) == 1:
+        filas = [("Lectura anterior:", f"{_fmt_num(anterior)} {unidad}"),
+                 ("Lectura actual:", f"{_fmt_num(actual)} {unidad}")]
+    else:
+        filas = []
+        for n, (ant, act) in enumerate(pares, start=1):
+            filas += [(f"Medidor {n} - anterior:", f"{_fmt_num(ant or 0)} {unidad}"),
+                      (f"Medidor {n} - actual:", f"{_fmt_num(act or 0)} {unidad}")]
     tarifa = float(periodo.get(cfg["campo_tarifa"]) or 0)
-    consumo_entero = _consumo.calcular_consumo(anterior, actual)
+    consumo_entero = _consumo.consumo_total(periodo, servicio)
     if abs(_consumo.calcular_monto(consumo_entero, tarifa) - float(periodo.get("monto_esperado") or 0)) < 0.005:
-        filas += [("Consumo:", f"{consumo_entero} {unidad}"),
+        filas += [("Consumo total:" if len(pares) > 1 else "Consumo:", f"{consumo_entero} {unidad}"),
                   ("Tarifa:", f"Bs {_fmt_tarifa(tarifa)} por {unidad}")]
     return filas
 
@@ -172,7 +182,7 @@ def construir_datos_recibo_servicio(servicio, pago, periodo, apartamento, total_
     datos = construir_datos_recibo(pago, periodo, apartamento, total_pagado_periodo, recibido_por)
     datos["numero_recibo"] = f'{cfg["prefijo"]}-{int(pago["id"]):06d}'
     datos["titulo"] = cfg["titulo"]
-    datos["detalle"] = _detalle_lecturas(cfg, periodo)
+    datos["detalle"] = _detalle_lecturas(cfg, periodo, servicio)
     return datos
 
 

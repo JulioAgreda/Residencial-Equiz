@@ -77,8 +77,10 @@ create table if not exists periodos_electricidad (
     anio int not null,
     kwh_anterior numeric(10,2) not null default 0,
     kwh_actual numeric(10,2) not null default 0,
+    kwh_anterior_2 numeric(10,2),                      -- segundo medidor (solo apartamentos con 2 medidores; NULL = un medidor)
+    kwh_actual_2 numeric(10,2),
     tarifa_kwh numeric(10,4) not null default 0,
-    monto_esperado numeric(10,2) not null default 0,  -- (kwh_actual - kwh_anterior) * tarifa_kwh
+    monto_esperado numeric(10,2) not null default 0,  -- (consumo de todos los medidores) * tarifa_kwh
     created_at timestamptz default now(),
     updated_at timestamptz default now(),
     unique (apartamento_id, mes, anio)

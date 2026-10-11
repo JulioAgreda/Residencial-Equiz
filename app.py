@@ -538,35 +538,82 @@ def pagina_consumo(servicio):
 
         periodo = db.obtener_periodo_servicio(servicio, apt["id"], mes, int(anio))
 
+        # Apartamentos con 2 medidores de luz (ver consumo.APARTAMENTOS_DOS_MEDIDORES): se registran las lecturas
+        # de los dos y el cobro es la suma. Siguen siendo UN solo periodo por mes.
+        medidores = calc_consumo.cantidad_medidores_luz(apt) if servicio == "electricidad" else 1
+        anterior_2_default = actual_2_default = 0.0
+
         if periodo:
             anterior_default = float(periodo[ui["col_anterior"]])
             actual_default = float(periodo[ui["col_actual"]])
             tarifa_default = float(periodo[ui["col_tarifa"]])
+            if medidores == 2:
+                anterior_2_default = float(periodo.get("kwh_anterior_2") or 0)
+                actual_2_default = float(periodo.get("kwh_actual_2") or 0)
         else:
             ultimo = db.ultimo_periodo_servicio(servicio, apt["id"])
             anterior_default = float(ultimo[ui["col_actual"]]) if ultimo else 0.0
             actual_default = anterior_default
             tarifa_default = tarifa_actual
+            if medidores == 2:
+                anterior_2_default = float((ultimo or {}).get("kwh_actual_2") or 0)
+                actual_2_default = anterior_2_default
 
-        st.subheader("📏 Lectura del medidor")
+        st.subheader("📏 Lectura del medidor" if medidores == 1 else "📏 Lectura de los 2 medidores")
+        if medidores == 2:
+            st.info("⚡ Este apartamento tiene **2 medidores** de energía eléctrica. Registra la lectura de cada uno: "
+                    "el cobro es la suma de los dos consumos.")
         with st.form(f"form_lectura_{k}"):
-            colk1, colk2, colk3 = st.columns(3)
-            with colk1:
-                lectura_anterior = st.number_input(ui["etq_anterior"], min_value=0.0, step=1.0,
-                                                   value=anterior_default)
-            with colk2:
-                lectura_actual = st.number_input(ui["etq_actual"], min_value=0.0, step=1.0,
-                                                 value=actual_default)
-            with colk3:
+            if medidores == 2:
+                st.markdown("**Medidor 1**")
+                colm1a, colm1b = st.columns(2)
+                with colm1a:
+                    lectura_anterior = st.number_input(f"Medidor 1 · {ui['etq_anterior']}", min_value=0.0, step=1.0,
+                                                       value=anterior_default)
+                with colm1b:
+                    lectura_actual = st.number_input(f"Medidor 1 · {ui['etq_actual']}", min_value=0.0, step=1.0,
+                                                     value=actual_default)
+                st.markdown("**Medidor 2**")
+                colm2a, colm2b = st.columns(2)
+                with colm2a:
+                    lectura_anterior_2 = st.number_input(f"Medidor 2 · {ui['etq_anterior']}", min_value=0.0, step=1.0,
+                                                         value=anterior_2_default)
+                with colm2b:
+                    lectura_actual_2 = st.number_input(f"Medidor 2 · {ui['etq_actual']}", min_value=0.0, step=1.0,
+                                                       value=actual_2_default)
                 tarifa = st.number_input(ui["etq_tarifa"], min_value=0.0, step=0.01, format="%.4f",
                                          value=tarifa_default)
+                consumo_1 = calc_consumo.calcular_consumo(lectura_anterior, lectura_actual)
+                consumo_2 = calc_consumo.calcular_consumo(lectura_anterior_2, lectura_actual_2)
+                consumo = consumo_1 + consumo_2
+                notas_redondeo = [
+                    f"medidor {i}, {n}" for i, n in (
+                        (1, calc_consumo.nota_redondeo(lectura_anterior, lectura_actual)),
+                        (2, calc_consumo.nota_redondeo(lectura_anterior_2, lectura_actual_2)))
+                    if n
+                ]
+            else:
+                colk1, colk2, colk3 = st.columns(3)
+                with colk1:
+                    lectura_anterior = st.number_input(ui["etq_anterior"], min_value=0.0, step=1.0,
+                                                       value=anterior_default)
+                with colk2:
+                    lectura_actual = st.number_input(ui["etq_actual"], min_value=0.0, step=1.0,
+                                                     value=actual_default)
+                with colk3:
+                    tarifa = st.number_input(ui["etq_tarifa"], min_value=0.0, step=0.01, format="%.4f",
+                                             value=tarifa_default)
+                consumo = calc_consumo.calcular_consumo(lectura_anterior, lectura_actual)   # número entero (redondeo normal)
+                notas_redondeo = [calc_consumo.nota_redondeo(lectura_anterior, lectura_actual)]
 
-            consumo = calc_consumo.calcular_consumo(lectura_anterior, lectura_actual)   # número entero (redondeo normal)
             monto_calculado = calc_consumo.calcular_monto(consumo, tarifa)
-            st.caption(f"Consumo: {consumo} {unidad}  ×  Bs {tarifa:.4f}  =  {detalle_monto_servicio(consumo, tarifa)}")
-            nota_redondeo = calc_consumo.nota_redondeo(lectura_anterior, lectura_actual)
-            if nota_redondeo:
-                st.caption(f"ℹ️ El consumo se redondea a número entero: {nota_redondeo}.")
+            if medidores == 2:
+                st.caption(f"Medidor 1: {consumo_1} {unidad}  +  Medidor 2: {consumo_2} {unidad}")
+            etiqueta_consumo = "Consumo total" if medidores == 2 else "Consumo"
+            st.caption(f"{etiqueta_consumo}: {consumo} {unidad}  ×  Bs {tarifa:.4f}  =  {detalle_monto_servicio(consumo, tarifa)}")
+            for nota_redondeo in notas_redondeo:
+                if nota_redondeo:
+                    st.caption(f"ℹ️ El consumo se redondea a número entero: {nota_redondeo}.")
 
             if st.form_submit_button("💾 Guardar lectura"):
                 payload = {
@@ -575,6 +622,8 @@ def pagina_consumo(servicio):
                     ui["col_tarifa"]: tarifa,
                     "monto_esperado": monto_calculado,
                 }
+                if medidores == 2:
+                    payload.update({"kwh_anterior_2": lectura_anterior_2, "kwh_actual_2": lectura_actual_2})
                 try:
                     if periodo:
                         db.actualizar_periodo_servicio(servicio, periodo["id"], payload)
@@ -585,7 +634,11 @@ def pagina_consumo(servicio):
                     st.success("Lectura guardada.")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Error al guardar: {e}")
+                    if "kwh_anterior_2" in str(e) or "kwh_actual_2" in str(e):
+                        st.error("Falta crear las columnas del segundo medidor en la base de datos: ejecuta "
+                                 "`migracion_dos_medidores.sql` en el SQL Editor de Supabase y vuelve a intentar.")
+                    else:
+                        st.error(f"Error al guardar: {e}")
 
         if periodo:
             abonos = periodo.get(campo_pagos, []) or []
@@ -662,23 +715,33 @@ def pagina_consumo(servicio):
             st.info("No hay periodos que coincidan con el filtro.")
             return
 
+        hay_medidor_2 = servicio == "electricidad" and any(p.get("kwh_actual_2") is not None for p in periodos)
         filas = []
         for p in periodos:
             apt_info = p.get("apartamentos") or {}
             pagado = sum(float(a["monto"]) for a in (p.get(campo_pagos) or []))
-            filas.append({
+            fila = {
                 "Apartamento": apt_info.get("codigo"),
                 "Inquilino": apt_info.get("inquilino_nombre"),
                 "Mes": p["mes"],
                 "Año": p["anio"],
                 ui["tabla_anterior"]: p[ui["col_anterior"]],
                 ui["tabla_actual"]: p[ui["col_actual"]],
-                "Consumo": calc_consumo.calcular_consumo(p[ui["col_anterior"]], p[ui["col_actual"]]),
+            }
+            if hay_medidor_2:      # solo los apartamentos con 2 medidores traen datos aquí
+                fila[f"{ui['tabla_anterior']} (medidor 2)"] = p.get("kwh_anterior_2")
+                fila[f"{ui['tabla_actual']} (medidor 2)"] = p.get("kwh_actual_2")
+            fila.update({
+                "Consumo": calc_consumo.consumo_total(p, servicio),
                 "Esperado": p["monto_esperado"],
                 "Pagado": pagado,
                 "Deuda": float(p["monto_esperado"]) - pagado,
             })
+            filas.append(fila)
         st.dataframe(pd.DataFrame(filas), use_container_width=True, hide_index=True)
+        if hay_medidor_2:
+            st.caption("Los apartamentos con 2 medidores muestran las lecturas del segundo en las columnas «(medidor 2)»; "
+                       "el consumo es la suma de los dos.")
 
         total_esperado = sum(f["Esperado"] for f in filas)
         total_recaudado = sum(f["Pagado"] for f in filas)
@@ -937,7 +1000,7 @@ if pagina == "📊 Dashboard":
         filas_elec = []
         for p in periodos_elec_sel:
             apt_info = p.get("apartamentos") or {}
-            consumo = calc_consumo.calcular_consumo(p["kwh_anterior"], p["kwh_actual"])
+            consumo = calc_consumo.consumo_total(p, "electricidad")
             filas_elec.append({
                 "Apartamento": apt_info.get("codigo"),
                 "Inquilino": apt_info.get("inquilino_nombre") or "—",
@@ -953,7 +1016,7 @@ if pagina == "📊 Dashboard":
         filas_agua = []
         for p in periodos_agua_sel:
             apt_info = p.get("apartamentos") or {}
-            consumo = calc_consumo.calcular_consumo(p["lectura_anterior"], p["lectura_actual"])
+            consumo = calc_consumo.consumo_total(p, "agua")
             filas_agua.append({
                 "Apartamento": apt_info.get("codigo"),
                 "Inquilino": apt_info.get("inquilino_nombre") or "—",
