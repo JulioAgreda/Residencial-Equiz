@@ -2,8 +2,7 @@ import io
 import zipfile
 import streamlit as st
 import pandas as pd
-from datetime import date, timedelta
-import calendar
+from datetime import date
 import bcrypt
 import db
 import accesos
@@ -170,12 +169,12 @@ def _cargar_periodos_todos(apartamento_id=None, anio=None, mes=None):
 
 @st.cache_data(ttl=30)
 def _cargar_periodos_electricidad_todos(anio=None, mes=None):
-    return db.listar_periodos_electricidad(anio=anio, mes=mes)
+    return db.listar_periodos_servicio("electricidad", anio=anio, mes=mes)
 
 
 @st.cache_data(ttl=30)
 def _cargar_periodos_agua_todos(anio=None, mes=None):
-    return db.listar_periodos_agua(anio=anio, mes=mes)
+    return db.listar_periodos_servicio("agua", anio=anio, mes=mes)
 
 
 @st.cache_data(ttl=60)
@@ -379,34 +378,6 @@ def parse_fecha(valor):
         return None
 
 
-def fecha_vencimiento_del_mes(fecha_ingreso: date, anio: int, mes_num: int):
-    """Día de pago mensual = mismo día del mes que la fecha de ingreso (ajustado si el mes es más corto)."""
-    ultimo_dia_mes = calendar.monthrange(anio, mes_num)[1]
-    dia = min(fecha_ingreso.day, ultimo_dia_mes)
-    return date(anio, mes_num, dia)
-
-
-def calcular_mora_alquiler(apt, periodos_mes_actual_por_apt):
-    """Devuelve (en_mora, dias_atraso, deuda) para un apartamento, según su fecha de pago mensual."""
-    if apt["estado"] != "Ocupado":
-        return False, 0, 0.0
-    fecha_ingreso = parse_fecha(apt.get("fecha_ingreso"))
-    hoy = date.today()
-    dia_pago = fecha_ingreso if fecha_ingreso else date(hoy.year, hoy.month, 1)
-    vencimiento = fecha_vencimiento_del_mes(dia_pago, hoy.year, hoy.month)
-    if hoy <= vencimiento:
-        return False, 0, 0.0  # todavía no vence el pago de este mes
-
-    periodo = periodos_mes_actual_por_apt.get(apt["id"])
-    monto_esperado = float(periodo["monto_esperado"]) if periodo else float(apt.get("monto_alquiler") or 0)
-    pagado = total_pagado(periodo) if periodo else 0.0
-    deuda = monto_esperado - pagado
-    if deuda <= 0:
-        return False, 0, 0.0
-    dias_atraso = (hoy - vencimiento).days
-    return True, dias_atraso, deuda
-
-
 def estado_contrato_alerta(apt):
     """Devuelve (nivel, texto) para contratos vencidos o por vencer en los próximos 30 días. None si no aplica."""
     hoy = date.today()
@@ -434,6 +405,291 @@ def ultimos_n_meses(n=12):
         mes_num = offset % 12 + 1
         resultado.append((anio, mes_num))
     return resultado
+
+
+# ------------------------------------------------------------------
+# Electricidad y Agua: la misma pantalla para los dos servicios
+# ------------------------------------------------------------------
+METODOS_ABONO = ["Efectivo", "Transferencia", "QR", "Otro"]
+
+# Lo único que cambia entre Electricidad y Agua: textos, unidad y nombres de las columnas de lectura/tarifa.
+SERVICIOS_UI = {
+    "electricidad": {
+        "clave": "elec", "titulo": "⚡ Control de Electricidad", "unidad": "Kwh",
+        "expander_tarifa": "⚙️ Tarifa por Kwh vigente", "etq_tarifa": "Tarifa por Kwh (Bs)",
+        "etq_anterior": "Kwh anterior", "etq_actual": "Kwh actual",
+        "col_anterior": "kwh_anterior", "col_actual": "kwh_actual", "col_tarifa": "tarifa_kwh",
+        "tabla_anterior": "Kwh anterior", "tabla_actual": "Kwh actual",
+    },
+    "agua": {
+        "clave": "agua", "titulo": "💧 Control de Agua", "unidad": "m³",
+        "expander_tarifa": "⚙️ Tarifa por m³ vigente", "etq_tarifa": "Tarifa por m³ (Bs)",
+        "etq_anterior": "Lectura anterior (m³)", "etq_actual": "Lectura actual (m³)",
+        "col_anterior": "lectura_anterior", "col_actual": "lectura_actual", "col_tarifa": "tarifa_agua",
+        "tabla_anterior": "Lectura anterior", "tabla_actual": "Lectura actual",
+    },
+}
+
+
+def _formulario_editar_abono(servicio, p, prefijo):
+    """Formulario para editar o eliminar un abono (el mismo en el registro y en el historial).
+    'prefijo' mantiene únicas las claves de los widgets (p. ej. 'elec' o 'elec_hist')."""
+    pid = p["id"]
+    with st.form(f"form_editar_pago_{prefijo}_{pid}"):
+        colf, colm = st.columns(2)
+        with colf:
+            edit_fecha = st.date_input("Fecha", value=date.fromisoformat(str(p["fecha"])[:10]),
+                                       format="DD/MM/YYYY", key=f"{prefijo}_fecha_{pid}")
+        with colm:
+            edit_monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0, value=float(p["monto"]),
+                                         key=f"{prefijo}_monto_{pid}")
+        metodo = p.get("metodo_pago")
+        edit_metodo = st.selectbox("Método de pago", METODOS_ABONO,
+                                   index=METODOS_ABONO.index(metodo) if metodo in METODOS_ABONO else 0,
+                                   key=f"{prefijo}_metodo_{pid}")
+        edit_obs = st.text_input("Observación", value=p.get("observacion") or "", key=f"{prefijo}_obs_{pid}")
+
+        if es_admin:
+            colg, cold = st.columns(2)
+            guardar_edit = colg.form_submit_button("💾 Guardar cambios", use_container_width=True)
+            eliminar_edit = cold.form_submit_button("🗑️ Eliminar abono", use_container_width=True)
+        else:
+            guardar_edit = st.form_submit_button("💾 Guardar cambios", use_container_width=True)
+            eliminar_edit = False
+
+        if guardar_edit:
+            try:
+                db.actualizar_pago_servicio(servicio, pid, {
+                    "fecha": str(edit_fecha), "monto": edit_monto,
+                    "metodo_pago": edit_metodo, "observacion": edit_obs or None,
+                })
+                limpiar_cache()
+                st.success("Abono actualizado.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al actualizar: {e}")
+
+        if eliminar_edit:
+            try:
+                db.eliminar_pago_servicio(servicio, pid)
+                limpiar_cache()
+                st.success("Abono eliminado.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al eliminar: {e}")
+
+
+def pagina_consumo(servicio):
+    """Pantalla completa de Electricidad ('electricidad') o Agua ('agua'): tarifa, lectura del medidor,
+    abonos e historial."""
+    ui = SERVICIOS_UI[servicio]
+    k, unidad = ui["clave"], ui["unidad"]
+    campo_pagos = f"pagos_{servicio}"
+    st.title(ui["titulo"])
+
+    apartamentos = cargar_apartamentos()
+    if not apartamentos:
+        st.info("Primero registra apartamentos en la sección **Apartamentos**.")
+        st.stop()
+
+    tarifa_actual = db.obtener_tarifa(servicio)
+    if es_admin:
+        with st.expander(ui["expander_tarifa"]):
+            with st.form(f"form_tarifa_{k}"):
+                nueva_tarifa = st.number_input(
+                    ui["etq_tarifa"], min_value=0.0, step=0.01, format="%.4f", value=tarifa_actual
+                )
+                if st.form_submit_button("Guardar tarifa"):
+                    try:
+                        db.guardar_tarifa(servicio, nueva_tarifa)
+                        st.success("Tarifa actualizada. Se usará como valor por defecto para nuevas lecturas.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al guardar: {e}")
+
+    tab_registrar, tab_historial = st.tabs(["➕ Registrar lectura y abono", "📜 Historial"])
+
+    with tab_registrar:
+        codigos = [f'{a["codigo"]} — {a.get("inquilino_nombre") or "vacío"}' for a in apartamentos]
+        idx = st.selectbox("Apartamento", range(len(apartamentos)), format_func=lambda i: codigos[i],
+                           key=f"{k}_apt")
+        apt = apartamentos[idx]
+
+        col1, col2 = st.columns(2)
+        with col1:
+            mes = st.selectbox("Mes", MESES, index=date.today().month - 1, key=f"{k}_mes")
+        with col2:
+            anio = st.number_input("Año", min_value=2000, max_value=2100, value=date.today().year, step=1,
+                                   key=f"{k}_anio")
+
+        periodo = db.obtener_periodo_servicio(servicio, apt["id"], mes, int(anio))
+
+        if periodo:
+            anterior_default = float(periodo[ui["col_anterior"]])
+            actual_default = float(periodo[ui["col_actual"]])
+            tarifa_default = float(periodo[ui["col_tarifa"]])
+        else:
+            ultimo = db.ultimo_periodo_servicio(servicio, apt["id"])
+            anterior_default = float(ultimo[ui["col_actual"]]) if ultimo else 0.0
+            actual_default = anterior_default
+            tarifa_default = tarifa_actual
+
+        st.subheader("📏 Lectura del medidor")
+        with st.form(f"form_lectura_{k}"):
+            colk1, colk2, colk3 = st.columns(3)
+            with colk1:
+                lectura_anterior = st.number_input(ui["etq_anterior"], min_value=0.0, step=1.0,
+                                                   value=anterior_default)
+            with colk2:
+                lectura_actual = st.number_input(ui["etq_actual"], min_value=0.0, step=1.0,
+                                                 value=actual_default)
+            with colk3:
+                tarifa = st.number_input(ui["etq_tarifa"], min_value=0.0, step=0.01, format="%.4f",
+                                         value=tarifa_default)
+
+            consumo = calc_consumo.calcular_consumo(lectura_anterior, lectura_actual)   # número entero (redondeo normal)
+            monto_calculado = calc_consumo.calcular_monto(consumo, tarifa)
+            st.caption(f"Consumo: {consumo} {unidad}  ×  Bs {tarifa:.4f}  =  {detalle_monto_servicio(consumo, tarifa)}")
+            nota_redondeo = calc_consumo.nota_redondeo(lectura_anterior, lectura_actual)
+            if nota_redondeo:
+                st.caption(f"ℹ️ El consumo se redondea a número entero: {nota_redondeo}.")
+
+            if st.form_submit_button("💾 Guardar lectura"):
+                payload = {
+                    ui["col_anterior"]: lectura_anterior,
+                    ui["col_actual"]: lectura_actual,
+                    ui["col_tarifa"]: tarifa,
+                    "monto_esperado": monto_calculado,
+                }
+                try:
+                    if periodo:
+                        db.actualizar_periodo_servicio(servicio, periodo["id"], payload)
+                    else:
+                        payload.update({"apartamento_id": apt["id"], "mes": mes, "anio": int(anio)})
+                        db.crear_periodo_servicio(servicio, payload)
+                    limpiar_cache()
+                    st.success("Lectura guardada.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al guardar: {e}")
+
+        if periodo:
+            abonos = periodo.get(campo_pagos, []) or []
+            total_abonos = sum(float(p["monto"]) for p in abonos)
+            deuda_actual = float(periodo["monto_esperado"]) - total_abonos
+
+            st.markdown(f"**Monto esperado del mes:** {fmt_money(periodo['monto_esperado'])}  |  "
+                        f"**Pagado hasta ahora:** {fmt_money(total_abonos)}  |  "
+                        f"**Deuda actual:** {fmt_money(deuda_actual)}")
+
+            st.divider()
+            st.subheader("➕ Registrar un nuevo abono")
+            with st.form(f"form_pago_{k}", clear_on_submit=True):
+                monto_pago = st.number_input("Monto abonado (Bs)", min_value=0.0, step=10.0)
+                fecha_pago = st.date_input("Fecha del abono", value=date.today(), format="DD/MM/YYYY")
+                metodo_pago = st.selectbox("Método de pago", METODOS_ABONO, key=f"metodo_{k}")
+                observacion = st.text_input("Observación (opcional)", key=f"obs_{k}")
+
+                if st.form_submit_button("💾 Registrar abono"):
+                    if monto_pago <= 0:
+                        st.error("El monto abonado debe ser mayor a 0.")
+                    else:
+                        try:
+                            db.crear_pago_servicio(servicio, {
+                                "periodo_id": periodo["id"],
+                                "fecha": str(fecha_pago),
+                                "monto": monto_pago,
+                                "metodo_pago": metodo_pago,
+                                "observacion": observacion or None,
+                            })
+                            limpiar_cache()
+                            st.success("Abono registrado.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al guardar: {e}")
+
+            if abonos:
+                st.divider()
+                st.subheader(f"Abonos ya registrados — {mes} {int(anio)}")
+                for p in sorted(abonos, key=lambda x: x["fecha"]):
+                    with st.expander(f'{p["fecha"]} — {fmt_money(p["monto"])} — {p.get("metodo_pago") or ""}'):
+                        mostrar_botones_recibo(p, periodo, apt, total_abonos,
+                                               key_sufijo=f'{k}_{p["id"]}', servicio=servicio)
+                        st.divider()
+                        _formulario_editar_abono(servicio, p, k)
+        else:
+            st.info("Guarda primero la lectura del medidor para poder registrar abonos de este mes.")
+
+    with tab_historial:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            filtro_apt = st.selectbox(
+                "Filtrar por apartamento", ["Todos"] + [a["codigo"] for a in apartamentos], key=f"{k}_hist_apt"
+            )
+        with col2:
+            filtro_anio = st.selectbox("Filtrar por año",
+                                       ["Todos"] + list(range(date.today().year - 2, date.today().year + 2)),
+                                       key=f"{k}_hist_anio")
+        with col3:
+            filtro_mes = st.selectbox("Filtrar por mes", ["Todos"] + MESES, key=f"{k}_hist_mes")
+
+        apt_id = None
+        if filtro_apt != "Todos":
+            apt_id = next(a["id"] for a in apartamentos if a["codigo"] == filtro_apt)
+
+        periodos = _solo_mis_apartamentos(db.listar_periodos_servicio(
+            servicio,
+            apartamento_id=apt_id,
+            anio=None if filtro_anio == "Todos" else filtro_anio,
+            mes=None if filtro_mes == "Todos" else filtro_mes,
+        ))
+
+        if not periodos:
+            st.info("No hay periodos que coincidan con el filtro.")
+            return
+
+        filas = []
+        for p in periodos:
+            apt_info = p.get("apartamentos") or {}
+            pagado = sum(float(a["monto"]) for a in (p.get(campo_pagos) or []))
+            filas.append({
+                "Apartamento": apt_info.get("codigo"),
+                "Inquilino": apt_info.get("inquilino_nombre"),
+                "Mes": p["mes"],
+                "Año": p["anio"],
+                ui["tabla_anterior"]: p[ui["col_anterior"]],
+                ui["tabla_actual"]: p[ui["col_actual"]],
+                "Consumo": calc_consumo.calcular_consumo(p[ui["col_anterior"]], p[ui["col_actual"]]),
+                "Esperado": p["monto_esperado"],
+                "Pagado": pagado,
+                "Deuda": float(p["monto_esperado"]) - pagado,
+            })
+        st.dataframe(pd.DataFrame(filas), use_container_width=True, hide_index=True)
+
+        total_esperado = sum(f["Esperado"] for f in filas)
+        total_recaudado = sum(f["Pagado"] for f in filas)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total esperado", fmt_money(total_esperado))
+        c2.metric("Total pagado", fmt_money(total_recaudado))
+        c3.metric("Total deuda", fmt_money(total_esperado - total_recaudado))
+
+        with st.expander("🔍 Ver y editar los abonos de un periodo específico"):
+            opciones = [f'{f["Apartamento"]} — {f["Mes"]} {f["Año"]}' for f in filas]
+            sel = st.selectbox("Periodo", range(len(opciones)), format_func=lambda i: opciones[i],
+                               key=f"sel_hist_{k}")
+            detalle_periodo = periodos[sel]
+            detalle_abonos = detalle_periodo.get(campo_pagos) or []
+            if not detalle_abonos:
+                st.write("Sin abonos registrados.")
+            else:
+                total_detalle = sum(float(x["monto"]) for x in detalle_abonos)
+                for p in sorted(detalle_abonos, key=lambda x: x["fecha"]):
+                    with st.expander(f'{p["fecha"]} — {fmt_money(p["monto"])} — {p.get("metodo_pago") or ""}'):
+                        mostrar_botones_recibo(
+                            p, detalle_periodo, detalle_periodo.get("apartamentos"), total_detalle,
+                            key_sufijo=f'{k}_hist_{p["id"]}', servicio=servicio)
+                        st.divider()
+                        _formulario_editar_abono(servicio, p, f"{k}_hist")
 
 
 # ------------------------------------------------------------------
@@ -1281,612 +1537,14 @@ elif pagina == "💵 Pagos de Alquiler":
 # PÁGINA: ELECTRICIDAD
 # ==================================================================
 elif pagina == "⚡ Electricidad":
-    st.title("⚡ Control de Electricidad")
+    pagina_consumo("electricidad")
 
-    apartamentos = cargar_apartamentos()
-    if not apartamentos:
-        st.info("Primero registra apartamentos en la sección **Apartamentos**.")
-        st.stop()
-
-    tarifa_actual = db.obtener_tarifa_kwh()
-    if es_admin:
-        with st.expander("⚙️ Tarifa por Kwh vigente"):
-            with st.form("form_tarifa"):
-                nueva_tarifa = st.number_input(
-                    "Tarifa por Kwh (Bs)", min_value=0.0, step=0.01, format="%.4f", value=tarifa_actual
-                )
-                if st.form_submit_button("Guardar tarifa"):
-                    try:
-                        db.guardar_tarifa_kwh(nueva_tarifa)
-                        st.success("Tarifa actualizada. Se usará como valor por defecto para nuevas lecturas.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al guardar: {e}")
-
-    tab_registrar, tab_historial = st.tabs(["➕ Registrar lectura y abono", "📜 Historial"])
-
-    with tab_registrar:
-        codigos = [f'{a["codigo"]} — {a.get("inquilino_nombre") or "vacío"}' for a in apartamentos]
-        idx = st.selectbox("Apartamento", range(len(apartamentos)), format_func=lambda i: codigos[i], key="elec_apt")
-        apt = apartamentos[idx]
-
-        col1, col2 = st.columns(2)
-        with col1:
-            mes = st.selectbox("Mes", MESES, index=date.today().month - 1, key="elec_mes")
-        with col2:
-            anio = st.number_input("Año", min_value=2000, max_value=2100, value=date.today().year, step=1,
-                                    key="elec_anio")
-
-        periodo = db.obtener_periodo_electricidad(apt["id"], mes, int(anio))
-
-        if periodo:
-            kwh_anterior_default = float(periodo["kwh_anterior"])
-            kwh_actual_default = float(periodo["kwh_actual"])
-            tarifa_default = float(periodo["tarifa_kwh"])
-        else:
-            anterior_periodo = db.ultimo_periodo_electricidad(apt["id"])
-            kwh_anterior_default = float(anterior_periodo["kwh_actual"]) if anterior_periodo else 0.0
-            kwh_actual_default = kwh_anterior_default
-            tarifa_default = tarifa_actual
-
-        st.subheader("📏 Lectura del medidor")
-        with st.form("form_lectura"):
-            colk1, colk2, colk3 = st.columns(3)
-            with colk1:
-                kwh_anterior = st.number_input("Kwh anterior", min_value=0.0, step=1.0, value=kwh_anterior_default)
-            with colk2:
-                kwh_actual = st.number_input("Kwh actual", min_value=0.0, step=1.0, value=kwh_actual_default)
-            with colk3:
-                tarifa_kwh = st.number_input("Tarifa por Kwh (Bs)", min_value=0.0, step=0.01, format="%.4f",
-                                              value=tarifa_default)
-
-            consumo = calc_consumo.calcular_consumo(kwh_anterior, kwh_actual)   # número entero (redondeo normal)
-            monto_calculado = calc_consumo.calcular_monto(consumo, tarifa_kwh)
-            st.caption(f"Consumo: {consumo} Kwh  ×  Bs {tarifa_kwh:.4f}  =  {detalle_monto_servicio(consumo, tarifa_kwh)}")
-            nota_redondeo = calc_consumo.nota_redondeo(kwh_anterior, kwh_actual)
-            if nota_redondeo:
-                st.caption(f"ℹ️ El consumo se redondea a número entero: {nota_redondeo}.")
-
-            guardar_lectura = st.form_submit_button("💾 Guardar lectura")
-            if guardar_lectura:
-                payload = {
-                    "kwh_anterior": kwh_anterior,
-                    "kwh_actual": kwh_actual,
-                    "tarifa_kwh": tarifa_kwh,
-                    "monto_esperado": monto_calculado,
-                }
-                try:
-                    if periodo:
-                        db.actualizar_periodo_electricidad(periodo["id"], payload)
-                    else:
-                        payload.update({"apartamento_id": apt["id"], "mes": mes, "anio": int(anio)})
-                        db.crear_periodo_electricidad(payload)
-                    limpiar_cache()
-                    st.success("Lectura guardada.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
-
-        if periodo:
-            abonos = periodo.get("pagos_electricidad", []) or []
-            pagado_hasta_ahora = sum(float(p["monto"]) for p in abonos)
-            deuda_actual = float(periodo["monto_esperado"]) - pagado_hasta_ahora
-
-            st.markdown(f"**Monto esperado del mes:** {fmt_money(periodo['monto_esperado'])}  |  "
-                        f"**Pagado hasta ahora:** {fmt_money(pagado_hasta_ahora)}  |  "
-                        f"**Deuda actual:** {fmt_money(deuda_actual)}")
-
-            st.divider()
-            st.subheader("➕ Registrar un nuevo abono")
-            with st.form("form_pago_elec", clear_on_submit=True):
-                monto_pago = st.number_input("Monto abonado (Bs)", min_value=0.0, step=10.0)
-                fecha_pago = st.date_input("Fecha del abono", value=date.today(), format="DD/MM/YYYY")
-                metodo_pago = st.selectbox("Método de pago", ["Efectivo", "Transferencia", "QR", "Otro"],
-                                            key="metodo_elec")
-                observacion = st.text_input("Observación (opcional)", key="obs_elec")
-
-                guardar = st.form_submit_button("💾 Registrar abono")
-                if guardar:
-                    if monto_pago <= 0:
-                        st.error("El monto abonado debe ser mayor a 0.")
-                    else:
-                        try:
-                            db.crear_pago_electricidad({
-                                "periodo_id": periodo["id"],
-                                "fecha": str(fecha_pago),
-                                "monto": monto_pago,
-                                "metodo_pago": metodo_pago,
-                                "observacion": observacion or None,
-                            })
-                            limpiar_cache()
-                            st.success("Abono registrado.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al guardar: {e}")
-
-            if abonos:
-                st.divider()
-                st.subheader(f"Abonos ya registrados — {mes} {int(anio)}")
-                for p in sorted(abonos, key=lambda x: x["fecha"]):
-                    with st.expander(f'{p["fecha"]} — {fmt_money(p["monto"])} — {p.get("metodo_pago") or ""}'):
-                        mostrar_botones_recibo(p, periodo, apt, sum(float(x["monto"]) for x in abonos),
-                                               key_sufijo=f'elec_{p["id"]}', servicio="electricidad")
-                        st.divider()
-                        with st.form(f'form_editar_pago_elec_{p["id"]}'):
-                            colf, colm = st.columns(2)
-                            with colf:
-                                _f = date.fromisoformat(str(p["fecha"])[:10])
-                                edit_fecha = st.date_input("Fecha", value=_f, format="DD/MM/YYYY",
-                                                            key=f'elec_fecha_{p["id"]}')
-                            with colm:
-                                edit_monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0,
-                                                              value=float(p["monto"]), key=f'elec_monto_{p["id"]}')
-                            edit_metodo = st.selectbox(
-                                "Método de pago", ["Efectivo", "Transferencia", "QR", "Otro"],
-                                index=["Efectivo", "Transferencia", "QR", "Otro"].index(p.get("metodo_pago"))
-                                if p.get("metodo_pago") in ["Efectivo", "Transferencia", "QR", "Otro"] else 0,
-                                key=f'elec_metodo_{p["id"]}'
-                            )
-                            edit_obs = st.text_input("Observación", value=p.get("observacion") or "",
-                                                      key=f'elec_obs_{p["id"]}')
-
-                            if es_admin:
-                                colg, cold = st.columns(2)
-                                guardar_edit = colg.form_submit_button("💾 Guardar cambios", use_container_width=True)
-                                eliminar_edit = cold.form_submit_button("🗑️ Eliminar abono", use_container_width=True)
-                            else:
-                                guardar_edit = st.form_submit_button("💾 Guardar cambios", use_container_width=True)
-                                eliminar_edit = False
-
-                            if guardar_edit:
-                                try:
-                                    db.actualizar_pago_electricidad(p["id"], {
-                                        "fecha": str(edit_fecha),
-                                        "monto": edit_monto,
-                                        "metodo_pago": edit_metodo,
-                                        "observacion": edit_obs or None,
-                                    })
-                                    limpiar_cache()
-                                    st.success("Abono actualizado.")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Error al actualizar: {e}")
-
-                            if eliminar_edit:
-                                try:
-                                    db.eliminar_pago_electricidad(p["id"])
-                                    limpiar_cache()
-                                    st.success("Abono eliminado.")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Error al eliminar: {e}")
-        else:
-            st.info("Guarda primero la lectura del medidor para poder registrar abonos de este mes.")
-
-    with tab_historial:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            filtro_apt = st.selectbox(
-                "Filtrar por apartamento", ["Todos"] + [a["codigo"] for a in apartamentos], key="elec_hist_apt"
-            )
-        with col2:
-            filtro_anio = st.selectbox("Filtrar por año",
-                                        ["Todos"] + list(range(date.today().year - 2, date.today().year + 2)),
-                                        key="elec_hist_anio")
-        with col3:
-            filtro_mes = st.selectbox("Filtrar por mes", ["Todos"] + MESES, key="elec_hist_mes")
-
-        apt_id = None
-        if filtro_apt != "Todos":
-            apt_id = next(a["id"] for a in apartamentos if a["codigo"] == filtro_apt)
-
-        periodos_elec = _solo_mis_apartamentos(db.listar_periodos_electricidad(
-            apartamento_id=apt_id,
-            anio=None if filtro_anio == "Todos" else filtro_anio,
-            mes=None if filtro_mes == "Todos" else filtro_mes,
-        ))
-
-        if not periodos_elec:
-            st.info("No hay periodos que coincidan con el filtro.")
-        else:
-            filas = []
-            for p in periodos_elec:
-                apt_info = p.get("apartamentos") or {}
-                pagado = sum(float(a["monto"]) for a in (p.get("pagos_electricidad") or []))
-                deuda = float(p["monto_esperado"]) - pagado
-                filas.append({
-                    "Apartamento": apt_info.get("codigo"),
-                    "Inquilino": apt_info.get("inquilino_nombre"),
-                    "Mes": p["mes"],
-                    "Año": p["anio"],
-                    "Kwh anterior": p["kwh_anterior"],
-                    "Kwh actual": p["kwh_actual"],
-                    "Consumo": calc_consumo.calcular_consumo(p["kwh_anterior"], p["kwh_actual"]),
-                    "Esperado": p["monto_esperado"],
-                    "Pagado": pagado,
-                    "Deuda": deuda,
-                })
-            st.dataframe(pd.DataFrame(filas), use_container_width=True, hide_index=True)
-
-            total_esperado = sum(f["Esperado"] for f in filas)
-            total_recaudado = sum(f["Pagado"] for f in filas)
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total esperado", fmt_money(total_esperado))
-            c2.metric("Total pagado", fmt_money(total_recaudado))
-            c3.metric("Total deuda", fmt_money(total_esperado - total_recaudado))
-
-            with st.expander("🔍 Ver y editar los abonos de un periodo específico"):
-                opciones = [f'{f["Apartamento"]} — {f["Mes"]} {f["Año"]}' for f in filas]
-                sel = st.selectbox("Periodo", range(len(opciones)), format_func=lambda i: opciones[i],
-                                    key="sel_hist_elec")
-                detalle_periodo = periodos_elec[sel]
-                detalle_abonos = detalle_periodo.get("pagos_electricidad") or []
-                if not detalle_abonos:
-                    st.write("Sin abonos registrados.")
-                else:
-                    for p in sorted(detalle_abonos, key=lambda x: x["fecha"]):
-                        with st.expander(f'{p["fecha"]} — {fmt_money(p["monto"])} — {p.get("metodo_pago") or ""}'):
-                            mostrar_botones_recibo(
-                                p, detalle_periodo, detalle_periodo.get("apartamentos"),
-                                sum(float(x["monto"]) for x in detalle_abonos),
-                                key_sufijo=f'elec_hist_{p["id"]}', servicio="electricidad")
-                            st.divider()
-                            with st.form(f'form_editar_pago_elec_hist_{p["id"]}'):
-                                colf, colm = st.columns(2)
-                                with colf:
-                                    _f = date.fromisoformat(str(p["fecha"])[:10])
-                                    edit_fecha = st.date_input("Fecha", value=_f, format="DD/MM/YYYY",
-                                                                key=f'elec_hist_fecha_{p["id"]}')
-                                with colm:
-                                    edit_monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0,
-                                                                  value=float(p["monto"]),
-                                                                  key=f'elec_hist_monto_{p["id"]}')
-                                edit_metodo = st.selectbox(
-                                    "Método de pago", ["Efectivo", "Transferencia", "QR", "Otro"],
-                                    index=["Efectivo", "Transferencia", "QR", "Otro"].index(p.get("metodo_pago"))
-                                    if p.get("metodo_pago") in ["Efectivo", "Transferencia", "QR", "Otro"] else 0,
-                                    key=f'elec_hist_metodo_{p["id"]}'
-                                )
-                                edit_obs = st.text_input("Observación", value=p.get("observacion") or "",
-                                                          key=f'elec_hist_obs_{p["id"]}')
-
-                                if es_admin:
-                                    colg, cold = st.columns(2)
-                                    guardar_edit = colg.form_submit_button("💾 Guardar cambios", use_container_width=True)
-                                    eliminar_edit = cold.form_submit_button("🗑️ Eliminar abono", use_container_width=True)
-                                else:
-                                    guardar_edit = st.form_submit_button("💾 Guardar cambios", use_container_width=True)
-                                    eliminar_edit = False
-
-                                if guardar_edit:
-                                    try:
-                                        db.actualizar_pago_electricidad(p["id"], {
-                                            "fecha": str(edit_fecha),
-                                            "monto": edit_monto,
-                                            "metodo_pago": edit_metodo,
-                                            "observacion": edit_obs or None,
-                                        })
-                                        limpiar_cache()
-                                        st.success("Abono actualizado.")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Error al actualizar: {e}")
-
-                                if eliminar_edit:
-                                    try:
-                                        db.eliminar_pago_electricidad(p["id"])
-                                        limpiar_cache()
-                                        st.success("Abono eliminado.")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Error al eliminar: {e}")
-# ==================================================================
 elif pagina == "💧 Agua":
-    st.title("💧 Control de Agua")
-
-    apartamentos = cargar_apartamentos()
-    if not apartamentos:
-        st.info("Primero registra apartamentos en la sección **Apartamentos**.")
-        st.stop()
-
-    tarifa_actual = db.obtener_tarifa_agua()
-    if es_admin:
-        with st.expander("⚙️ Tarifa por m³ vigente"):
-            with st.form("form_tarifa_agua"):
-                nueva_tarifa = st.number_input(
-                    "Tarifa por m³ (Bs)", min_value=0.0, step=0.01, format="%.4f", value=tarifa_actual
-                )
-                if st.form_submit_button("Guardar tarifa"):
-                    try:
-                        db.guardar_tarifa_agua(nueva_tarifa)
-                        st.success("Tarifa actualizada. Se usará como valor por defecto para nuevas lecturas.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al guardar: {e}")
-
-    tab_registrar, tab_historial = st.tabs(["➕ Registrar lectura y abono", "📜 Historial"])
-
-    with tab_registrar:
-        codigos = [f'{a["codigo"]} — {a.get("inquilino_nombre") or "vacío"}' for a in apartamentos]
-        idx = st.selectbox("Apartamento", range(len(apartamentos)), format_func=lambda i: codigos[i], key="agua_apt")
-        apt = apartamentos[idx]
-
-        col1, col2 = st.columns(2)
-        with col1:
-            mes = st.selectbox("Mes", MESES, index=date.today().month - 1, key="agua_mes")
-        with col2:
-            anio = st.number_input("Año", min_value=2000, max_value=2100, value=date.today().year, step=1,
-                                    key="agua_anio")
-
-        periodo = db.obtener_periodo_agua(apt["id"], mes, int(anio))
-
-        if periodo:
-            lectura_anterior_default = float(periodo["lectura_anterior"])
-            lectura_actual_default = float(periodo["lectura_actual"])
-            tarifa_default = float(periodo["tarifa_agua"])
-        else:
-            anterior_periodo = db.ultimo_periodo_agua(apt["id"])
-            lectura_anterior_default = float(anterior_periodo["lectura_actual"]) if anterior_periodo else 0.0
-            lectura_actual_default = lectura_anterior_default
-            tarifa_default = tarifa_actual
-
-        st.subheader("📏 Lectura del medidor")
-        with st.form("form_lectura_agua"):
-            colk1, colk2, colk3 = st.columns(3)
-            with colk1:
-                lectura_anterior = st.number_input("Lectura anterior (m³)", min_value=0.0, step=1.0,
-                                                     value=lectura_anterior_default)
-            with colk2:
-                lectura_actual = st.number_input("Lectura actual (m³)", min_value=0.0, step=1.0,
-                                                   value=lectura_actual_default)
-            with colk3:
-                tarifa_agua = st.number_input("Tarifa por m³ (Bs)", min_value=0.0, step=0.01, format="%.4f",
-                                               value=tarifa_default)
-
-            consumo = calc_consumo.calcular_consumo(lectura_anterior, lectura_actual)   # número entero (redondeo normal)
-            monto_calculado = calc_consumo.calcular_monto(consumo, tarifa_agua)
-            st.caption(f"Consumo: {consumo} m³  ×  Bs {tarifa_agua:.4f}  =  {detalle_monto_servicio(consumo, tarifa_agua)}")
-            nota_redondeo = calc_consumo.nota_redondeo(lectura_anterior, lectura_actual)
-            if nota_redondeo:
-                st.caption(f"ℹ️ El consumo se redondea a número entero: {nota_redondeo}.")
-
-            guardar_lectura = st.form_submit_button("💾 Guardar lectura")
-            if guardar_lectura:
-                payload = {
-                    "lectura_anterior": lectura_anterior,
-                    "lectura_actual": lectura_actual,
-                    "tarifa_agua": tarifa_agua,
-                    "monto_esperado": monto_calculado,
-                }
-                try:
-                    if periodo:
-                        db.actualizar_periodo_agua(periodo["id"], payload)
-                    else:
-                        payload.update({"apartamento_id": apt["id"], "mes": mes, "anio": int(anio)})
-                        db.crear_periodo_agua(payload)
-                    limpiar_cache()
-                    st.success("Lectura guardada.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
-
-        if periodo:
-            abonos = periodo.get("pagos_agua", []) or []
-            pagado_hasta_ahora = sum(float(p["monto"]) for p in abonos)
-            deuda_actual = float(periodo["monto_esperado"]) - pagado_hasta_ahora
-
-            st.markdown(f"**Monto esperado del mes:** {fmt_money(periodo['monto_esperado'])}  |  "
-                        f"**Pagado hasta ahora:** {fmt_money(pagado_hasta_ahora)}  |  "
-                        f"**Deuda actual:** {fmt_money(deuda_actual)}")
-
-            st.divider()
-            st.subheader("➕ Registrar un nuevo abono")
-            with st.form("form_pago_agua", clear_on_submit=True):
-                monto_pago = st.number_input("Monto abonado (Bs)", min_value=0.0, step=10.0)
-                fecha_pago = st.date_input("Fecha del abono", value=date.today(), format="DD/MM/YYYY")
-                metodo_pago = st.selectbox("Método de pago", ["Efectivo", "Transferencia", "QR", "Otro"],
-                                            key="metodo_agua")
-                observacion = st.text_input("Observación (opcional)", key="obs_agua")
-
-                guardar = st.form_submit_button("💾 Registrar abono")
-                if guardar:
-                    if monto_pago <= 0:
-                        st.error("El monto abonado debe ser mayor a 0.")
-                    else:
-                        try:
-                            db.crear_pago_agua({
-                                "periodo_id": periodo["id"],
-                                "fecha": str(fecha_pago),
-                                "monto": monto_pago,
-                                "metodo_pago": metodo_pago,
-                                "observacion": observacion or None,
-                            })
-                            limpiar_cache()
-                            st.success("Abono registrado.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al guardar: {e}")
-
-            if abonos:
-                st.divider()
-                st.subheader(f"Abonos ya registrados — {mes} {int(anio)}")
-                for p in sorted(abonos, key=lambda x: x["fecha"]):
-                    with st.expander(f'{p["fecha"]} — {fmt_money(p["monto"])} — {p.get("metodo_pago") or ""}'):
-                        mostrar_botones_recibo(p, periodo, apt, sum(float(x["monto"]) for x in abonos),
-                                               key_sufijo=f'agua_{p["id"]}', servicio="agua")
-                        st.divider()
-                        with st.form(f'form_editar_pago_agua_{p["id"]}'):
-                            colf, colm = st.columns(2)
-                            with colf:
-                                _f = date.fromisoformat(str(p["fecha"])[:10])
-                                edit_fecha = st.date_input("Fecha", value=_f, format="DD/MM/YYYY",
-                                                            key=f'agua_fecha_{p["id"]}')
-                            with colm:
-                                edit_monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0,
-                                                              value=float(p["monto"]), key=f'agua_monto_{p["id"]}')
-                            edit_metodo = st.selectbox(
-                                "Método de pago", ["Efectivo", "Transferencia", "QR", "Otro"],
-                                index=["Efectivo", "Transferencia", "QR", "Otro"].index(p.get("metodo_pago"))
-                                if p.get("metodo_pago") in ["Efectivo", "Transferencia", "QR", "Otro"] else 0,
-                                key=f'agua_metodo_{p["id"]}'
-                            )
-                            edit_obs = st.text_input("Observación", value=p.get("observacion") or "",
-                                                      key=f'agua_obs_{p["id"]}')
-
-                            if es_admin:
-                                colg, cold = st.columns(2)
-                                guardar_edit = colg.form_submit_button("💾 Guardar cambios", use_container_width=True)
-                                eliminar_edit = cold.form_submit_button("🗑️ Eliminar abono", use_container_width=True)
-                            else:
-                                guardar_edit = st.form_submit_button("💾 Guardar cambios", use_container_width=True)
-                                eliminar_edit = False
-
-                            if guardar_edit:
-                                try:
-                                    db.actualizar_pago_agua(p["id"], {
-                                        "fecha": str(edit_fecha),
-                                        "monto": edit_monto,
-                                        "metodo_pago": edit_metodo,
-                                        "observacion": edit_obs or None,
-                                    })
-                                    limpiar_cache()
-                                    st.success("Abono actualizado.")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Error al actualizar: {e}")
-
-                            if eliminar_edit:
-                                try:
-                                    db.eliminar_pago_agua(p["id"])
-                                    limpiar_cache()
-                                    st.success("Abono eliminado.")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Error al eliminar: {e}")
-        else:
-            st.info("Guarda primero la lectura del medidor para poder registrar abonos de este mes.")
-
-    with tab_historial:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            filtro_apt = st.selectbox(
-                "Filtrar por apartamento", ["Todos"] + [a["codigo"] for a in apartamentos], key="agua_hist_apt"
-            )
-        with col2:
-            filtro_anio = st.selectbox("Filtrar por año",
-                                        ["Todos"] + list(range(date.today().year - 2, date.today().year + 2)),
-                                        key="agua_hist_anio")
-        with col3:
-            filtro_mes = st.selectbox("Filtrar por mes", ["Todos"] + MESES, key="agua_hist_mes")
-
-        apt_id = None
-        if filtro_apt != "Todos":
-            apt_id = next(a["id"] for a in apartamentos if a["codigo"] == filtro_apt)
-
-        periodos_agua = _solo_mis_apartamentos(db.listar_periodos_agua(
-            apartamento_id=apt_id,
-            anio=None if filtro_anio == "Todos" else filtro_anio,
-            mes=None if filtro_mes == "Todos" else filtro_mes,
-        ))
-
-        if not periodos_agua:
-            st.info("No hay periodos que coincidan con el filtro.")
-        else:
-            filas = []
-            for p in periodos_agua:
-                apt_info = p.get("apartamentos") or {}
-                pagado = sum(float(a["monto"]) for a in (p.get("pagos_agua") or []))
-                deuda = float(p["monto_esperado"]) - pagado
-                filas.append({
-                    "Apartamento": apt_info.get("codigo"),
-                    "Inquilino": apt_info.get("inquilino_nombre"),
-                    "Mes": p["mes"],
-                    "Año": p["anio"],
-                    "Lectura anterior": p["lectura_anterior"],
-                    "Lectura actual": p["lectura_actual"],
-                    "Consumo": calc_consumo.calcular_consumo(p["lectura_anterior"], p["lectura_actual"]),
-                    "Esperado": p["monto_esperado"],
-                    "Pagado": pagado,
-                    "Deuda": deuda,
-                })
-            st.dataframe(pd.DataFrame(filas), use_container_width=True, hide_index=True)
-
-            total_esperado = sum(f["Esperado"] for f in filas)
-            total_recaudado = sum(f["Pagado"] for f in filas)
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total esperado", fmt_money(total_esperado))
-            c2.metric("Total pagado", fmt_money(total_recaudado))
-            c3.metric("Total deuda", fmt_money(total_esperado - total_recaudado))
-
-            with st.expander("🔍 Ver y editar los abonos de un periodo específico"):
-                opciones = [f'{f["Apartamento"]} — {f["Mes"]} {f["Año"]}' for f in filas]
-                sel = st.selectbox("Periodo", range(len(opciones)), format_func=lambda i: opciones[i],
-                                    key="sel_hist_agua")
-                detalle_periodo = periodos_agua[sel]
-                detalle_abonos = detalle_periodo.get("pagos_agua") or []
-                if not detalle_abonos:
-                    st.write("Sin abonos registrados.")
-                else:
-                    for p in sorted(detalle_abonos, key=lambda x: x["fecha"]):
-                        with st.expander(f'{p["fecha"]} — {fmt_money(p["monto"])} — {p.get("metodo_pago") or ""}'):
-                            mostrar_botones_recibo(
-                                p, detalle_periodo, detalle_periodo.get("apartamentos"),
-                                sum(float(x["monto"]) for x in detalle_abonos),
-                                key_sufijo=f'agua_hist_{p["id"]}', servicio="agua")
-                            st.divider()
-                            with st.form(f'form_editar_pago_agua_hist_{p["id"]}'):
-                                colf, colm = st.columns(2)
-                                with colf:
-                                    _f = date.fromisoformat(str(p["fecha"])[:10])
-                                    edit_fecha = st.date_input("Fecha", value=_f, format="DD/MM/YYYY",
-                                                                key=f'agua_hist_fecha_{p["id"]}')
-                                with colm:
-                                    edit_monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0,
-                                                                  value=float(p["monto"]),
-                                                                  key=f'agua_hist_monto_{p["id"]}')
-                                edit_metodo = st.selectbox(
-                                    "Método de pago", ["Efectivo", "Transferencia", "QR", "Otro"],
-                                    index=["Efectivo", "Transferencia", "QR", "Otro"].index(p.get("metodo_pago"))
-                                    if p.get("metodo_pago") in ["Efectivo", "Transferencia", "QR", "Otro"] else 0,
-                                    key=f'agua_hist_metodo_{p["id"]}'
-                                )
-                                edit_obs = st.text_input("Observación", value=p.get("observacion") or "",
-                                                          key=f'agua_hist_obs_{p["id"]}')
-
-                                if es_admin:
-                                    colg, cold = st.columns(2)
-                                    guardar_edit = colg.form_submit_button("💾 Guardar cambios", use_container_width=True)
-                                    eliminar_edit = cold.form_submit_button("🗑️ Eliminar abono", use_container_width=True)
-                                else:
-                                    guardar_edit = st.form_submit_button("💾 Guardar cambios", use_container_width=True)
-                                    eliminar_edit = False
-
-                                if guardar_edit:
-                                    try:
-                                        db.actualizar_pago_agua(p["id"], {
-                                            "fecha": str(edit_fecha),
-                                            "monto": edit_monto,
-                                            "metodo_pago": edit_metodo,
-                                            "observacion": edit_obs or None,
-                                        })
-                                        limpiar_cache()
-                                        st.success("Abono actualizado.")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Error al actualizar: {e}")
-
-                                if eliminar_edit:
-                                    try:
-                                        db.eliminar_pago_agua(p["id"])
-                                        limpiar_cache()
-                                        st.success("Abono eliminado.")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Error al eliminar: {e}")
+    pagina_consumo("agua")
 
 
 # ==================================================================
-# PÁGINA: PENDIENTES (tareas de colaboradores)
+# PÁGINA: ESTADO DE CUENTA (deuda real por inquilino)
 # ==================================================================
 elif pagina == "📑 Estado de cuenta":
     st.title("📑 Estado de cuenta")

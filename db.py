@@ -220,39 +220,46 @@ def eliminar_pago(pago_id):
     return sb.table("pagos").delete().eq("id", pago_id).execute()
 
 
-# ---------- Configuración (tarifa de electricidad y agua) ----------
+# ---------- Electricidad y agua (misma estructura: una sola implementación) ----------
+#
+# Cada servicio tiene su tabla de periodos (un registro por apartamento + mes/año con la lectura del medidor),
+# su tabla de pagos (abonos) y su tarifa vigente en `configuracion`. Las funciones de abajo reciben el nombre del
+# servicio ('electricidad' o 'agua') y sirven para los dos.
 
-def obtener_tarifa_kwh():
-    sb = get_client()
-    res = sb.table("configuracion").select("tarifa_kwh").eq("id", 1).execute()
+SERVICIOS = {
+    "electricidad": {"periodos": "periodos_electricidad", "pagos": "pagos_electricidad", "tarifa": "tarifa_kwh",
+                     "lectura_actual": "kwh_actual"},
+    "agua": {"periodos": "periodos_agua", "pagos": "pagos_agua", "tarifa": "tarifa_agua",
+             "lectura_actual": "lectura_actual"},
+}
+_COLUMNAS_ABONO = "id, fecha, monto, metodo_pago, observacion"
+
+
+def _cfg_servicio(servicio):
+    try:
+        return SERVICIOS[servicio]
+    except KeyError:
+        raise ValueError(f"Servicio desconocido: {servicio!r} (usa 'electricidad' o 'agua')") from None
+
+
+def obtener_tarifa(servicio):
+    columna = _cfg_servicio(servicio)["tarifa"]
+    res = get_client().table("configuracion").select(columna).eq("id", 1).execute()
     data = res.data or []
-    return float(data[0]["tarifa_kwh"]) if data else 0.0
+    return float(data[0][columna]) if data else 0.0
 
 
-def guardar_tarifa_kwh(valor):
-    sb = get_client()
-    return sb.table("configuracion").upsert({"id": 1, "tarifa_kwh": valor}).execute()
+def guardar_tarifa(servicio, valor):
+    columna = _cfg_servicio(servicio)["tarifa"]
+    return get_client().table("configuracion").upsert({"id": 1, columna: valor}).execute()
 
 
-def obtener_tarifa_agua():
-    sb = get_client()
-    res = sb.table("configuracion").select("tarifa_agua").eq("id", 1).execute()
-    data = res.data or []
-    return float(data[0]["tarifa_agua"]) if data else 0.0
-
-
-def guardar_tarifa_agua(valor):
-    sb = get_client()
-    return sb.table("configuracion").upsert({"id": 1, "tarifa_agua": valor}).execute()
-
-
-# ---------- Periodos de electricidad (un registro por apartamento + mes/año) ----------
-
-def listar_periodos_electricidad(apartamento_id=None, anio=None, mes=None, solo_activos=False):
-    """solo_activos=True excluye los periodos cerrados de inquilinos que ya salieron."""
-    sb = get_client()
-    q = sb.table("periodos_electricidad").select(
-        "*, apartamentos(codigo, piso, inquilino_nombre), pagos_electricidad(id, fecha, monto, metodo_pago, observacion)"
+def listar_periodos_servicio(servicio, apartamento_id=None, anio=None, mes=None, solo_activos=False):
+    """Periodos del servicio con el apartamento y todos sus abonos. solo_activos=True excluye los periodos
+    cerrados de inquilinos que ya salieron."""
+    cfg = _cfg_servicio(servicio)
+    q = get_client().table(cfg["periodos"]).select(
+        f"*, apartamentos(codigo, piso, inquilino_nombre), {cfg['pagos']}({_COLUMNAS_ABONO})"
     )
     if apartamento_id:
         q = q.eq("apartamento_id", apartamento_id)
@@ -266,11 +273,12 @@ def listar_periodos_electricidad(apartamento_id=None, anio=None, mes=None, solo_
     return _ordenar_periodos(res.data or [])
 
 
-def obtener_periodo_electricidad(apartamento_id, mes, anio):
-    sb = get_client()
+def obtener_periodo_servicio(servicio, apartamento_id, mes, anio):
+    """Periodo ABIERTO (inquilino actual) de ese apartamento/mes/año, con sus abonos; None si no existe."""
+    cfg = _cfg_servicio(servicio)
     res = (
-        sb.table("periodos_electricidad")
-        .select("*, pagos_electricidad(id, fecha, monto, metodo_pago, observacion)")
+        get_client().table(cfg["periodos"])
+        .select(f"*, {cfg['pagos']}({_COLUMNAS_ABONO})")
         .eq("apartamento_id", apartamento_id)
         .eq("mes", mes)
         .eq("anio", anio)
@@ -281,11 +289,10 @@ def obtener_periodo_electricidad(apartamento_id, mes, anio):
     return data[0] if data else None
 
 
-def ultimo_periodo_electricidad(apartamento_id):
-    """Último periodo registrado (por fecha de creación) para precargar el Kwh anterior."""
-    sb = get_client()
+def ultimo_periodo_servicio(servicio, apartamento_id):
+    """Último periodo registrado (por año y fecha de creación), para precargar la lectura anterior."""
     res = (
-        sb.table("periodos_electricidad")
+        get_client().table(_cfg_servicio(servicio)["periodos"])
         .select("*")
         .eq("apartamento_id", apartamento_id)
         .order("anio", desc=True)
@@ -297,108 +304,25 @@ def ultimo_periodo_electricidad(apartamento_id):
     return data[0] if data else None
 
 
-def crear_periodo_electricidad(payload: dict):
-    sb = get_client()
-    res = sb.table("periodos_electricidad").insert(payload).execute()
+def crear_periodo_servicio(servicio, payload: dict):
+    res = get_client().table(_cfg_servicio(servicio)["periodos"]).insert(payload).execute()
     return res.data[0]
 
 
-def actualizar_periodo_electricidad(periodo_id, payload: dict):
-    sb = get_client()
-    return sb.table("periodos_electricidad").update(payload).eq("id", periodo_id).execute()
+def actualizar_periodo_servicio(servicio, periodo_id, payload: dict):
+    return get_client().table(_cfg_servicio(servicio)["periodos"]).update(payload).eq("id", periodo_id).execute()
 
 
-# ---------- Pagos de electricidad (abonos individuales) ----------
-
-def crear_pago_electricidad(payload: dict):
-    sb = get_client()
-    return sb.table("pagos_electricidad").insert(payload).execute()
+def crear_pago_servicio(servicio, payload: dict):
+    return get_client().table(_cfg_servicio(servicio)["pagos"]).insert(payload).execute()
 
 
-def actualizar_pago_electricidad(pago_id, payload: dict):
-    sb = get_client()
-    return sb.table("pagos_electricidad").update(payload).eq("id", pago_id).execute()
+def actualizar_pago_servicio(servicio, pago_id, payload: dict):
+    return get_client().table(_cfg_servicio(servicio)["pagos"]).update(payload).eq("id", pago_id).execute()
 
 
-def eliminar_pago_electricidad(pago_id):
-    sb = get_client()
-    return sb.table("pagos_electricidad").delete().eq("id", pago_id).execute()
-
-
-# ---------- Periodos de agua (un registro por apartamento + mes/año) ----------
-
-def listar_periodos_agua(apartamento_id=None, anio=None, mes=None):
-    sb = get_client()
-    q = sb.table("periodos_agua").select(
-        "*, apartamentos(codigo, piso, inquilino_nombre), pagos_agua(id, fecha, monto, metodo_pago, observacion)"
-    )
-    if apartamento_id:
-        q = q.eq("apartamento_id", apartamento_id)
-    if anio:
-        q = q.eq("anio", anio)
-    if mes:
-        q = q.eq("mes", mes)
-    res = q.order("anio", desc=True).execute()
-    return _ordenar_periodos(res.data or [])
-
-
-def obtener_periodo_agua(apartamento_id, mes, anio):
-    sb = get_client()
-    res = (
-        sb.table("periodos_agua")
-        .select("*, pagos_agua(id, fecha, monto, metodo_pago, observacion)")
-        .eq("apartamento_id", apartamento_id)
-        .eq("mes", mes)
-        .eq("anio", anio)
-        .is_("inquilino_historial_id", "null")
-        .execute()
-    )
-    data = res.data or []
-    return data[0] if data else None
-
-
-def ultimo_periodo_agua(apartamento_id):
-    """Último periodo registrado (por fecha de creación) para precargar la lectura anterior."""
-    sb = get_client()
-    res = (
-        sb.table("periodos_agua")
-        .select("*")
-        .eq("apartamento_id", apartamento_id)
-        .order("anio", desc=True)
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
-    )
-    data = res.data or []
-    return data[0] if data else None
-
-
-def crear_periodo_agua(payload: dict):
-    sb = get_client()
-    res = sb.table("periodos_agua").insert(payload).execute()
-    return res.data[0]
-
-
-def actualizar_periodo_agua(periodo_id, payload: dict):
-    sb = get_client()
-    return sb.table("periodos_agua").update(payload).eq("id", periodo_id).execute()
-
-
-# ---------- Pagos de agua (abonos individuales) ----------
-
-def crear_pago_agua(payload: dict):
-    sb = get_client()
-    return sb.table("pagos_agua").insert(payload).execute()
-
-
-def actualizar_pago_agua(pago_id, payload: dict):
-    sb = get_client()
-    return sb.table("pagos_agua").update(payload).eq("id", pago_id).execute()
-
-
-def eliminar_pago_agua(pago_id):
-    sb = get_client()
-    return sb.table("pagos_agua").delete().eq("id", pago_id).execute()
+def eliminar_pago_servicio(servicio, pago_id):
+    return get_client().table(_cfg_servicio(servicio)["pagos"]).delete().eq("id", pago_id).execute()
 
 
 # ---------- Usuarios (roles y permisos) ----------
@@ -432,41 +356,6 @@ def eliminar_usuario(usuario_id):
 
 
 # ---------- Reportes por usuario (cobrador) ----------
-
-def listar_pagos_alquiler_rango(fecha_desde, fecha_hasta):
-    """Abonos de alquiler en un rango de fechas (tabla plana, sin embeds anidados;
-    el periodo/apartamento se cruza en la app con listar_todos_periodos_alquiler_basico)."""
-    sb = get_client()
-    res = (
-        sb.table("pagos").select("*")
-        .gte("fecha", str(fecha_desde)).lte("fecha", str(fecha_hasta))
-        .order("fecha").execute()
-    )
-    return res.data or []
-
-
-def listar_pagos_electricidad_rango(fecha_desde, fecha_hasta):
-    sb = get_client()
-    res = (
-        sb.table("pagos_electricidad").select("*")
-        .gte("fecha", str(fecha_desde)).lte("fecha", str(fecha_hasta))
-        .order("fecha").execute()
-    )
-    return res.data or []
-
-
-def listar_todos_periodos_alquiler_basico():
-    """Solo id/apartamento/mes/año de cada periodo de alquiler (tabla chica), para cruzar
-    en la app con los pagos y armar los reportes sin usar embeds anidados."""
-    sb = get_client()
-    res = sb.table("periodos_alquiler").select("id, apartamento_id, mes, anio").execute()
-    return res.data or []
-
-
-def listar_todos_periodos_electricidad_basico():
-    sb = get_client()
-    res = sb.table("periodos_electricidad").select("id, apartamento_id, mes, anio").execute()
-    return res.data or []
 
 
 # ---------- Compras (gastos) ----------
@@ -579,12 +468,6 @@ def listar_pendientes(estado=None, prioridad=None, asignado_a=None, apartamento_
     return res.data or []
 
 
-def obtener_pendiente(pendiente_id):
-    sb = get_client()
-    res = sb.table("pendientes").select("*").eq("id", pendiente_id).single().execute()
-    return res.data
-
-
 def crear_pendiente(payload: dict):
     sb = get_client()
     res = sb.table("pendientes").insert(payload).execute()
@@ -689,18 +572,6 @@ def eliminar_reunion(reunion_id):
 
 
 # ---------- Almacenamiento de comprobantes ----------
-
-def subir_comprobante(archivo_bytes: bytes, nombre_archivo: str, carpeta: str = "compras") -> str:
-    """Sube un archivo al bucket 'comprobantes' y devuelve su URL pública."""
-    import uuid
-    import mimetypes
-
-    sb = get_client()
-    extension = nombre_archivo.split(".")[-1] if "." in nombre_archivo else "bin"
-    path = f"{carpeta}/{uuid.uuid4().hex}.{extension}"
-    content_type = mimetypes.guess_type(nombre_archivo)[0] or "application/octet-stream"
-    sb.storage.from_("comprobantes").upload(path, archivo_bytes, {"content-type": content_type})
-    return sb.storage.from_("comprobantes").get_public_url(path)
 
 
 # ---------- Moras (Dashboard): periodos abiertos con sus abonos ----------

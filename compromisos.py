@@ -38,13 +38,6 @@ def estado_efectivo(compromiso, hoy=None):
     return estado
 
 
-def dias_para_plazo(compromiso, hoy=None):
-    """Días que faltan para el plazo (negativo si ya pasó); None si no tiene plazo."""
-    hoy = hoy or date.today()
-    plazo = _fecha(compromiso.get("fecha_plazo"))
-    return (plazo - hoy).days if plazo else None
-
-
 def validar_compromiso(motivo, compromiso, fecha_registro, fecha_plazo, monto):
     """Devuelve la lista de errores en español (vacía si todo está bien).
     Reglas: el motivo es obligatorio; si hay monto debe haber plazo; el plazo no puede ser anterior
