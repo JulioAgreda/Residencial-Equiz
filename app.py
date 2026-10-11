@@ -1,3 +1,4 @@
+import calendar
 import io
 import zipfile
 import streamlit as st
@@ -8,6 +9,7 @@ import db
 import accesos
 import aire_acondicionado
 import compromisos
+import cuadre
 import consumo as calc_consumo
 import estados
 import moras
@@ -269,6 +271,16 @@ def _actividad_excel_cache(reps, desde, hasta, emitido_por):
 @st.cache_data(ttl=300, show_spinner=False)
 def _actividad_pdf_cache(reps, desde, hasta, emitido_por):
     return reportes.generar_pdf_reporte(reps, desde, hasta, emitido_por=emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cuadre_excel_cache(q, emitido_por):
+    return cuadre.generar_excel_cuadre(q, emitido_por=emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cuadre_pdf_cache(q, emitido_por):
+    return cuadre.generar_pdf_cuadre(q, emitido_por=emitido_por)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -714,7 +726,7 @@ else:
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
 opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "🗒️ Reuniones"]
-opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📊 Actividad por usuario"]
+opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📊 Actividad por usuario", "💰 Cuadre de tesorería"]
 
 # Los radios de abajo son independientes en el estado interno de Streamlit:
 # si eliges algo en uno, los demás no se "enteran" y siguen marcando su
@@ -1773,6 +1785,153 @@ elif pagina == "📊 Actividad por usuario":
             st.download_button(
                 "📄 Descargar PDF", data=_actividad_pdf_cache(reps, txt_desde, txt_hasta, nombre_emisor),
                 file_name=f"{base_archivo}.pdf", mime="application/pdf", key="act_pdf", use_container_width=True)
+
+# ==================================================================
+# PÁGINA: CUADRE DE TESORERÍA (libro de movimientos y cuadre de fin de mes)
+# ==================================================================
+elif pagina == "💰 Cuadre de tesorería":
+    st.title("💰 Cuadre de tesorería")
+    st.caption(
+        "Todos los pagos, compras (egresos) y ventas (ingresos) del periodo, con los totales para cuadrar la caja. "
+        "Los montos no se descuentan según el Estado (devolución / entrega): ese dato se muestra aparte."
+    )
+    hoy_cd = recibo.hoy_bolivia()
+    nombre_emisor_cd = usuario_actual.get("nombre") or usuario_actual.get("username")
+
+    modo_cd = st.radio("Periodo", ["Mes completo", "Rango de fechas"], horizontal=True, key="cd_modo")
+    if modo_cd == "Mes completo":
+        cm1, cm2 = st.columns(2)
+        with cm1:
+            mes_cd = st.selectbox("Mes", MESES, index=hoy_cd.month - 1, key="cd_mes")
+        with cm2:
+            anio_cd = int(st.number_input("Año", min_value=2000, max_value=2100, value=hoy_cd.year, step=1, key="cd_anio"))
+        mes_num_cd = MESES.index(mes_cd) + 1
+        cd_desde = date(anio_cd, mes_num_cd, 1)
+        cd_hasta = date(anio_cd, mes_num_cd, calendar.monthrange(anio_cd, mes_num_cd)[1])
+    else:
+        cr1, cr2 = st.columns(2)
+        with cr1:
+            cd_desde = st.date_input("Desde", value=hoy_cd.replace(day=1), format="DD/MM/YYYY", key="cd_desde")
+        with cr2:
+            cd_hasta = st.date_input("Hasta", value=hoy_cd, format="DD/MM/YYYY", key="cd_hasta")
+        if not cd_desde or not cd_hasta:
+            st.warning("Elige las dos fechas.")
+            st.stop()
+        if cd_desde > cd_hasta:
+            st.error("La fecha «Desde» no puede ser posterior a «Hasta».")
+            st.stop()
+
+    st.markdown("**Cuadre de efectivo** (opcional)")
+    ce1, ce2 = st.columns(2)
+    with ce1:
+        saldo_inicial_cd = st.number_input(
+            "Saldo inicial en efectivo (Bs)", min_value=0.0, step=10.0, value=0.0, key=f"cd_ini_{cd_desde}_{cd_hasta}",
+            help="Efectivo con el que se abrió la caja al inicio del periodo (normalmente el efectivo contado al cierre del mes anterior).")
+    with ce2:
+        contado_cd = st.number_input(
+            "Efectivo contado en caja (Bs)", min_value=0.0, step=10.0, value=None, placeholder="Escribe lo que contaste",
+            key=f"cd_contado_{cd_desde}_{cd_hasta}", help="Lo que realmente hay en caja hoy. Se compara con el efectivo esperado.")
+
+    datos_cd = cargar_actividad(str(cd_desde), str(cd_hasta))
+    movs_cd = cuadre.construir_movimientos(datos_cd["pagos_generales"], datos_cd["compras"], datos_cd["ventas"])
+    q = cuadre.construir_cuadre(movs_cd, cd_desde, cd_hasta, saldo_inicial=saldo_inicial_cd, efectivo_contado=contado_cd)
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Movimientos", q["n_mov"])
+    k2.metric("Ingresos (ventas)", fmt_money(q["ingresos"]))
+    k3.metric("Egresos (pagos + compras)", fmt_money(q["egresos"]))
+    k4.metric("Resultado", fmt_money(q["resultado"]))
+
+    if q["n_mov"] == 0:
+        st.info("No hay pagos, compras ni ventas registrados en ese periodo.")
+        st.stop()
+
+    ef = q["efectivo"]
+    with st.container(border=True):
+        st.markdown("**💵 Cuadre de efectivo en caja**")
+        e1, e2, e3, e4 = st.columns(4)
+        e1.metric("Saldo inicial", fmt_money(ef["saldo_inicial"]))
+        e2.metric("+ Ingresos en efectivo", fmt_money(ef["ingresos"]))
+        e3.metric("− Egresos en efectivo", fmt_money(ef["egresos"]))
+        e4.metric("= Efectivo esperado", fmt_money(ef["esperado"]))
+        if ef["diferencia"] is None:
+            st.caption("Escribe el efectivo contado en caja para ver si cuadra.")
+        elif abs(ef["diferencia"]) < 0.005:
+            st.success(f"✅ Cuadra: el efectivo contado ({fmt_money(ef['contado'])}) coincide con lo esperado.")
+        elif ef["diferencia"] > 0:
+            st.warning(f"⚠️ Sobran {fmt_money(ef['diferencia'])}: hay más efectivo del esperado "
+                       f"(contado {fmt_money(ef['contado'])} vs. esperado {fmt_money(ef['esperado'])}).")
+        else:
+            st.error(f"⚠️ Faltan {fmt_money(-ef['diferencia'])}: hay menos efectivo del esperado "
+                     f"(contado {fmt_money(ef['contado'])} vs. esperado {fmt_money(ef['esperado'])}).")
+        if any(m["metodo"] == cuadre.SIN_METODO for m in q["por_metodo"]):
+            st.caption("ℹ️ Hay movimientos sin método de pago: no se incluyen en el efectivo. Revísalos en la pestaña «Por revisar».")
+
+    pe = q["pendientes"]
+    if any(pe.values()):
+        st.caption(f"Según el Estado de cada registro — egresos con devolución pendiente: {fmt_money(pe['devolucion_pendiente'])} · "
+                   f"devolución realizada: {fmt_money(pe['devolucion_realizada'])} · ingresos con entrega pendiente: "
+                   f"{fmt_money(pe['entrega_pendiente'])} · entrega realizada: {fmt_money(pe['entrega_realizada'])}.")
+
+    cfg_cd = {c: st.column_config.NumberColumn(format="Bs %.2f")
+              for c in ("Ingreso", "Egreso", "Acumulado", "Ingresos", "Egresos", "Neto", "Neto del día", "Total", "Monto")}
+    t_libro, t_dia, t_metodo, t_cat, t_ven, t_pag, t_com, t_rev = st.tabs([
+        "📒 Libro diario", "📅 Por día", "💳 Por método", "🗂️ Por categoría", "💸 Ventas", "💳 Pagos", "🧾 Compras",
+        f"🔎 Por revisar ({len(q['revisar'])})"])
+    with t_libro:
+        st.dataframe(pd.DataFrame([{
+            "Fecha": m["fecha_txt"], "Registro": m["origen"], "Categoría / Concepto": m["categoria"],
+            "Descripción": m["detalle"], "Tercero": m["tercero"], "Método": m["metodo_original"] or "—",
+            "Estado": reportes._estado_txt(m["estado"]), "Ingreso": m["ingreso"], "Egreso": m["egreso"],
+            "Acumulado": m["acumulado"]} for m in q["libro"]]),
+            use_container_width=True, hide_index=True, column_config=cfg_cd)
+        st.caption("«Tercero» es el comprador (ventas), el beneficiario (pagos) o el proveedor (compras). "
+                   "«Acumulado» es el resultado acumulado del periodo (ingresos − egresos).")
+    with t_dia:
+        st.dataframe(pd.DataFrame([{"Fecha": d["fecha_txt"], "Movimientos": d["n"], "Ingresos": d["ingresos"],
+                                    "Egresos": d["egresos"], "Neto del día": d["neto"], "Acumulado": d["acumulado"]}
+                                   for d in q["por_dia"]]),
+                     use_container_width=True, hide_index=True, column_config=cfg_cd)
+    with t_metodo:
+        st.dataframe(pd.DataFrame([{"Método": m["metodo"], "Movimientos": m["n"], "Ingresos": m["ingresos"],
+                                    "Egresos": m["egresos"], "Neto": m["neto"]} for m in q["por_metodo"]]),
+                     use_container_width=True, hide_index=True, column_config=cfg_cd)
+        st.caption("Sirve para cuadrar por separado el efectivo, los QR y las transferencias con el banco.")
+    with t_cat:
+        cc1, cc2 = st.columns(2)
+        with cc1:
+            st.markdown("**Egresos por categoría**")
+            st.dataframe(pd.DataFrame([{"Categoría": c["categoria"], "Movimientos": c["n"], "Total": c["total"]}
+                                       for c in q["categorias_egreso"]]),
+                         use_container_width=True, hide_index=True, column_config=cfg_cd)
+        with cc2:
+            st.markdown("**Ingresos por concepto**")
+            st.dataframe(pd.DataFrame([{"Concepto": c["categoria"], "Movimientos": c["n"], "Total": c["total"]}
+                                       for c in q["categorias_ingreso"]]),
+                         use_container_width=True, hide_index=True, column_config=cfg_cd)
+    for pestana, origen, vacio in ((t_ven, "Venta", "ventas"), (t_pag, "Pago", "pagos"), (t_com, "Compra", "compras")):
+        with pestana:
+            filas_o = cuadre.filas_por_origen(q, origen)
+            if filas_o:
+                st.dataframe(pd.DataFrame(filas_o), use_container_width=True, hide_index=True, column_config=cfg_cd)
+            else:
+                st.caption(f"Sin {vacio} en este periodo.")
+    with t_rev:
+        if q["revisar"]:
+            st.caption("Sugerencias para revisar antes de cerrar el mes (no son errores obligatorios).")
+            st.dataframe(pd.DataFrame(q["revisar"]), use_container_width=True, hide_index=True, column_config=cfg_cd)
+        else:
+            st.success("Nada por revisar: todos los registros tienen método y comprobante.")
+
+    base_cd = f"cuadre_tesoreria_{cd_desde:%Y-%m-%d}_{cd_hasta:%Y-%m-%d}"
+    dd1, dd2 = st.columns(2)
+    with dd1:
+        st.download_button("📊 Descargar Excel", data=_cuadre_excel_cache(q, nombre_emisor_cd), file_name=f"{base_cd}.xlsx",
+                           key="cd_xlsx", use_container_width=True,
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    with dd2:
+        st.download_button("📄 Descargar PDF", data=_cuadre_pdf_cache(q, nombre_emisor_cd), file_name=f"{base_cd}.pdf",
+                           mime="application/pdf", key="cd_pdf", use_container_width=True)
 
 # ==================================================================
 # PÁGINA: INQUILINOS (solo lectura, para todos los usuarios)
