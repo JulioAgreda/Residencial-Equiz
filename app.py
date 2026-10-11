@@ -193,6 +193,13 @@ cargar_periodos_agua = _solo_permitidos(_cargar_periodos_agua_todos)
 cargar_periodos_abiertos = _solo_permitidos(_cargar_periodos_abiertos_todos)
 
 
+AVISO_MIGRACION_DEVOLUCION = (
+    "Para registrar **a qué usuario se realizó la devolución**, ejecuta el archivo "
+    "`migracion_devolucion_usuario.sql` en el SQL Editor de Supabase. Mientras tanto, esta sección "
+    "funciona normal, sin ese dato."
+)
+
+
 AVISO_MIGRACION_ESTADOS = (
     "El campo **Estado** todavía no está activo en la base de datos: ejecuta el archivo "
     "`migracion_estados_movimientos.sql` en el SQL Editor de Supabase. Mientras tanto, esta sección "
@@ -242,6 +249,36 @@ AVISO_PERIODOS_ILEGIBLES = (
 def estado_disponible(tabla, columna):
     """¿Ya existe la columna de estado? (si aún no se ejecutó la migración, la app sigue funcionando sin ella)"""
     return db.columna_disponible(tabla, columna)
+
+
+@st.cache_data(ttl=60)
+def devolucion_a_disponible(tabla):
+    """¿Ya existe la columna `devolucion_a` (a qué usuario se le devolvió el dinero)?"""
+    return estado_disponible(tabla, "devolucion_a")
+
+
+def selector_devolucion_a(key, actual=None):
+    """Lista «Devolución realizada a» de Compras y Pagos: usuarios activos (más el ya guardado, si ya no está activo).
+    Solo la pueden cambiar el Administrador y Viovip, igual que el Estado. Devuelve el nombre elegido o None."""
+    nombres = {u.get("nombre") or u.get("username") for u in cargar_usuarios_activos()}
+    opciones = ["—"] + sorted((n for n in nombres if n), key=str.casefold)
+    if actual and actual not in opciones:
+        opciones.append(actual)
+    elegido = st.selectbox(
+        "Devolución realizada a", opciones, index=opciones.index(actual) if actual in opciones else 0, key=key,
+        disabled=not puede_editar_estado,
+        help=(estados.AYUDA_SIN_PERMISO if not puede_editar_estado else
+              "Elige a qué usuario se le devolvió el dinero. Solo se guarda si el Estado indica que la devolución ya se realizó."))
+    return None if elegido == "—" else elegido
+
+
+def texto_error_guardado(prefijo, error):
+    """Mensaje de error de guardado; si parece un problema de migración pendiente, lo dice."""
+    texto = str(error)
+    if any(x in texto.lower() for x in ("estado_devolucion", "devolucion_a", "value too long", "check constraint")):
+        texto += ("\n\nSi acabas de actualizar la aplicación, ejecuta `migracion_devolucion_usuario.sql` "
+                  "en el SQL Editor de Supabase.")
+    return f"{prefijo}: {texto}"
 
 
 @st.cache_data(ttl=30)
@@ -1944,11 +1981,13 @@ elif pagina == "💰 Cuadre de tesorería":
     with t_libro:
         st.dataframe(pd.DataFrame([{
             "Fecha": m["fecha_txt"], "Registro": m["origen"], "Categoría / Concepto": m["categoria"],
-            "Descripción": m["detalle"], "Tercero": m["tercero"], "Método": m["metodo_original"] or "—",
-            "Estado": reportes._estado_txt(m["estado"]), "Ingreso": m["ingreso"], "Egreso": m["egreso"],
+            "Descripción": m["detalle"], "Persona / Empresa": m["persona"], "Método": m["metodo_original"] or "—",
+            "Estado": reportes._estado_txt(m["estado"]), "Devolución a": m["devolucion_a"],
+            "Ingreso": m["ingreso"], "Egreso": m["egreso"],
             "Acumulado": m["acumulado"]} for m in q["libro"]]),
             use_container_width=True, hide_index=True, column_config=cfg_cd)
-        st.caption("«Tercero» es el comprador (ventas), el beneficiario (pagos) o el proveedor (compras). "
+        st.caption("«Persona / Empresa» es el comprador (ventas), el beneficiario (pagos) o el proveedor (compras). "
+                   "«Devolución a» indica a qué usuario se le devolvió el dinero cuando el Estado dice que la devolución ya se realizó. "
                    "«Acumulado» es el resultado acumulado del periodo (ingresos − egresos).")
     with t_dia:
         st.dataframe(pd.DataFrame([{"Fecha": d["fecha_txt"], "Movimientos": d["n"], "Ingresos": d["ingresos"],
@@ -2949,6 +2988,9 @@ elif pagina == "🧾 Compras":
     compras_con_estado = estado_disponible("compras", "estado_devolucion")
     if not compras_con_estado:
         st.warning(AVISO_MIGRACION_ESTADOS)
+    compras_con_devolucion = compras_con_estado and devolucion_a_disponible("compras")
+    if compras_con_estado and not compras_con_devolucion:
+        st.warning(AVISO_MIGRACION_DEVOLUCION)
 
     nombre_encargado = usuario_actual.get("nombre") or usuario_actual.get("username")
 
@@ -2971,6 +3013,8 @@ elif pagina == "🧾 Compras":
                     estado_compra = st.selectbox("Estado", estados.ESTADOS_DEVOLUCION, key="compra_estado",
                                           disabled=not puede_editar_estado,
                                           help=None if puede_editar_estado else estados.AYUDA_SIN_PERMISO)
+                if compras_con_devolucion:
+                    devolucion_compra = selector_devolucion_a("compra_devolucion_a")
             descripcion = st.text_area("Descripción detallada",
                                         placeholder='Ej. "Compra de 4 focos LED para el pasillo del piso 3"')
 
@@ -2978,8 +3022,12 @@ elif pagina == "🧾 Compras":
 
             guardar = st.form_submit_button("💾 Registrar compra")
             if guardar:
+                error_devolucion = (estados.validar_devolucion(estado_compra, devolucion_compra)
+                                    if compras_con_devolucion and puede_editar_estado else None)
                 if monto_total <= 0:
                     st.error("El monto total debe ser mayor a 0.")
+                elif error_devolucion:
+                    st.error(error_devolucion)
                 else:
                     try:
                         nueva_compra = {
@@ -2994,11 +3042,13 @@ elif pagina == "🧾 Compras":
                         }
                         if compras_con_estado and puede_editar_estado:
                             nueva_compra["estado_devolucion"] = estado_compra
+                            if compras_con_devolucion:
+                                nueva_compra["devolucion_a"] = estados.devolucion_a_a_guardar(estado_compra, devolucion_compra)
                         db.crear_compra(nueva_compra)
                         st.success("Compra registrada.")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error al guardar: {e}")
+                        st.error(texto_error_guardado("Error al guardar", e))
 
     with tab_historial:
         col1, col2, col3, col4 = st.columns(4)
@@ -3036,6 +3086,8 @@ elif pagina == "🧾 Compras":
                     "Encargado": c.get("encargado") or "",
                     **({"Estado": estados.normalizar(c.get("estado_devolucion"), estados.ESTADOS_DEVOLUCION)}
                        if compras_con_estado else {}),
+                    **({"Devolución a": estados.texto_devolucion_a(c.get("estado_devolucion"), c.get("devolucion_a"))}
+                       if compras_con_devolucion else {}),
                 } for c in compras]),
                 use_container_width=True, hide_index=True,
             )
@@ -3064,6 +3116,8 @@ elif pagina == "🧾 Compras":
                             disabled=not puede_editar_estado,
                             help=None if puede_editar_estado else estados.AYUDA_SIN_PERMISO,
                             key=f'compra_estado_edit_{c["id"]}')
+                    if compras_con_devolucion:
+                        e_devolucion = selector_devolucion_a(f'compra_devolucion_a_edit_{c["id"]}', c.get("devolucion_a"))
 
                     if es_admin:
                         colg, cold = st.columns(2)
@@ -3073,7 +3127,11 @@ elif pagina == "🧾 Compras":
                         g = st.form_submit_button("💾 Guardar cambios", use_container_width=True)
                         d = False
 
-                    if g:
+                    error_devolucion = (estados.validar_devolucion(e_estado, e_devolucion)
+                                        if compras_con_devolucion and puede_editar_estado else None)
+                    if g and error_devolucion:
+                        st.error(error_devolucion)
+                    elif g:
                         try:
                             cambios_compra = {
                                 "fecha_compra": str(e_fecha), "categoria": e_categoria,
@@ -3083,11 +3141,13 @@ elif pagina == "🧾 Compras":
                             }
                             if compras_con_estado and puede_editar_estado:
                                 cambios_compra["estado_devolucion"] = e_estado
+                                if compras_con_devolucion:
+                                    cambios_compra["devolucion_a"] = estados.devolucion_a_a_guardar(e_estado, e_devolucion)
                             db.actualizar_compra(c["id"], cambios_compra)
                             st.success("Compra actualizada.")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Error al actualizar: {e}")
+                            st.error(texto_error_guardado("Error al actualizar", e))
                     if d:
                         try:
                             db.eliminar_compra(c["id"])
@@ -3107,6 +3167,9 @@ elif pagina == "💳 Pagos":
     pagos_con_estado = estado_disponible("pagos_generales", "estado_devolucion")
     if not pagos_con_estado:
         st.warning(AVISO_MIGRACION_ESTADOS)
+    pagos_con_devolucion = pagos_con_estado and devolucion_a_disponible("pagos_generales")
+    if pagos_con_estado and not pagos_con_devolucion:
+        st.warning(AVISO_MIGRACION_DEVOLUCION)
 
     nombre_encargado = usuario_actual.get("nombre") or usuario_actual.get("username")
 
@@ -3128,6 +3191,8 @@ elif pagina == "💳 Pagos":
                     estado_pago = st.selectbox("Estado", estados.ESTADOS_DEVOLUCION, key="pago_estado",
                                           disabled=not puede_editar_estado,
                                           help=None if puede_editar_estado else estados.AYUDA_SIN_PERMISO)
+                if pagos_con_devolucion:
+                    devolucion_pago = selector_devolucion_a("pago_devolucion_a")
             descripcion = st.text_area("Descripción",
                                         placeholder='Ej. "Pago de factura de luz de áreas comunes, septiembre"')
 
@@ -3135,8 +3200,12 @@ elif pagina == "💳 Pagos":
 
             guardar = st.form_submit_button("💾 Registrar pago")
             if guardar:
+                error_devolucion = (estados.validar_devolucion(estado_pago, devolucion_pago)
+                                    if pagos_con_devolucion and puede_editar_estado else None)
                 if monto <= 0:
                     st.error("El monto pagado debe ser mayor a 0.")
+                elif error_devolucion:
+                    st.error(error_devolucion)
                 else:
                     try:
                         nuevo_pago = {
@@ -3150,11 +3219,13 @@ elif pagina == "💳 Pagos":
                         }
                         if pagos_con_estado and puede_editar_estado:
                             nuevo_pago["estado_devolucion"] = estado_pago
+                            if pagos_con_devolucion:
+                                nuevo_pago["devolucion_a"] = estados.devolucion_a_a_guardar(estado_pago, devolucion_pago)
                         db.crear_pago_general(nuevo_pago)
                         st.success("Pago registrado.")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error al guardar: {e}")
+                        st.error(texto_error_guardado("Error al guardar", e))
 
     with tab_historial:
         col1, col2, col3, col4 = st.columns(4)
@@ -3193,6 +3264,8 @@ elif pagina == "💳 Pagos":
                     "Encargado": pg.get("encargado") or "",
                     **({"Estado": estados.normalizar(pg.get("estado_devolucion"), estados.ESTADOS_DEVOLUCION)}
                        if pagos_con_estado else {}),
+                    **({"Devolución a": estados.texto_devolucion_a(pg.get("estado_devolucion"), pg.get("devolucion_a"))}
+                       if pagos_con_devolucion else {}),
                 } for pg in pagos_generales]),
                 use_container_width=True, hide_index=True,
             )
@@ -3217,6 +3290,8 @@ elif pagina == "💳 Pagos":
                             disabled=not puede_editar_estado,
                             help=None if puede_editar_estado else estados.AYUDA_SIN_PERMISO,
                             key=f'pago_estado_edit_{pg["id"]}')
+                    if pagos_con_devolucion:
+                        e_devolucion = selector_devolucion_a(f'pago_devolucion_a_edit_{pg["id"]}', pg.get("devolucion_a"))
 
                     if es_admin:
                         colg, cold = st.columns(2)
@@ -3226,7 +3301,11 @@ elif pagina == "💳 Pagos":
                         g = st.form_submit_button("💾 Guardar cambios", use_container_width=True)
                         d = False
 
-                    if g:
+                    error_devolucion = (estados.validar_devolucion(e_estado, e_devolucion)
+                                        if pagos_con_devolucion and puede_editar_estado else None)
+                    if g and error_devolucion:
+                        st.error(error_devolucion)
+                    elif g:
                         try:
                             cambios_pago = {
                                 "fecha_pago": str(e_fecha), "categoria": e_categoria,
@@ -3235,11 +3314,13 @@ elif pagina == "💳 Pagos":
                             }
                             if pagos_con_estado and puede_editar_estado:
                                 cambios_pago["estado_devolucion"] = e_estado
+                                if pagos_con_devolucion:
+                                    cambios_pago["devolucion_a"] = estados.devolucion_a_a_guardar(e_estado, e_devolucion)
                             db.actualizar_pago_general(pg["id"], cambios_pago)
                             st.success("Pago actualizado.")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Error al actualizar: {e}")
+                            st.error(texto_error_guardado("Error al actualizar", e))
                     if d:
                         try:
                             db.eliminar_pago_general(pg["id"])
@@ -3274,7 +3355,7 @@ elif pagina == "💸 Ventas":
             with col2:
                 forma_cobro_sel = st.selectbox("Forma de cobro", METODOS_PAGO_MOVIMIENTOS)
                 forma_cobro_otro = st.text_input("Especificar forma de cobro") if forma_cobro_sel == "Otro" else ""
-                comprador = st.text_input("Comprador (residente, depto. o tercero)")
+                comprador = st.text_input("Comprador (residente, departamento u otra persona)")
                 recibo_emitido = st.text_input("N° de recibo emitido")
                 if ventas_con_estado:
                     estado_venta = st.selectbox("Estado", estados.ESTADOS_ENTREGA, key="venta_estado",

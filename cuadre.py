@@ -88,10 +88,11 @@ def grupo_metodo(valor):
 
 def construir_movimientos(pagos, compras, ventas):
     """Lista única de movimientos, ordenada por fecha. Cada uno trae: fecha, tipo (Ingreso/Egreso), origen
-    (Venta/Pago/Compra), categoría, detalle, tercero, comprobante, método (agrupado), estado y monto."""
+    (Venta/Pago/Compra), categoría, detalle, persona, comprobante, método (agrupado), estado y monto."""
     movs = []
 
-    def agregar(r, origen, tipo, campo_fecha, campo_monto, categoria, tercero, comprobante, campo_metodo, campo_estado, opciones):
+    def agregar(r, origen, tipo, campo_fecha, campo_monto, categoria, persona, comprobante, campo_metodo, campo_estado, opciones,
+                con_devolucion=False):
         fecha = _fecha(r.get(campo_fecha))
         if not fecha:
             return
@@ -99,9 +100,11 @@ def construir_movimientos(pagos, compras, ventas):
         movs.append({
             "id": r.get("id") or 0, "fecha": fecha, "tipo": tipo, "origen": origen,
             "categoria": rp._txt(r.get(categoria)), "detalle": rp._txt(r.get("descripcion")),
-            "tercero": rp._txt(r.get(tercero)), "comprobante": rp._txt(r.get(comprobante)),
+            "persona": rp._txt(r.get(persona)), "comprobante": rp._txt(r.get(comprobante)),
             "metodo": grupo_metodo(r.get(campo_metodo)), "metodo_original": rp._txt(r.get(campo_metodo)),
             "estado": estado, "monto": _f(_d(r.get(campo_monto))), "encargado": rp._txt(r.get("encargado")),
+            # a qué usuario se le devolvió el dinero (solo Pagos y Compras con la devolución ya realizada)
+            "devolucion_a": estados.texto_devolucion_a(estado, r.get("devolucion_a")) if con_devolucion else "",
         })
 
     for r in ventas or []:
@@ -109,10 +112,10 @@ def construir_movimientos(pagos, compras, ventas):
                 "forma_cobro", "estado_entrega", estados.ESTADOS_ENTREGA)
     for r in pagos or []:
         agregar(r, "Pago", EGRESO, "fecha_pago", "monto", "categoria", "beneficiario", None,
-                "metodo_pago", "estado_devolucion", estados.ESTADOS_DEVOLUCION)
+                "metodo_pago", "estado_devolucion", estados.ESTADOS_DEVOLUCION, con_devolucion=True)
     for r in compras or []:
         agregar(r, "Compra", EGRESO, "fecha_compra", "monto_total", "categoria", "proveedor", "numero_comprobante",
-                "metodo_pago", "estado_devolucion", estados.ESTADOS_DEVOLUCION)
+                "metodo_pago", "estado_devolucion", estados.ESTADOS_DEVOLUCION, con_devolucion=True)
     movs.sort(key=lambda m: (m["fecha"], _ORDEN_ORIGEN[m["origen"]], m["id"]))
     return movs
 
@@ -182,7 +185,7 @@ def construir_cuadre(movs, desde=None, hasta=None, saldo_inicial=0, efectivo_con
 
     pendientes = {
         "devolucion_pendiente": suma_estado(EGRESO, estados.PENDIENTE_DEVOLUCION),
-        "devolucion_realizada": suma_estado(EGRESO, estados.ESTADOS_DEVOLUCION[2]),
+        "devolucion_realizada": suma_estado(EGRESO, estados.REALIZADA_DEVOLUCION),
         "entrega_pendiente": suma_estado(INGRESO, estados.PENDIENTE_ENTREGA),
         "entrega_realizada": suma_estado(INGRESO, estados.ESTADOS_ENTREGA[2]),
     }
@@ -198,6 +201,8 @@ def construir_cuadre(movs, desde=None, hasta=None, saldo_inicial=0, efectivo_con
             problemas.append("Compra sin N° de comprobante")
         if m["origen"] == "Venta" and not m["comprobante"]:
             problemas.append("Venta sin N° de recibo")
+        if m["devolucion_a"] == estados.SIN_INDICAR:
+            problemas.append("Devolución realizada sin indicar a qué usuario")
         if problemas:
             revisar.append({"Fecha": rp._fmt_fecha(m["fecha"]), "Registro": m["origen"],
                             "Categoría": m["categoria"] or "—", "Detalle": m["detalle"] or "—",
@@ -217,11 +222,13 @@ def filas_por_origen(cuadre, origen):
             continue
         fila = {"Fecha": m["fecha_txt"], "Categoría" if origen != "Venta" else "Concepto": m["categoria"],
                 "Descripción": m["detalle"],
-                {"Venta": "Comprador", "Pago": "Beneficiario", "Compra": "Proveedor"}[origen]: m["tercero"]}
+                {"Venta": "Comprador", "Pago": "Beneficiario", "Compra": "Proveedor"}[origen]: m["persona"]}
         if origen != "Pago":
             fila["Recibo N°" if origen == "Venta" else "Comprobante N°"] = m["comprobante"]
         fila["Método"] = m["metodo_original"] or "—"
         fila["Estado"] = rp._estado_txt(m["estado"])
+        if origen != "Venta":
+            fila["Devolución a"] = m["devolucion_a"]
         fila["Monto"] = m["monto"]
         out.append(fila)
     return out
@@ -344,8 +351,8 @@ def generar_excel_cuadre(cuadre, emitido_por=None):
     _hoja(wb, "Libro diario", "Libro diario de movimientos", periodo,
           [("fecha_txt", "Fecha", "txt"), ("tipo", "Tipo", "txt"), ("origen", "Registro", "txt"),
            ("categoria", "Categoría / Concepto", "txt"), ("detalle", "Descripción", "txt"),
-           ("tercero", "Beneficiario / Proveedor / Comprador", "txt"), ("comprobante", "N° comprobante / recibo", "txt"),
-           ("metodo_original", "Método", "txt"), ("estado", "Estado", "txt"),
+           ("persona", "Persona / Empresa", "txt"), ("comprobante", "N° comprobante / recibo", "txt"),
+           ("metodo_original", "Método", "txt"), ("estado", "Estado", "txt"), ("devolucion_a", "Devolución realizada a", "txt"),
            ("ingreso", "Ingreso", "bs"), ("egreso", "Egreso", "bs"), ("acumulado", "Saldo acumulado", "bs")],
           [{**m, "estado": rp._estado_txt(m["estado"])} for m in cuadre["libro"]],
           {"ingreso": cuadre["ingresos"], "egreso": cuadre["egresos"], "acumulado": cuadre["resultado"]})
@@ -473,12 +480,13 @@ def generar_pdf_cuadre(cuadre, emitido_por=None):
     story.append(CondPageBreak(40 * mm))
     story.append(Paragraph("Libro diario de movimientos", st_sec))
     if cuadre["libro"]:
-        filas = [[m["fecha_txt"], f"{m['origen']}", m["categoria"], m["detalle"], m["tercero"], m["metodo_original"] or "—",
-                  rp._estado_txt(m["estado"]), bs(m["ingreso"]) if m["ingreso"] is not None else "",
+        filas = [[m["fecha_txt"], f"{m['origen']}", m["categoria"], m["detalle"], m["persona"], m["metodo_original"] or "—",
+                  rp._estado_txt(m["estado"]), m["devolucion_a"], bs(m["ingreso"]) if m["ingreso"] is not None else "",
                   bs(m["egreso"]) if m["egreso"] is not None else "", bs(m["acumulado"])] for m in cuadre["libro"]]
-        story.append(tabla(["Fecha", "Registro", "Categoría / Concepto", "Descripción", "Tercero", "Método", "Estado",
-                            "Ingreso", "Egreso", "Acumulado"], filas, [1.1, 1, 1.8, 3.2, 1.8, 1.3, 1.5, 1.3, 1.3, 1.4],
-                           (7, 8, 9), ["TOTAL", "", "", "", "", "", "", bs(cuadre["ingresos"]), bs(cuadre["egresos"]), bs(cuadre["resultado"])]))
+        story.append(tabla(["Fecha", "Registro", "Categoría / Concepto", "Descripción", "Persona / Empresa", "Método", "Estado",
+                            "Devolución a", "Ingreso", "Egreso", "Acumulado"], filas,
+                           [1.1, 0.9, 1.6, 2.4, 1.6, 1.2, 1.6, 1.3, 1.3, 1.3, 1.4],
+                           (8, 9, 10), ["TOTAL", "", "", "", "", "", "", "", bs(cuadre["ingresos"]), bs(cuadre["egresos"]), bs(cuadre["resultado"])]))
     else:
         story.append(Paragraph("Sin movimientos en este periodo.", st_nota))
 

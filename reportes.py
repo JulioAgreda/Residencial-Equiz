@@ -28,6 +28,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer,
                                 CondPageBreak, HRFlowable, Image as RLImage)
 
+import estados
 import recibo
 
 # (clave_interna, título, tipo)   tipo: "egreso" | "ingreso"
@@ -68,7 +69,7 @@ def _txt(valor):
 
 def _estado_txt(valor):
     """Texto del estado para el reporte: '—' si no aplica (o si el registro es anterior al campo)."""
-    texto = _txt(valor)
+    texto = estados.TEXTOS_ANTERIORES.get(_txt(valor), _txt(valor))
     return texto if texto and texto != "No aplica" else "—"
 
 
@@ -76,6 +77,7 @@ def fila_pago_general(r):
     return {"Fecha": _fmt_fecha(r.get("fecha_pago")), "Categoría": _txt(r.get("categoria")),
             "Descripción": _txt(r.get("descripcion")), "Beneficiario": _txt(r.get("beneficiario")),
             "Método de pago": _txt(r.get("metodo_pago")), "Estado": _estado_txt(r.get("estado_devolucion")),
+            "Devolución a": estados.texto_devolucion_a(r.get("estado_devolucion"), r.get("devolucion_a")),
             "Monto": float(r.get("monto") or 0)}
 
 
@@ -84,6 +86,7 @@ def fila_compra(r):
             "Descripción": _txt(r.get("descripcion")), "Proveedor": _txt(r.get("proveedor")),
             "Comprobante N°": _txt(r.get("numero_comprobante")),
             "Método de pago": _txt(r.get("metodo_pago")), "Estado": _estado_txt(r.get("estado_devolucion")),
+            "Devolución a": estados.texto_devolucion_a(r.get("estado_devolucion"), r.get("devolucion_a")),
             "Monto": float(r.get("monto_total") or 0)}
 
 
