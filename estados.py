@@ -38,3 +38,19 @@ def monto_pendiente(registros, campo_estado, campo_monto, estado_pendiente):
     """Suma de los montos de los registros en el estado pendiente indicado."""
     return round(sum(float(r.get(campo_monto) or 0) for r in registros
                      if r.get(campo_estado) == estado_pendiente), 2)
+
+
+# ------------------------------------------------------------------
+# Quién puede MODIFICAR el estado (registrarlo distinto de "No aplica" o cambiarlo al editar).
+# Los demás usuarios siguen viendo el estado, filtrando por él y registrando/editando el resto de los datos.
+# ------------------------------------------------------------------
+USUARIOS_CON_PERMISO_ESTADO = ("viovip",)     # nombres de usuario (sin distinguir mayúsculas)
+AYUDA_SIN_PERMISO = "Solo el usuario Viovip y el Administrador pueden modificar el estado."
+
+
+def puede_modificar(usuario, es_admin):
+    """True para el Administrador y para los usuarios de USUARIOS_CON_PERMISO_ESTADO."""
+    if es_admin:
+        return True
+    nombre = str((usuario or {}).get("username") or "").strip().casefold()
+    return nombre in USUARIOS_CON_PERMISO_ESTADO

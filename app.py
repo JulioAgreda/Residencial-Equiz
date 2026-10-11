@@ -120,6 +120,8 @@ if not check_login():
 
 usuario_actual = st.session_state["usuario"]
 es_admin = usuario_actual.get("rol") == "Administrador"
+# Solo el Administrador y el usuario Viovip pueden modificar el Estado de Compras, Pagos y Ventas
+puede_editar_estado = estados.puede_modificar(usuario_actual, es_admin)
 
 
 # ------------------------------------------------------------------
@@ -2744,7 +2746,9 @@ elif pagina == "🧾 Compras":
                 proveedor = st.text_input("Proveedor (tienda o técnico)")
                 numero_comprobante = st.text_input("Número de comprobante (factura/recibo)")
                 if compras_con_estado:
-                    estado_compra = st.selectbox("Estado", estados.ESTADOS_DEVOLUCION, key="compra_estado")
+                    estado_compra = st.selectbox("Estado", estados.ESTADOS_DEVOLUCION, key="compra_estado",
+                                          disabled=not puede_editar_estado,
+                                          help=None if puede_editar_estado else estados.AYUDA_SIN_PERMISO)
             descripcion = st.text_area("Descripción detallada",
                                         placeholder='Ej. "Compra de 4 focos LED para el pasillo del piso 3"')
 
@@ -2766,7 +2770,7 @@ elif pagina == "🧾 Compras":
                             "numero_comprobante": numero_comprobante or None,
                             "encargado": nombre_encargado,
                         }
-                        if compras_con_estado:
+                        if compras_con_estado and puede_editar_estado:
                             nueva_compra["estado_devolucion"] = estado_compra
                         db.crear_compra(nueva_compra)
                         st.success("Compra registrada.")
@@ -2835,6 +2839,8 @@ elif pagina == "🧾 Compras":
                         e_estado = st.selectbox(
                             "Estado", estados.ESTADOS_DEVOLUCION,
                             index=estados.indice(c.get("estado_devolucion"), estados.ESTADOS_DEVOLUCION),
+                            disabled=not puede_editar_estado,
+                            help=None if puede_editar_estado else estados.AYUDA_SIN_PERMISO,
                             key=f'compra_estado_edit_{c["id"]}')
 
                     if es_admin:
@@ -2853,7 +2859,7 @@ elif pagina == "🧾 Compras":
                                 "metodo_pago": e_metodo or None, "proveedor": e_proveedor or None,
                                 "numero_comprobante": e_comprobante or None,
                             }
-                            if compras_con_estado:
+                            if compras_con_estado and puede_editar_estado:
                                 cambios_compra["estado_devolucion"] = e_estado
                             db.actualizar_compra(c["id"], cambios_compra)
                             st.success("Compra actualizada.")
@@ -2897,7 +2903,9 @@ elif pagina == "💳 Pagos":
                 metodo_pago_otro = st.text_input("Especificar método de pago") if metodo_pago_sel == "Otro" else ""
                 beneficiario = st.text_input("Beneficiario (a quién se le pagó)")
                 if pagos_con_estado:
-                    estado_pago = st.selectbox("Estado", estados.ESTADOS_DEVOLUCION, key="pago_estado")
+                    estado_pago = st.selectbox("Estado", estados.ESTADOS_DEVOLUCION, key="pago_estado",
+                                          disabled=not puede_editar_estado,
+                                          help=None if puede_editar_estado else estados.AYUDA_SIN_PERMISO)
             descripcion = st.text_area("Descripción",
                                         placeholder='Ej. "Pago de factura de luz de áreas comunes, septiembre"')
 
@@ -2918,7 +2926,7 @@ elif pagina == "💳 Pagos":
                             "beneficiario": beneficiario or None,
                             "encargado": nombre_encargado,
                         }
-                        if pagos_con_estado:
+                        if pagos_con_estado and puede_editar_estado:
                             nuevo_pago["estado_devolucion"] = estado_pago
                         db.crear_pago_general(nuevo_pago)
                         st.success("Pago registrado.")
@@ -2984,6 +2992,8 @@ elif pagina == "💳 Pagos":
                         e_estado = st.selectbox(
                             "Estado", estados.ESTADOS_DEVOLUCION,
                             index=estados.indice(pg.get("estado_devolucion"), estados.ESTADOS_DEVOLUCION),
+                            disabled=not puede_editar_estado,
+                            help=None if puede_editar_estado else estados.AYUDA_SIN_PERMISO,
                             key=f'pago_estado_edit_{pg["id"]}')
 
                     if es_admin:
@@ -3001,7 +3011,7 @@ elif pagina == "💳 Pagos":
                                 "descripcion": e_descripcion or None, "monto": e_monto,
                                 "metodo_pago": e_metodo or None, "beneficiario": e_beneficiario or None,
                             }
-                            if pagos_con_estado:
+                            if pagos_con_estado and puede_editar_estado:
                                 cambios_pago["estado_devolucion"] = e_estado
                             db.actualizar_pago_general(pg["id"], cambios_pago)
                             st.success("Pago actualizado.")
@@ -3045,7 +3055,9 @@ elif pagina == "💸 Ventas":
                 comprador = st.text_input("Comprador (residente, depto. o tercero)")
                 recibo_emitido = st.text_input("N° de recibo emitido")
                 if ventas_con_estado:
-                    estado_venta = st.selectbox("Estado", estados.ESTADOS_ENTREGA, key="venta_estado")
+                    estado_venta = st.selectbox("Estado", estados.ESTADOS_ENTREGA, key="venta_estado",
+                                          disabled=not puede_editar_estado,
+                                          help=None if puede_editar_estado else estados.AYUDA_SIN_PERMISO)
             descripcion = st.text_area("Descripción",
                                         placeholder='Ej. "Alquiler del salón de eventos al departamento 402"')
 
@@ -3067,7 +3079,7 @@ elif pagina == "💸 Ventas":
                             "recibo_emitido": recibo_emitido or None,
                             "encargado": nombre_encargado,
                         }
-                        if ventas_con_estado:
+                        if ventas_con_estado and puede_editar_estado:
                             nueva_venta["estado_entrega"] = estado_venta
                         db.crear_venta(nueva_venta)
                         st.success("Venta registrada.")
@@ -3132,6 +3144,8 @@ elif pagina == "💸 Ventas":
                         e_estado = st.selectbox(
                             "Estado", estados.ESTADOS_ENTREGA,
                             index=estados.indice(v.get("estado_entrega"), estados.ESTADOS_ENTREGA),
+                            disabled=not puede_editar_estado,
+                            help=None if puede_editar_estado else estados.AYUDA_SIN_PERMISO,
                             key=f'venta_estado_edit_{v["id"]}')
 
                     if es_admin:
@@ -3150,7 +3164,7 @@ elif pagina == "💸 Ventas":
                                 "forma_cobro": e_forma_cobro or None, "comprador": e_comprador or None,
                                 "recibo_emitido": e_recibo or None,
                             }
-                            if ventas_con_estado:
+                            if ventas_con_estado and puede_editar_estado:
                                 cambios_venta["estado_entrega"] = e_estado
                             db.actualizar_venta(v["id"], cambios_venta)
                             st.success("Venta actualizada.")
