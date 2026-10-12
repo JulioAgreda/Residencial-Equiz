@@ -1693,27 +1693,27 @@ elif pagina == "📑 Estado de cuenta":
     if n_ilegibles:
         st.warning(AVISO_PERIODOS_ILEGIBLES.format(n=n_ilegibles))
 
-    reportes, no_aplican = [], []
+    estados_cuenta, no_aplican = [], []
     for apt in apartamentos:
         d = moras.deuda_real_inquilino(apt, alq_por_apt.get(apt["id"], []), elec_por_apt.get(apt["id"], []), hoy_rep)
         if d["aplica"]:
-            reportes.append((apt, d))
+            estados_cuenta.append((apt, d))
         else:
             no_aplican.append((apt, d["motivo"]))
 
-    if not reportes:
+    if not estados_cuenta:
         st.info("No hay apartamentos ocupados con contrato de alquiler.")
     else:
         # ---------- Resumen de todos los apartamentos ----------
-        total_alq = sum(d["alquiler"]["deuda"] for _a, d in reportes)
-        total_elec = sum(d["electricidad"]["deuda"] for _a, d in reportes)
+        total_alq = sum(d["alquiler"]["deuda"] for _a, d in estados_cuenta)
+        total_elec = sum(d["electricidad"]["deuda"] for _a, d in estados_cuenta)
         r1, r2, r3 = st.columns(3)
         r1.metric("💵 Deuda de alquiler", fmt_money(total_alq))
         r2.metric("⚡ Deuda de electricidad", fmt_money(total_elec))
         r3.metric("Deuda total", fmt_money(total_alq + total_elec))
 
         filas_resumen = []
-        for apt, d in reportes:
+        for apt, d in estados_cuenta:
             up = d["alquiler"]["ultimo_pago"]
             filas_resumen.append({
                 "Departamento": apt.get("codigo") or "—",
@@ -1740,10 +1740,10 @@ elif pagina == "📑 Estado de cuenta":
         # ---------- Reporte individual (vista previa + descargas) ----------
         st.divider()
         st.markdown("### Reporte para entregar al inquilino")
-        etiquetas = [f'{a.get("codigo")} — {a.get("inquilino_nombre") or "sin nombre"}' for a, _d in reportes]
-        indice = st.selectbox("Apartamento", range(len(reportes)), format_func=lambda i: etiquetas[i],
+        etiquetas = [f'{a.get("codigo")} — {a.get("inquilino_nombre") or "sin nombre"}' for a, _d in estados_cuenta]
+        indice = st.selectbox("Apartamento", range(len(estados_cuenta)), format_func=lambda i: etiquetas[i],
                               key="rep_apartamento")
-        apt_sel, deuda_sel = reportes[indice]
+        apt_sel, deuda_sel = estados_cuenta[indice]
         datos_rep = recibo.construir_datos_reporte_inquilino(apt_sel, deuda_sel, emitido_por=nombre_emisor)
         pdf_rep = _reporte_pdf_cache(datos_rep)
         png_rep = _reporte_png_cache(datos_rep)
@@ -1799,10 +1799,10 @@ elif pagina == "📑 Estado de cuenta":
             with st.spinner("Generando reportes..."):
                 memoria = io.BytesIO()
                 with zipfile.ZipFile(memoria, "w", zipfile.ZIP_DEFLATED) as zf:
-                    for apt, d in reportes:
+                    for apt, d in estados_cuenta:
                         datos_i = recibo.construir_datos_reporte_inquilino(apt, d, emitido_por=nombre_emisor)
                         zf.writestr(_nombre_archivo_reporte(apt, hoy_rep, "pdf"), _reporte_pdf_cache(datos_i))
-                st.session_state["rep_zip"] = (hoy_rep, memoria.getvalue(), len(reportes))
+                st.session_state["rep_zip"] = (hoy_rep, memoria.getvalue(), len(estados_cuenta))
         zip_guardado = st.session_state.get("rep_zip")
         if zip_guardado and zip_guardado[0] == hoy_rep:
             st.download_button(f"⬇️ Descargar ZIP ({zip_guardado[2]} reportes)", data=zip_guardado[1],
