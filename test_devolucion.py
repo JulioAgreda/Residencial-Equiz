@@ -29,6 +29,25 @@ assert e.devolucion_a_a_guardar("No aplica", "Ana") is None
 assert e.texto_devolucion_a(NUEVO, "Ana") == "Ana" and e.texto_devolucion_a(NUEVO, None) == "(sin indicar)"
 assert e.texto_devolucion_a(ANTERIOR, None) == "(sin indicar)" and e.texto_devolucion_a("Pendiente de devolución", "Ana") == ""
 
+# ---- devolución a un TERCERO (persona externa que no es usuario del sistema) ----
+T = e.OPCION_TERCERO
+assert e.componer_devolucion_a(T, "  Juan Gómez ") == "Tercero: Juan Gómez" and e.componer_devolucion_a("Ana", "ignorado") == "Ana"
+assert e.componer_devolucion_a(None, "Juan") is None and e.componer_devolucion_a("", "") is None
+assert e.componer_devolucion_a(T, "") == "Tercero:" and e.componer_devolucion_a(T, None) == "Tercero:"           # eligió Tercero y no escribió el nombre
+assert e.validar_devolucion(NUEVO, "Tercero:") and e.validar_devolucion(NUEVO, "Tercero:   ")                      # -> se rechaza, con mensaje propio
+assert "nombre del tercero" in e.validar_devolucion(NUEVO, "Tercero:") and "quién" in e.validar_devolucion(NUEVO, "")
+assert e.validar_devolucion(NUEVO, "Tercero: Juan Gómez") is None and e.validar_devolucion(NUEVO, "Ana") is None
+assert e.validar_devolucion(e.PENDIENTE_DEVOLUCION, "Tercero:") is None                                           # en otro estado no se exige
+assert e.validar_devolucion(NUEVO, "Tercero: " + "x" * 200) and e.validar_devolucion(NUEVO, "Tercero: " + "x" * 100) is None   # cabe en varchar(150)
+assert e.devolucion_a_a_guardar(NUEVO, "Tercero: Juan Gómez") == "Tercero: Juan Gómez"
+assert e.devolucion_a_a_guardar(e.PENDIENTE_DEVOLUCION, "Tercero: Juan") is None                                   # si deja de estar realizada, se limpia
+assert e.texto_devolucion_a(NUEVO, "Tercero: Juan Gómez") == "Tercero: Juan Gómez"                               # se lee claro en tablas y reportes
+assert e.separar_devolucion_a("Tercero: Juan Gómez") == (T, "Juan Gómez") and e.separar_devolucion_a("Ana") == ("Ana", "")
+assert e.separar_devolucion_a(None) == (None, "") and e.separar_devolucion_a("tercero: x")[0] != T                  # solo el formato exacto cuenta
+for nombre in ("Juan Gómez", "María del Carmen", "Empresa X & Cía."):                                              # ida y vuelta sin pérdida
+    assert e.separar_devolucion_a(e.componer_devolucion_a(T, nombre)) == (T, nombre)
+assert e.es_tercero("Tercero: A") and not e.es_tercero("Ana") and not e.es_tercero(None) and not e.es_tercero("Terceros SA")
+
 # ---- reporte «Actividad por usuario» ----
 pago = {"fecha_pago": "2026-10-02", "monto": 10, "estado_devolucion": NUEVO, "devolucion_a": "Ana"}
 compra = {"fecha_compra": "2026-10-02", "monto_total": 10, "estado_devolucion": ANTERIOR}
@@ -37,6 +56,7 @@ assert rp.fila_pago_general(pago)["Devolución a"] == "Ana" and rp.fila_pago_gen
 assert rp.fila_compra(compra)["Devolución a"] == "(sin indicar)" and rp.fila_compra(compra)["Estado"] == NUEVO   # texto anterior -> texto actual
 assert "Devolución a" not in rp.fila_venta(venta) and rp.fila_venta(venta)["Estado"] == "Pendiente de entrega"
 assert rp.fila_pago_general({"fecha_pago": "2026-10-02", "monto": 1})["Devolución a"] == ""
+assert rp.fila_pago_general({**pago, "devolucion_a": "Tercero: Juan Gómez"})["Devolución a"] == "Tercero: Juan Gómez"
 
 # ---- el SQL coincide con lo que usa el código ----
 base = os.path.dirname(os.path.abspath(__file__))

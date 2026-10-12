@@ -66,8 +66,34 @@ def puede_modificar(usuario, es_admin):
 
 # ------------------------------------------------------------------
 # A quién se le devolvió el dinero (solo cuando el estado es "Se realizó la devolución…")
+#   * un usuario del sistema  -> se guarda su nombre            (p. ej. "Ana Pérez")
+#   * una persona externa     -> se guarda "Tercero: <nombre>"  (p. ej. "Tercero: Juan Gómez")
+# Ambos van en la misma columna `devolucion_a`, así no hace falta ninguna migración y en tablas, Excel y PDF se lee
+# claro quién recibió el dinero.
 # ------------------------------------------------------------------
 SIN_INDICAR = "(sin indicar)"
+OPCION_TERCERO = "Tercero (persona externa)"      # lo que se elige en la lista del formulario
+PREFIJO_TERCERO = "Tercero:"                       # cómo se guarda y se muestra
+MAX_DEVOLUCION_A = 150                             # largo de la columna devolucion_a
+
+
+def es_tercero(valor):
+    return str(valor or "").strip().startswith(PREFIJO_TERCERO)
+
+
+def componer_devolucion_a(elegido, nombre_tercero=""):
+    """Valor a guardar según lo elegido en el formulario: el nombre del usuario, «Tercero: nombre» si se eligió
+    OPCION_TERCERO (queda «Tercero:» a secas si no se escribió el nombre, y validar_devolucion lo rechaza) o None."""
+    if elegido == OPCION_TERCERO:
+        return f"{PREFIJO_TERCERO} {(nombre_tercero or '').strip()}".strip()
+    return elegido or None
+
+
+def separar_devolucion_a(valor):
+    """Inverso de componer_devolucion_a, para preseleccionar el formulario al editar: (opción de la lista, nombre del tercero)."""
+    if es_tercero(valor):
+        return OPCION_TERCERO, str(valor).strip()[len(PREFIJO_TERCERO):].strip()
+    return valor, ""
 
 
 def devolucion_realizada(estado):
@@ -75,20 +101,28 @@ def devolucion_realizada(estado):
 
 
 def validar_devolucion(estado, devuelto_a):
-    """Error en español si el estado dice que la devolución ya se realizó pero no se indicó a quién; None si está bien."""
-    if devolucion_realizada(estado) and not (devuelto_a or "").strip():
-        return "Indica a qué usuario se realizó la devolución."
+    """Error en español si el estado dice que la devolución ya se realizó y falta indicar a quién (o el nombre del
+    tercero), o si no cabe en la columna; None si está bien."""
+    if not devolucion_realizada(estado):
+        return None
+    texto = (devuelto_a or "").strip()
+    if not texto:
+        return "Indica a quién se realizó la devolución (un usuario o un tercero)."
+    if es_tercero(texto) and not texto[len(PREFIJO_TERCERO):].strip():
+        return "Escribe el nombre del tercero (persona externa) al que se realizó la devolución."
+    if len(texto) > MAX_DEVOLUCION_A:
+        return f"El nombre es demasiado largo (máximo {MAX_DEVOLUCION_A} caracteres)."
     return None
 
 
 def devolucion_a_a_guardar(estado, devuelto_a):
-    """Lo que se guarda en `devolucion_a`: el nombre solo si la devolución ya se realizó; en cualquier otro estado, vacío."""
+    """Lo que se guarda en `devolucion_a`: solo si la devolución ya se realizó; en cualquier otro estado, vacío."""
     return (devuelto_a or "").strip() or None if devolucion_realizada(estado) else None
 
 
 def texto_devolucion_a(estado, devuelto_a):
-    """Texto para tablas y reportes: el nombre; '(sin indicar)' si ya se devolvió pero no se anotó a quién
-    (registros anteriores a esta columna); vacío si la devolución no se ha realizado."""
+    """Texto para tablas y reportes: el usuario o «Tercero: nombre»; '(sin indicar)' si ya se devolvió pero no se anotó a
+    quién (registros anteriores a esta columna); vacío si la devolución no se ha realizado."""
     if not devolucion_realizada(estado):
         return ""
     return (devuelto_a or "").strip() or SIN_INDICAR

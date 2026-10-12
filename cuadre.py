@@ -103,7 +103,7 @@ def construir_movimientos(pagos, compras, ventas):
             "persona": rp._txt(r.get(persona)), "comprobante": rp._txt(r.get(comprobante)),
             "metodo": grupo_metodo(r.get(campo_metodo)), "metodo_original": rp._txt(r.get(campo_metodo)),
             "estado": estado, "monto": _f(_d(r.get(campo_monto))), "encargado": rp._txt(r.get("encargado")),
-            # a qué usuario se le devolvió el dinero (solo Pagos y Compras con la devolución ya realizada)
+            # a quién se le devolvió el dinero: usuario o «Tercero: nombre» (solo Pagos y Compras con la devolución ya realizada)
             "devolucion_a": estados.texto_devolucion_a(estado, r.get("devolucion_a")) if con_devolucion else "",
         })
 
@@ -202,7 +202,7 @@ def construir_cuadre(movs, desde=None, hasta=None, saldo_inicial=0, efectivo_con
         if m["origen"] == "Venta" and not m["comprobante"]:
             problemas.append("Venta sin N° de recibo")
         if m["devolucion_a"] == estados.SIN_INDICAR:
-            problemas.append("Devolución realizada sin indicar a qué usuario")
+            problemas.append("Devolución realizada sin indicar a quién")
         if problemas:
             revisar.append({"Fecha": rp._fmt_fecha(m["fecha"]), "Registro": m["origen"],
                             "Categoría": m["categoria"] or "—", "Detalle": m["detalle"] or "—",

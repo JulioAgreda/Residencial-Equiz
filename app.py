@@ -195,7 +195,7 @@ cargar_periodos_abiertos = _solo_permitidos(_cargar_periodos_abiertos_todos)
 
 
 AVISO_MIGRACION_DEVOLUCION = (
-    "Para registrar **a qué usuario se realizó la devolución**, ejecuta el archivo "
+    "Para registrar **a quién se realizó la devolución**, ejecuta el archivo "
     "`migracion_devolucion_usuario.sql` en el SQL Editor de Supabase. Mientras tanto, esta sección "
     "funciona normal, sin ese dato."
 )
@@ -254,23 +254,30 @@ def estado_disponible(tabla, columna):
 
 @st.cache_data(ttl=60)
 def devolucion_a_disponible(tabla):
-    """¿Ya existe la columna `devolucion_a` (a qué usuario se le devolvió el dinero)?"""
+    """¿Ya existe la columna `devolucion_a` (a quién se le devolvió el dinero)?"""
     return estado_disponible(tabla, "devolucion_a")
 
 
 def selector_devolucion_a(key, actual=None):
-    """Lista «Devolución realizada a» de Compras y Pagos: usuarios activos (más el ya guardado, si ya no está activo).
-    Solo la pueden cambiar el Administrador y Viovip, igual que el Estado. Devuelve el nombre elegido o None."""
+    """«Devolución realizada a» de Compras y Pagos: un usuario activo (más el ya guardado, si ya no está activo) o
+    «Tercero (persona externa)» con el nombre escrito aparte. Solo la pueden cambiar el Administrador y Viovip, igual
+    que el Estado. Devuelve lo que se guarda («Nombre», «Tercero: Nombre») o None."""
+    guardado, nombre_guardado = estados.separar_devolucion_a(actual)
     nombres = {u.get("nombre") or u.get("username") for u in cargar_usuarios_activos()}
     opciones = ["—"] + sorted((n for n in nombres if n), key=str.casefold)
-    if actual and actual not in opciones:
-        opciones.append(actual)
+    if guardado and guardado not in opciones and guardado != estados.OPCION_TERCERO:
+        opciones.append(guardado)
+    opciones.append(estados.OPCION_TERCERO)
     elegido = st.selectbox(
-        "Devolución realizada a", opciones, index=opciones.index(actual) if actual in opciones else 0, key=key,
+        "Devolución realizada a", opciones, index=opciones.index(guardado) if guardado in opciones else 0, key=key,
         disabled=not puede_editar_estado,
         help=(estados.AYUDA_SIN_PERMISO if not puede_editar_estado else
-              "Elige a qué usuario se le devolvió el dinero. Solo se guarda si el Estado indica que la devolución ya se realizó."))
-    return None if elegido == "—" else elegido
+              "Elige el usuario al que se le devolvió el dinero, o «Tercero (persona externa)» si se le devolvió a alguien que "
+              "no es usuario del sistema. Solo se guarda si el Estado indica que la devolución ya se realizó."))
+    nombre_tercero = st.text_input(
+        "Nombre del tercero (solo si elegiste «Tercero»)", value=nombre_guardado, key=f"{key}_tercero",
+        disabled=not puede_editar_estado, max_chars=100, placeholder="Persona o empresa externa que recibió la devolución")
+    return estados.componer_devolucion_a(None if elegido == "—" else elegido, nombre_tercero)
 
 
 def texto_error_guardado(prefijo, error):
@@ -1998,7 +2005,7 @@ elif pagina == "💰 Cuadre de tesorería":
             "Acumulado": m["acumulado"]} for m in q["libro"]]),
             use_container_width=True, hide_index=True, column_config=cfg_cd)
         st.caption("«Persona / Empresa» es el comprador (ventas), el beneficiario (pagos) o el proveedor (compras). "
-                   "«Devolución a» indica a qué usuario se le devolvió el dinero cuando el Estado dice que la devolución ya se realizó. "
+                   "«Devolución a» indica a quién se le devolvió el dinero (un usuario o «Tercero: nombre») cuando el Estado dice que la devolución ya se realizó. "
                    "«Acumulado» es el resultado acumulado del periodo (ingresos − egresos).")
     with t_dia:
         st.dataframe(pd.DataFrame([{"Fecha": d["fecha_txt"], "Movimientos": d["n"], "Ingresos": d["ingresos"],

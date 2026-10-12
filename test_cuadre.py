@@ -51,7 +51,7 @@ assert q["pendientes"] == {"devolucion_pendiente": 80, "devolucion_realizada": 3
 assert q["categorias_egreso"][0] == {"categoria": "Seguridad", "n": 1, "total": 200}       # ordenado de mayor a menor
 assert sum(x["total"] for x in q["categorias_egreso"]) == q["egresos"]
 motivos = " | ".join(r["Por revisar"] for r in q["revisar"])
-assert "Devolución realizada sin indicar a qué usuario" in motivos and "Sin método" in motivos and "Compra sin N° de comprobante" in motivos and "Venta sin N° de recibo" in motivos
+assert "Devolución realizada sin indicar a quién" in motivos and "Sin método" in motivos and "Compra sin N° de comprobante" in motivos and "Venta sin N° de recibo" in motivos
 assert [f["Comprobante N°"] for f in c.filas_por_origen(q, "Compra")] == ["F-9", ""] and "Comprobante N°" not in c.filas_por_origen(q, "Pago")[0]
 vacio = c.construir_cuadre(c.construir_movimientos([], [], []), "2026-10-01", "2026-10-31")
 assert vacio["n_mov"] == 0 and vacio["resultado"] == 0 and vacio["libro"] == [] and vacio["efectivo"]["esperado"] == 0
