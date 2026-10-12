@@ -30,64 +30,94 @@ agua = [per(20, 1, "Octubre", 2026, 34, [(10, "2026-10-07", "Efectivo", None)], 
         per(21, 3, "Octubre", 2026, 78, [(78, "2026-10-08", "Efectivo", None)], "pagos_agua"),
         per(22, 2, "Octubre", 2026, 56, [], "pagos_agua")]
 
-oct_ = r.construir_rendicion(apartamentos, alq, luz, agua, date(2026, 10, 1), date(2026, 10, 31), HOY)
+D = date
+oct_ = r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 10, 1), D(2026, 10, 31), HOY)
 f = {x["apartamento"]: x for x in oct_["filas"]}
 assert oct_["meses"] == [(2026, 10)] and oct_["n_apartamentos"] == 4                      # el desocupado sin movimientos no sale
 a, b, c, d = f["PB - APARTAMENTO 1"], f["PB - APARTAMENTO 2"], f["PB - APARTAMENTO 3"], f["PP - APARTAMENTO 5"]
-assert (a["alquiler"], a["luz"], a["agua"], a["total"], a["pagado"], a["deuda"]) == (600, 33, 34, 667, 43, 624)    # no pagó alquiler; luz pagada; agua parcial
-assert (a["alquiler_pagado"], a["alquiler_deuda"], a["luz_deuda"], a["agua_pagado"], a["agua_deuda"]) == (0, 600, 0, 10, 24)
-assert (b["alquiler"], b["pagado"], b["deuda"]) == (800, 300, 800 - 300 + 45 + 56)                                # pago parcial + luz y agua sin pagar
-assert (c["total"], c["pagado"], c["deuda"]) == (645, 658, 0)                                                      # pagó todo (de más en la luz): deuda 0, no negativa
-assert c["aire"] == "Sí · edificio" and c["contrato"] == "Alquiler · Vigente" and a["aire"] == "No"
-assert d["alquiler"] == 0 and d["deuda"] == 0 and d["contrato"] == "Anticrético · Vigente"                         # anticrético: sin alquiler mensual
-assert a["inquilino"] == "julio" and a["celular"] == "70000001" and a["piso"] == "Planta Baja" and a["estado"] == "Ocupado"
-t = oct_["totales"]
-assert t["alquiler"] == 1900 and t["luz"] == 145 and t["agua"] == 168                                              # los totales del boceto
-assert t["total"] == 2213 and round(sum(x["deuda"] for x in oct_["filas"]), 2) == t["deuda"] == 624 + 601 + 0
-assert oct_["con_deuda"] == 2 and oct_["porcentaje_cobrado"] == round(100 * t["pagado"] / t["total"], 1)
 
-# movimientos: cada pago, ordenados por fecha, con método y observación
+# --- lo COBRADO es lo recibido entre las fechas (por fecha de pago), por servicio ---
+assert (a["alquiler"], a["luz"], a["agua"], a["total"]) == (0, 33, 10, 43)                  # julio no pagó alquiler en octubre; pagó luz y parte del agua
+assert (b["alquiler"], b["luz"], b["agua"], b["total"]) == (300, 0, 0, 300)
+assert (c["alquiler"], c["luz"], c["agua"], c["total"]) == (500, 80, 78, 658)               # incluye lo pagado de más en la luz
+assert d["total"] == 0 and d["alquiler"] == 0 and d["contrato"] == "Anticrético · Vigente"
+t = oct_["totales"]
+assert (t["alquiler"], t["luz"], t["agua"], t["total"]) == (800, 113, 88, 1001)
+assert a["aire"] == "No" and c["aire"] == "Sí · edificio" and c["contrato"] == "Alquiler · Vigente"
+assert a["inquilino"] == "julio" and a["celular"] == "70000001" and a["piso"] == "Planta Baja" and a["estado"] == "Ocupado"
+
+# --- la DEUDA pendiente es de los meses del periodo y no depende de cuándo se pagó ---
+assert (a["deuda"], b["deuda"], c["deuda"]) == (624, 601, 0) and t["deuda"] == 1225 == round(sum(x["deuda"] for x in oct_["filas"]), 2)
+assert (a["alquiler_acobrar"], a["alquiler_pagado"], a["alquiler_deuda"], a["agua_acobrar"], a["agua_pagado"], a["agua_deuda"]) == (600, 0, 600, 34, 10, 24)
+assert oct_["con_deuda"] == 2
+
+# --- movimientos: solo los pagos de esas fechas; suman lo mismo que el resumen ---
 m = oct_["movimientos"]
-assert len(m) == 6 and [x["fecha"] for x in m] == sorted(x["fecha"] for x in m)
+assert len(m) == oct_["n_pagos"] == 6 and [x["fecha"] for x in m] == sorted(x["fecha"] for x in m)
+assert sum(x["monto"] for x in m) == 33 + 10 + 300 + 500 + 80 + 78 == t["total"] == 1001
 assert {"concepto": "Luz", "monto": 80, "metodo": "Efectivo", "observacion": "pagó de más"}.items() <= [x for x in m if x["observacion"] == "pagó de más"][0].items()
-assert sum(x["monto"] for x in m) == 33 + 10 + 300 + 500 + 80 + 78 == t["pagado"] == 1001      # los pagos listados suman lo pagado del resumen
 assert [(p["concepto"], p["total"]) for p in oct_["pagos_por_concepto"]] == [("Alquiler", 800), ("Luz", 113), ("Agua", 88)]
+assert all(x["fecha"].month == 10 for x in m)                                                # nada de septiembre aunque sea un pago del mismo inquilino
 assert all(x["periodo"] == "Octubre 2026" for x in m)
 
-# mes sin ningún registro: se cobra con el alquiler de la ficha (como el estado de cuenta)
-sin = r.construir_rendicion(apartamentos, [p for p in alq if p["id"] != 1], luz, agua, date(2026, 10, 1), date(2026, 10, 31), HOY)
-assert {x["apartamento"]: x for x in sin["filas"]}["PB - APARTAMENTO 1"]["alquiler"] == 600       # sin registro de octubre pero con septiembre -> se completa
-assert {x["apartamento"]: x for x in sin["filas"]}["PB - APARTAMENTO 1"]["alquiler_deuda"] == 600
-futuro = r.construir_rendicion(apartamentos, alq, luz, agua, date(2026, 12, 1), date(2026, 12, 31), HOY)
-assert all(x["alquiler"] == 0 for x in futuro["filas"])                                           # meses futuros no se inventan
+# --- el caso de la captura: un pago hecho en julio por el alquiler de octubre NO es de octubre ---
+adelantos = alq + [per(30, 5, "Octubre", 2026, 900, [(1200, "2026-07-27", "Efectivo", None)]),      # apt. 5 (anticrético en los datos de prueba)
+                   per(31, 2, "Noviembre", 2026, 800, [(800, "2026-10-12", "QR", "adelanto")])]    # pago de octubre por el alquiler de NOVIEMBRE
+ad_oct = r.construir_rendicion(apartamentos, adelantos, luz, agua, D(2026, 10, 1), D(2026, 10, 31), HOY)
+assert all(x["fecha"] != D(2026, 7, 27) for x in ad_oct["movimientos"])                            # el de julio no aparece en octubre
+nov = [x for x in ad_oct["movimientos"] if x["observacion"] == "adelanto"][0]
+assert nov["periodo"] == "Noviembre 2026" and nov["fecha"] == D(2026, 10, 12)                      # sí entra en octubre: el dinero ingresó en octubre
+assert {x["apartamento"]: x for x in ad_oct["filas"]}["PB - APARTAMENTO 2"]["alquiler"] == 1100   # 300 + 800
+jul = r.construir_rendicion(apartamentos, adelantos, luz, agua, D(2026, 7, 1), D(2026, 7, 31), HOY)
+assert [(x["fecha"], x["periodo"], x["monto"]) for x in jul["movimientos"]] == [(D(2026, 7, 27), "Octubre 2026", 1200)]   # aparece en julio
+assert jul["totales"]["total"] == 1200 and {x["apartamento"]: x for x in jul["filas"]}["PP - APARTAMENTO 5"]["alquiler"] == 1200
+sep = r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 9, 1), D(2026, 9, 30), HOY)
+assert sep["totales"]["alquiler"] == 600 + 800 + 500 and sep["n_pagos"] == 3 and sep["totales"]["deuda"] == 0   # septiembre: lo que ingresó en septiembre
 
-# rango: meses que toca (sep. 15 a oct. 5 = septiembre y octubre)
-rango = r.construir_rendicion(apartamentos, alq, luz, agua, date(2026, 9, 15), date(2026, 10, 5), HOY)
-assert rango["meses"] == [(2026, 9), (2026, 10)] and r.texto_meses(rango) == "Septiembre 2026 a Octubre 2026"
-fr = {x["apartamento"]: x for x in rango["filas"]}
-assert fr["PB - APARTAMENTO 1"]["alquiler"] == 1200 and fr["PB - APARTAMENTO 1"]["alquiler_pagado"] == 600     # sep. pagado + oct. no
-assert fr["PB - APARTAMENTO 3"]["alquiler"] == 1000 and fr["PB - APARTAMENTO 3"]["alquiler_deuda"] == 0
-assert r.texto_meses(oct_) == "Octubre 2026" and r.meses_en_rango(date(2025, 11, 30), date(2026, 2, 1)) == [(2025, 11), (2025, 12), (2026, 1), (2026, 2)]
+# --- fechas exactas: los extremos están incluidos ---
+assert r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 10, 6), D(2026, 10, 6), HOY)["totales"]["total"] == 300
+assert r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 10, 7), D(2026, 10, 7), HOY)["totales"]["total"] == 43
+assert r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 10, 5), D(2026, 10, 7), HOY)["totales"]["total"] == 343
+assert r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 10, 9), D(2026, 10, 31), HOY)["totales"]["total"] == 0     # sin pagos esos días
+rango = r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 9, 15), D(2026, 10, 5), HOY)
+assert rango["n_pagos"] == 1 and rango["totales"]["total"] == 500 and rango["meses"] == [(2026, 9), (2026, 10)]    # solo el pago del 3/10
+assert r.texto_meses(rango) == "Septiembre 2026 a Octubre 2026" and r.texto_meses(oct_) == "Octubre 2026"
+assert r.meses_en_rango(D(2025, 11, 30), D(2026, 2, 1)) == [(2025, 11), (2025, 12), (2026, 1), (2026, 2)]
+sin_pagos = r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 10, 9), D(2026, 10, 31), HOY)
+assert sin_pagos["movimientos"] == [] and sin_pagos["totales"]["deuda"] == 1225                     # sin pagos, pero la deuda sigue ahí
 
-# solo con deuda / sin datos
-sd = r.construir_rendicion(apartamentos, alq, luz, agua, date(2026, 10, 1), date(2026, 10, 31), HOY, solo_con_deuda=True)
+# --- deuda: mes sin registro se cobra con la ficha; meses futuros no se inventan ---
+sinreg = r.construir_rendicion(apartamentos, [p for p in alq if p["id"] != 1], luz, agua, D(2026, 10, 1), D(2026, 10, 31), HOY)
+assert {x["apartamento"]: x for x in sinreg["filas"]}["PB - APARTAMENTO 1"]["alquiler_deuda"] == 600
+futuro = r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 12, 1), D(2026, 12, 31), HOY)
+assert all(x["alquiler_acobrar"] == 0 for x in futuro["filas"]) and futuro["totales"]["total"] == 0
+
+# --- filtros de apartamentos ---
+sd = r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 10, 1), D(2026, 10, 31), HOY, solo_con_deuda=True)
 assert [x["apartamento"] for x in sd["filas"]] == ["PB - APARTAMENTO 1", "PB - APARTAMENTO 2"]
-vacio = r.construir_rendicion([], [], [], [], date(2026, 10, 1), date(2026, 10, 31), HOY)
-assert vacio["filas"] == [] and vacio["totales"]["total"] == 0 and vacio["porcentaje_cobrado"] is None and vacio["movimientos"] == []
-# periodos con mes ilegible no rompen el reporte
-raros = r.construir_rendicion(apartamentos, alq + [{"id": 99, "apartamento_id": 1, "mes": "???", "anio": 2026, "monto_esperado": 5, "pagos": []}], luz, agua,
-                              date(2026, 10, 1), date(2026, 10, 31), HOY)
-assert raros["totales"] == oct_["totales"]
+sc = r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 10, 1), D(2026, 10, 31), HOY, solo_con_cobros=True)
+assert [x["apartamento"] for x in sc["filas"]] == ["PB - APARTAMENTO 1", "PB - APARTAMENTO 2", "PB - APARTAMENTO 3"] and sc["totales"]["total"] == 1001
+vacio = r.construir_rendicion([], [], [], [], D(2026, 10, 1), D(2026, 10, 31), HOY)
+assert vacio["filas"] == [] and vacio["totales"]["total"] == 0 and vacio["movimientos"] == [] and vacio["n_pagos"] == 0
+
+# --- periodo con mes ilegible: su dinero SÍ cuenta como cobrado (mes «—»); su deuda no entra ---
+raro = {"id": 99, "apartamento_id": 1, "mes": "???", "anio": 2026, "monto_esperado": 5,
+        "pagos": [{"id": 1, "monto": 7, "fecha": "2026-10-10", "metodo_pago": "Efectivo", "observacion": None}]}
+raros = r.construir_rendicion(apartamentos, alq + [raro], luz, agua, D(2026, 10, 1), D(2026, 10, 31), HOY)
+assert raros["totales"]["total"] == 1008 and raros["totales"]["deuda"] == oct_["totales"]["deuda"]
+assert [x["periodo"] for x in raros["movimientos"] if x["monto"] == 7] == ["—"]
 
 # ---- Excel ----
 wb = openpyxl.load_workbook(io.BytesIO(r.generar_excel_rendicion(oct_, "Vio")))
-assert wb.sheetnames == ["Rendición", "Detalle por servicio", "Pagos recibidos"]
+assert wb.sheetnames == ["Rendición", "Deuda por servicio", "Pagos recibidos"]
 ws = wb["Rendición"]
-assert [ws.cell(4, i).value for i in range(1, 14)] == [e for _c, e, _t in r.COLUMNAS_RESUMEN]
-assert [ws.cell(5, i).value for i in (1, 4, 6, 7, 8, 11)] == ["PB - APARTAMENTO 1", "julio", 600, 33, 34, 624]
-assert [ws.cell(9, i).value for i in (1, 6, 7, 8, 9, 10, 11)] == ["TOTAL", 1900, 145, 168, 2213, 1001, 1225]
-assert wb["Pagos recibidos"].max_row == 4 + 6 + 1                                               # encabezado + 6 pagos + total
+assert [ws.cell(4, i).value for i in range(1, 13)] == [e for _c, e, _t in r.COLUMNAS_RESUMEN]
+assert [ws.cell(5, i).value for i in (1, 4, 6, 7, 8, 9, 10)] == ["PB - APARTAMENTO 1", "julio", 0, 33, 10, 43, 624]
+assert [ws.cell(9, i).value for i in (1, 6, 7, 8, 9, 10)] == ["TOTAL", 800, 113, 88, 1001, 1225]
+assert wb["Pagos recibidos"].max_row == 4 + 6 + 1                                              # encabezado + 6 pagos + total
+assert wb["Pagos recibidos"].cell(11, 8).value == 1001
 openpyxl.load_workbook(io.BytesIO(r.generar_excel_rendicion(vacio)))
 # ---- PDF ----
 assert r.generar_pdf_rendicion(oct_, "Vio")[:4] == b"%PDF" and r.generar_pdf_rendicion(vacio)[:4] == b"%PDF"
+assert r.generar_pdf_rendicion(sin_pagos)[:4] == b"%PDF"
 print("PRUEBAS DE RENDICIÓN OK")

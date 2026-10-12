@@ -2059,8 +2059,8 @@ elif pagina == "💰 Cuadre de tesorería":
 elif pagina == "📋 Rendición de alquileres":
     st.title("📋 Rendición de alquileres")
     st.caption(
-        "Por apartamento: alquiler, luz y agua del periodo, lo pagado y la deuda (si no se pagó todo o solo una parte), "
-        "más el detalle de cada pago recibido. Sirve para rendir cuentas."
+        "El dinero que ingresó en el periodo: cada pago cuenta en la fecha en que se recibió, sin importar a qué mes corresponda "
+        "(un pago hecho en julio por el alquiler de octubre aparece en julio). Sirve para rendir cuentas del dinero recolectado."
     )
     hoy_rd = recibo.hoy_bolivia()
 
@@ -2089,50 +2089,56 @@ elif pagina == "📋 Rendición de alquileres":
         if len(rendicion.meses_en_rango(rd_desde, rd_hasta)) > rendicion.MAX_MESES:
             st.error(f"El rango no puede pasar de {rendicion.MAX_MESES} meses.")
             st.stop()
-        st.caption("Un rango incluye los meses completos que toca (el alquiler, la luz y el agua se cobran por mes).")
+    st.markdown(f"**Dinero recibido del {rd_desde:%d/%m/%Y} al {rd_hasta:%d/%m/%Y}** (ambas fechas incluidas)")
 
-    solo_deuda_rd = st.checkbox("Mostrar solo apartamentos con deuda", key="rd_solo_deuda")
+    filtro_rd = st.radio("Apartamentos a mostrar", ["Todos", "Solo con cobros en el periodo", "Solo con deuda pendiente"],
+                         horizontal=True, key="rd_filtro")
 
     periodos_rd = {t: cargar_periodos_abiertos(t) for t in ("alquiler", "electricidad", "agua")}
     n_ilegibles_rd = sum(moras.contar_ilegibles(p) for p in periodos_rd.values())
     if n_ilegibles_rd:
-        st.warning(AVISO_PERIODOS_ILEGIBLES.format(n=n_ilegibles_rd))
-    rd = rendicion.construir_rendicion(cargar_apartamentos(), periodos_rd["alquiler"], periodos_rd["electricidad"],
-                                       periodos_rd["agua"], rd_desde, rd_hasta, hoy_rd, solo_con_deuda=solo_deuda_rd)
-    st.markdown(f"**Meses incluidos:** {rendicion.texto_meses(rd)}")
+        st.warning(f"⚠️ Hay **{n_ilegibles_rd}** periodo(s) de pagos con un mes o año que la app no reconoce. Sus pagos SÍ se cuentan "
+                   "como dinero recibido (en «Mes que paga» aparece «—»), pero su deuda no entra en «Deuda pendiente». "
+                   "Corrígelos en Supabase: el mes debe ser uno de Enero … Diciembre.")
+    rd = rendicion.construir_rendicion(
+        cargar_apartamentos(), periodos_rd["alquiler"], periodos_rd["electricidad"], periodos_rd["agua"], rd_desde, rd_hasta, hoy_rd,
+        solo_con_deuda=filtro_rd == "Solo con deuda pendiente", solo_con_cobros=filtro_rd == "Solo con cobros en el periodo")
 
     td = rd["totales"]
-    rk1, rk2, rk3, rk4 = st.columns(4)
-    rk1.metric("Total a cobrar", fmt_money(td["total"]))
-    rk2.metric("Pagado", fmt_money(td["pagado"]))
-    rk3.metric("Deuda", fmt_money(td["deuda"]))
-    rk4.metric("Cobrado", f'{rd["porcentaje_cobrado"]}%' if rd["porcentaje_cobrado"] is not None else "—",
-               help=f'{rd["con_deuda"]} de {rd["n_apartamentos"]} apartamentos con deuda')
+    rk1, rk2, rk3, rk4, rk5 = st.columns(5)
+    rk1.metric("Total cobrado", fmt_money(td["total"]), help=f'{rd["n_pagos"]} pago(s) recibido(s) en el periodo')
+    rk2.metric("Alquiler", fmt_money(td["alquiler"]))
+    rk3.metric("Luz", fmt_money(td["luz"]))
+    rk4.metric("Agua", fmt_money(td["agua"]))
+    rk5.metric("Deuda pendiente", fmt_money(td["deuda"]),
+               help=f'Lo que aún falta pagar de {rendicion.texto_meses(rd)} (a hoy). {rd["con_deuda"]} de {rd["n_apartamentos"]} apartamentos con deuda.')
 
     if not rd["filas"]:
         st.info("No hay apartamentos para mostrar en este periodo.")
         st.stop()
 
     cfg_rd = {c: st.column_config.NumberColumn(format="Bs %.2f") for c in (
-        "Alquiler", "Luz", "Agua", "Total a cobrar", "Pagado", "Deuda", "Alquiler a cobrar", "Alquiler pagado", "Alquiler deuda",
-        "Luz a cobrar", "Luz pagado", "Luz deuda", "Agua a cobrar", "Agua pagado", "Agua deuda", "Deuda total", "Monto")}
-    t_res, t_det, t_mov = st.tabs(["📋 Resumen por apartamento", "🔎 Detalle por servicio", f"💵 Pagos recibidos ({len(rd['movimientos'])})"])
+        "Alquiler cobrado", "Luz cobrada", "Agua cobrada", "Total cobrado", "Deuda pendiente", "Alquiler a cobrar", "Alquiler pagado",
+        "Alquiler deuda", "Luz a cobrar", "Luz pagado", "Luz deuda", "Agua a cobrar", "Agua pagado", "Agua deuda", "Deuda total", "Monto")}
+    t_res, t_mov, t_det = st.tabs(["📋 Resumen por apartamento", f"💵 Pagos recibidos ({rd['n_pagos']})", "🔎 Deuda por servicio"])
     with t_res:
         filas_rd = [{enc: f[clave] for clave, enc, _t in rendicion.COLUMNAS_RESUMEN} for f in rd["filas"]]
         filas_rd.append({enc: ("TOTAL" if clave == "apartamento" else td.get(clave, "")) for clave, enc, _t in rendicion.COLUMNAS_RESUMEN})
         st.dataframe(pd.DataFrame(filas_rd), use_container_width=True, hide_index=True, column_config=cfg_rd)
-        st.caption("«Total a cobrar» = alquiler + luz + agua de los meses incluidos. «Deuda» = lo que falta pagar. "
-                   "Solo se cuenta el inquilino actual de cada apartamento.")
-    with t_det:
-        st.dataframe(pd.DataFrame([{enc: f[clave] for clave, enc, _t in rendicion.COLUMNAS_DETALLE} for f in rd["filas"]]),
-                     use_container_width=True, hide_index=True, column_config=cfg_rd)
+        st.caption("«Cobrado» es el dinero recibido entre las dos fechas. «Deuda pendiente» es lo que aún falta pagar de "
+                   f"{rendicion.texto_meses(rd)} (a hoy), sin importar cuándo se pagó. Solo se cuenta el inquilino actual de cada apartamento.")
     with t_mov:
         if rd["movimientos"]:
             st.dataframe(pd.DataFrame([{enc: m[clave] for clave, enc, _t in rendicion.COLUMNAS_MOVIMIENTOS} for m in rd["movimientos"]]),
                          use_container_width=True, hide_index=True, column_config=cfg_rd)
             st.caption("Por concepto: " + " · ".join(f"{c['concepto']} {fmt_money(c['total'])}" for c in rd["pagos_por_concepto"]) + ".")
         else:
-            st.info("No hay pagos registrados en esos meses.")
+            st.info("No se recibió ningún pago en este periodo.")
+    with t_det:
+        st.dataframe(pd.DataFrame([{enc: f[clave] for clave, enc, _t in rendicion.COLUMNAS_DETALLE} for f in rd["filas"]]),
+                     use_container_width=True, hide_index=True, column_config=cfg_rd)
+        st.caption(f"Cobros y deuda de los meses del periodo ({rendicion.texto_meses(rd)}). «Pagado» incluye los pagos de esos meses "
+                   "hechos en cualquier fecha, por eso puede no coincidir con lo cobrado en el periodo.")
 
     base_rd = f"rendicion_alquileres_{rd_desde:%Y-%m-%d}_{rd_hasta:%Y-%m-%d}"
     nombre_emisor_rd = usuario_actual.get("nombre") or usuario_actual.get("username")
