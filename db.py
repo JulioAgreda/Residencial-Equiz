@@ -585,7 +585,7 @@ _TABLAS_MORA = {
 
 def listar_periodos_abiertos(tipo):
     """Todos los periodos del inquilino ACTUAL (sin los cerrados de inquilinos que ya salieron),
-    con solo las columnas necesarias para calcular deuda. tipo: 'alquiler' | 'electricidad' | 'agua'.
+    con solo las columnas necesarias para calcular deuda y listar los pagos. tipo: 'alquiler' | 'electricidad' | 'agua'.
     PostgREST corta en 1000 filas por consulta sin avisar; aquí se pide por páginas hasta traer
     todo, para que ninguna deuda quede fuera del cálculo."""
     tabla, tabla_pagos = _TABLAS_MORA[tipo]
@@ -594,7 +594,7 @@ def listar_periodos_abiertos(tipo):
     while True:
         res = (
             sb.table(tabla)
-            .select(f"id, apartamento_id, mes, anio, monto_esperado, {tabla_pagos}(monto, fecha)")
+            .select(f"id, apartamento_id, mes, anio, monto_esperado, {tabla_pagos}(id, monto, fecha, metodo_pago, observacion)")
             .is_("inquilino_historial_id", "null")
             .order("id")
             .range(inicio, inicio + tam - 1)

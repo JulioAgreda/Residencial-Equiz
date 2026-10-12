@@ -15,6 +15,7 @@ import estados
 import moras
 import servicios_basicos
 import recibo
+import rendicion
 import reportes
 
 st.set_page_config(page_title="Residencial EQUIZ", page_icon="🏢", layout="wide")
@@ -308,6 +309,16 @@ def _actividad_excel_cache(reps, desde, hasta, emitido_por):
 @st.cache_data(ttl=300, show_spinner=False)
 def _actividad_pdf_cache(reps, desde, hasta, emitido_por):
     return reportes.generar_pdf_reporte(reps, desde, hasta, emitido_por=emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _rendicion_excel_cache(r, emitido_por):
+    return rendicion.generar_excel_rendicion(r, emitido_por=emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _rendicion_pdf_cache(r, emitido_por):
+    return rendicion.generar_pdf_rendicion(r, emitido_por=emitido_por)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -826,7 +837,7 @@ else:
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
 opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "🗒️ Reuniones"]
-opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📊 Actividad por usuario", "💰 Cuadre de tesorería"]
+opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería"]
 
 # Los radios de abajo son independientes en el estado interno de Streamlit:
 # si eliges algo en uno, los demás no se "enteran" y siguen marcando su
@@ -2034,6 +2045,98 @@ elif pagina == "💰 Cuadre de tesorería":
     with dd2:
         st.download_button("📄 Descargar PDF", data=_cuadre_pdf_cache(q, nombre_emisor_cd), file_name=f"{base_cd}.pdf",
                            mime="application/pdf", key="cd_pdf", use_container_width=True)
+
+# ==================================================================
+# PÁGINA: RENDICIÓN DE ALQUILERES (qué se cobró, qué se pagó y qué se debe, por mes o rango de fechas)
+# ==================================================================
+elif pagina == "📋 Rendición de alquileres":
+    st.title("📋 Rendición de alquileres")
+    st.caption(
+        "Por apartamento: alquiler, luz y agua del periodo, lo pagado y la deuda (si no se pagó todo o solo una parte), "
+        "más el detalle de cada pago recibido. Sirve para rendir cuentas."
+    )
+    hoy_rd = recibo.hoy_bolivia()
+
+    modo_rd = st.radio("Periodo", ["Mes completo", "Rango de fechas"], horizontal=True, key="rd_modo")
+    if modo_rd == "Mes completo":
+        rm1, rm2 = st.columns(2)
+        with rm1:
+            mes_rd = st.selectbox("Mes", MESES, index=hoy_rd.month - 1, key="rd_mes")
+        with rm2:
+            anio_rd = int(st.number_input("Año", min_value=2000, max_value=2100, value=hoy_rd.year, step=1, key="rd_anio"))
+        mes_num_rd = MESES.index(mes_rd) + 1
+        rd_desde = date(anio_rd, mes_num_rd, 1)
+        rd_hasta = date(anio_rd, mes_num_rd, calendar.monthrange(anio_rd, mes_num_rd)[1])
+    else:
+        rr1, rr2 = st.columns(2)
+        with rr1:
+            rd_desde = st.date_input("Desde", value=hoy_rd.replace(day=1), format="DD/MM/YYYY", key="rd_desde")
+        with rr2:
+            rd_hasta = st.date_input("Hasta", value=hoy_rd, format="DD/MM/YYYY", key="rd_hasta")
+        if not rd_desde or not rd_hasta:
+            st.warning("Elige las dos fechas.")
+            st.stop()
+        if rd_desde > rd_hasta:
+            st.error("La fecha «Desde» no puede ser posterior a «Hasta».")
+            st.stop()
+        if len(rendicion.meses_en_rango(rd_desde, rd_hasta)) > rendicion.MAX_MESES:
+            st.error(f"El rango no puede pasar de {rendicion.MAX_MESES} meses.")
+            st.stop()
+        st.caption("Un rango incluye los meses completos que toca (el alquiler, la luz y el agua se cobran por mes).")
+
+    solo_deuda_rd = st.checkbox("Mostrar solo apartamentos con deuda", key="rd_solo_deuda")
+
+    periodos_rd = {t: cargar_periodos_abiertos(t) for t in ("alquiler", "electricidad", "agua")}
+    n_ilegibles_rd = sum(moras.contar_ilegibles(p) for p in periodos_rd.values())
+    if n_ilegibles_rd:
+        st.warning(AVISO_PERIODOS_ILEGIBLES.format(n=n_ilegibles_rd))
+    rd = rendicion.construir_rendicion(cargar_apartamentos(), periodos_rd["alquiler"], periodos_rd["electricidad"],
+                                       periodos_rd["agua"], rd_desde, rd_hasta, hoy_rd, solo_con_deuda=solo_deuda_rd)
+    st.markdown(f"**Meses incluidos:** {rendicion.texto_meses(rd)}")
+
+    td = rd["totales"]
+    rk1, rk2, rk3, rk4 = st.columns(4)
+    rk1.metric("Total a cobrar", fmt_money(td["total"]))
+    rk2.metric("Pagado", fmt_money(td["pagado"]))
+    rk3.metric("Deuda", fmt_money(td["deuda"]))
+    rk4.metric("Cobrado", f'{rd["porcentaje_cobrado"]}%' if rd["porcentaje_cobrado"] is not None else "—",
+               help=f'{rd["con_deuda"]} de {rd["n_apartamentos"]} apartamentos con deuda')
+
+    if not rd["filas"]:
+        st.info("No hay apartamentos para mostrar en este periodo.")
+        st.stop()
+
+    cfg_rd = {c: st.column_config.NumberColumn(format="Bs %.2f") for c in (
+        "Alquiler", "Luz", "Agua", "Total a cobrar", "Pagado", "Deuda", "Alquiler a cobrar", "Alquiler pagado", "Alquiler deuda",
+        "Luz a cobrar", "Luz pagado", "Luz deuda", "Agua a cobrar", "Agua pagado", "Agua deuda", "Deuda total", "Monto")}
+    t_res, t_det, t_mov = st.tabs(["📋 Resumen por apartamento", "🔎 Detalle por servicio", f"💵 Pagos recibidos ({len(rd['movimientos'])})"])
+    with t_res:
+        filas_rd = [{enc: f[clave] for clave, enc, _t in rendicion.COLUMNAS_RESUMEN} for f in rd["filas"]]
+        filas_rd.append({enc: ("TOTAL" if clave == "apartamento" else td.get(clave, "")) for clave, enc, _t in rendicion.COLUMNAS_RESUMEN})
+        st.dataframe(pd.DataFrame(filas_rd), use_container_width=True, hide_index=True, column_config=cfg_rd)
+        st.caption("«Total a cobrar» = alquiler + luz + agua de los meses incluidos. «Deuda» = lo que falta pagar. "
+                   "Solo se cuenta el inquilino actual de cada apartamento.")
+    with t_det:
+        st.dataframe(pd.DataFrame([{enc: f[clave] for clave, enc, _t in rendicion.COLUMNAS_DETALLE} for f in rd["filas"]]),
+                     use_container_width=True, hide_index=True, column_config=cfg_rd)
+    with t_mov:
+        if rd["movimientos"]:
+            st.dataframe(pd.DataFrame([{enc: m[clave] for clave, enc, _t in rendicion.COLUMNAS_MOVIMIENTOS} for m in rd["movimientos"]]),
+                         use_container_width=True, hide_index=True, column_config=cfg_rd)
+            st.caption("Por concepto: " + " · ".join(f"{c['concepto']} {fmt_money(c['total'])}" for c in rd["pagos_por_concepto"]) + ".")
+        else:
+            st.info("No hay pagos registrados en esos meses.")
+
+    base_rd = f"rendicion_alquileres_{rd_desde:%Y-%m-%d}_{rd_hasta:%Y-%m-%d}"
+    nombre_emisor_rd = usuario_actual.get("nombre") or usuario_actual.get("username")
+    rdl1, rdl2 = st.columns(2)
+    with rdl1:
+        st.download_button("📊 Descargar Excel", data=_rendicion_excel_cache(rd, nombre_emisor_rd), file_name=f"{base_rd}.xlsx",
+                           key="rd_xlsx", use_container_width=True,
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    with rdl2:
+        st.download_button("📄 Descargar PDF", data=_rendicion_pdf_cache(rd, nombre_emisor_rd), file_name=f"{base_rd}.pdf",
+                           mime="application/pdf", key="rd_pdf", use_container_width=True)
 
 # ==================================================================
 # PÁGINA: INQUILINOS (solo lectura, para todos los usuarios)

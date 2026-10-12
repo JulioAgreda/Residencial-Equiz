@@ -25,8 +25,8 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import landscape, letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import (CondPageBreak, HRFlowable, Image as RLImage, Paragraph, SimpleDocTemplate,
-                                Spacer, Table, TableStyle)
+from reportlab.platypus import (CondPageBreak, HRFlowable, Image as RLImage, KeepTogether, Paragraph,
+                                SimpleDocTemplate, Spacer, Table, TableStyle)
 
 import estados
 import recibo
@@ -389,58 +389,88 @@ def generar_excel_cuadre(cuadre, emitido_por=None):
 # PDF (horizontal, mismo estilo que los demás reportes)
 # ============================================================
 
-def generar_pdf_cuadre(cuadre, emitido_por=None):
-    bs = rp._fmt_bs
-    pdf = rp._pdf_texto
-    buffer = io.BytesIO()
+def estilos_pdf():
+    """Estilos de párrafo comunes a los reportes en PDF horizontales (cuadre, rendición)."""
+    from types import SimpleNamespace
+    base = getSampleStyleSheet()["Normal"]
+    cel = ParagraphStyle("cel", parent=base, fontSize=7, leading=8.5)
+    h = ParagraphStyle("h", parent=cel, fontName="Helvetica-Bold", textColor=colors.white)
+    return SimpleNamespace(
+        titulo=ParagraphStyle("t", parent=base, fontName="Helvetica-Bold", fontSize=15, leading=18),
+        sub=ParagraphStyle("s", parent=base, fontSize=9, leading=12, textColor=colors.Color(.33, .33, .33)),
+        chico=ParagraphStyle("c", parent=base, fontSize=8, leading=10), cel=cel,
+        der=ParagraphStyle("d", parent=cel, alignment=2), h=h, hd=ParagraphStyle("hd", parent=h, alignment=2),
+        sec=ParagraphStyle("sec", parent=base, fontName="Helvetica-Bold", fontSize=10, leading=13, spaceBefore=8, spaceAfter=3),
+        nota=ParagraphStyle("n", parent=base, fontName="Helvetica-Oblique", fontSize=7.5, textColor=colors.Color(.33, .33, .33)))
+
+
+def documento_pdf(buffer, titulo):
+    """Documento horizontal tamaño carta con márgenes de 12 mm. Devuelve (documento, ancho útil)."""
     pagina = landscape(letter)
     doc = SimpleDocTemplate(buffer, pagesize=pagina, topMargin=12 * mm, bottomMargin=12 * mm,
-                            leftMargin=12 * mm, rightMargin=12 * mm, title="Cuadre de tesorería")
-    ancho = pagina[0] - 24 * mm
-    base = getSampleStyleSheet()["Normal"]
-    st_titulo = ParagraphStyle("t", parent=base, fontName="Helvetica-Bold", fontSize=15, leading=18)
-    st_sub = ParagraphStyle("s", parent=base, fontSize=9, leading=12, textColor=colors.Color(.33, .33, .33))
-    st_chico = ParagraphStyle("c", parent=base, fontSize=8, leading=10)
-    st_cel = ParagraphStyle("cel", parent=base, fontSize=7, leading=8.5)
-    st_der = ParagraphStyle("d", parent=st_cel, alignment=2)
-    st_h = ParagraphStyle("h", parent=st_cel, fontName="Helvetica-Bold", textColor=colors.white)
-    st_hd = ParagraphStyle("hd", parent=st_h, alignment=2)
-    st_sec = ParagraphStyle("sec", parent=base, fontName="Helvetica-Bold", fontSize=10, leading=13, spaceBefore=8, spaceAfter=3)
-    st_nota = ParagraphStyle("n", parent=base, fontName="Helvetica-Oblique", fontSize=7.5, textColor=colors.Color(.33, .33, .33))
-    azul = colors.HexColor("#" + rp._COLOR_HEADER)
-    gris = colors.HexColor("#cccccc")
+                            leftMargin=12 * mm, rightMargin=12 * mm, title=titulo)
+    return doc, pagina[0] - 24 * mm
 
-    def tabla(columnas, filas, pesos, alinear_der=(), fila_total=None, ancho_tabla=None):
-        """columnas: encabezados; filas: listas de textos; alinear_der: índices de columnas numéricas."""
-        datos = [[Paragraph(pdf(c), st_hd if i in alinear_der else st_h) for i, c in enumerate(columnas)]]
-        for f in filas:
-            datos.append([Paragraph(pdf(v), st_der if i in alinear_der else st_cel) for i, v in enumerate(f)])
-        if fila_total:
-            datos.append([Paragraph(f"<b>{pdf(v)}</b>", st_der if i in alinear_der else st_cel) for i, v in enumerate(fila_total)])
-        t = Table(datos, repeatRows=1, hAlign="LEFT", colWidths=[(ancho_tabla or ancho) * p / sum(pesos) for p in pesos])
-        estilo = [("BACKGROUND", (0, 0), (-1, 0), azul), ("LINEBELOW", (0, 0), (-1, -1), 0.3, gris),
-                  ("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2)]
-        if fila_total:
-            estilo += [("LINEABOVE", (0, -1), (-1, -1), 1, colors.black), ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#f0f0f0"))]
-        t.setStyle(TableStyle(estilo))
-        return t
 
-    story = []
+def tabla_pdf(columnas, filas, pesos, alinear_der=(), fila_total=None, ancho_tabla=None, *, ancho, est):
+    """Tabla con encabezado azul. columnas: encabezados; filas: listas de textos; alinear_der: índices de columnas
+    numéricas; pesos: ancho relativo de cada columna; ancho_tabla: ancho de esta tabla (por defecto, todo el ancho útil)."""
+    pdf = rp._pdf_texto
+    datos = [[Paragraph(pdf(c), est.hd if i in alinear_der else est.h) for i, c in enumerate(columnas)]]
+    for f in filas:
+        datos.append([Paragraph(pdf(v), est.der if i in alinear_der else est.cel) for i, v in enumerate(f)])
+    if fila_total:
+        datos.append([Paragraph(f"<b>{pdf(v)}</b>", est.der if i in alinear_der else est.cel) for i, v in enumerate(fila_total)])
+    t = Table(datos, repeatRows=1, hAlign="LEFT", colWidths=[(ancho_tabla or ancho) * p / sum(pesos) for p in pesos])
+    estilo = [("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#" + rp._COLOR_HEADER)),
+              ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor("#cccccc")), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+              ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2)]
+    if fila_total:
+        estilo += [("LINEABOVE", (0, -1), (-1, -1), 1, colors.black), ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#f0f0f0"))]
+    t.setStyle(TableStyle(estilo))
+    return t
+
+
+def cabecera_pdf(subtitulo, desde, hasta, emitido_por, ancho, est):
+    """Logo, nombre del residencial, título del reporte, periodo, fecha de emisión y quién lo emitió."""
+    pdf = rp._pdf_texto
     logo = ""
     try:
         if os.path.exists(recibo.LOGO_PATH):
             logo = RLImage(io.BytesIO(recibo._logo_liviano_bytes()), width=16 * mm, height=16 * mm)
     except Exception:
         logo = ""
-    cab = Table([[logo, [Paragraph(recibo.NOMBRE_RESIDENCIAL, st_titulo), Paragraph("Cuadre de tesorería", st_sub)]]],
+    cab = Table([[logo, [Paragraph(recibo.NOMBRE_RESIDENCIAL, est.titulo), Paragraph(subtitulo, est.sub)]]],
                 colWidths=[20 * mm, ancho - 20 * mm])
     cab.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
     emitido = datetime.now(recibo._ZONA_BOLIVIA).strftime("%d/%m/%Y %H:%M")
-    story += [cab, Spacer(1, 3), HRFlowable(width="100%", thickness=0.6, color=colors.black), Spacer(1, 4),
-              Paragraph(f"<b>Periodo:</b> {rp._fmt_fecha(cuadre['desde'])} al {rp._fmt_fecha(cuadre['hasta'])}"
-                        f" &nbsp;&nbsp;|&nbsp;&nbsp; <b>Emitido:</b> {emitido}"
-                        + (f" &nbsp;&nbsp;|&nbsp;&nbsp; <b>Por:</b> {pdf(emitido_por)}" if emitido_por else ""), st_chico),
-              Spacer(1, 6)]
+    return [cab, Spacer(1, 3), HRFlowable(width="100%", thickness=0.6, color=colors.black), Spacer(1, 4),
+            Paragraph(f"<b>Periodo:</b> {rp._fmt_fecha(desde)} al {rp._fmt_fecha(hasta)}"
+                      f" &nbsp;&nbsp;|&nbsp;&nbsp; <b>Emitido:</b> {emitido}"
+                      + (f" &nbsp;&nbsp;|&nbsp;&nbsp; <b>Por:</b> {pdf(emitido_por)}" if emitido_por else ""), est.chico),
+            Spacer(1, 6)]
+
+
+def firmas_pdf(ancho, izquierda="Elaborado por (Tesorería)", derecha="Revisado por (Administración)"):
+    """Espacio y líneas de firma al final del reporte."""
+    firmas = Table([["_______________________________", "", "_______________________________"], [izquierda, "", derecha]],
+                   colWidths=[ancho * 0.35, ancho * 0.30, ancho * 0.35])
+    firmas.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"), ("FONTSIZE", (0, 0), (-1, -1), 8)]))
+    return [CondPageBreak(30 * mm), KeepTogether([Spacer(1, 22 * mm), firmas])]
+
+
+def generar_pdf_cuadre(cuadre, emitido_por=None):
+    bs = rp._fmt_bs
+    pdf = rp._pdf_texto
+    buffer = io.BytesIO()
+    doc, ancho = documento_pdf(buffer, "Cuadre de tesorería")
+    est = estilos_pdf()
+    st_sec, st_nota = est.sec, est.nota
+
+    def tabla(*args, **kwargs):
+        return tabla_pdf(*args, ancho=ancho, est=est, **kwargs)
+
+    story = cabecera_pdf("Cuadre de tesorería", cuadre["desde"], cuadre["hasta"], emitido_por, ancho, est)
 
     # ---- Totales y cuadre de efectivo, lado a lado ----
     ef = cuadre["efectivo"]
@@ -490,13 +520,7 @@ def generar_pdf_cuadre(cuadre, emitido_por=None):
     else:
         story.append(Paragraph("Sin movimientos en este periodo.", st_nota))
 
-    # ---- Firmas ----
-    story += [CondPageBreak(30 * mm), Spacer(1, 22 * mm)]
-    firmas = Table([["_______________________________", "", "_______________________________"],
-                    ["Elaborado por (Tesorería)", "", "Revisado por (Administración)"]],
-                   colWidths=[ancho * 0.35, ancho * 0.30, ancho * 0.35])
-    firmas.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"), ("FONTSIZE", (0, 0), (-1, -1), 8)]))
-    story.append(firmas)
+    story += firmas_pdf(ancho)
 
     doc.build(story)
     buffer.seek(0)
