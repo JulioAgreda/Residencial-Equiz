@@ -107,6 +107,63 @@ raros = r.construir_rendicion(apartamentos, alq + [raro], luz, agua, D(2026, 10,
 assert raros["totales"]["total"] == 1008 and raros["totales"]["deuda"] == oct_["totales"]["deuda"]
 assert [x["periodo"] for x in raros["movimientos"] if x["monto"] == 7] == ["—"]
 
+# ================= EX INQUILINOS: si pagan después, ese cobro suma y se ve que es de un ex inquilino =================
+def cer(i, hid, mes, anio, esperado, pagos=(), campo="pagos"):
+    return {"id": i, "apartamento_id": 1 if hid == 1 else 2, "inquilino_historial_id": hid, "mes": mes, "anio": anio, "monto_esperado": esperado,
+            campo: [{"id": k, "monto": m, "fecha": fe, "metodo_pago": me, "observacion": ob} for k, (m, fe, me, ob) in enumerate(pagos, 1)]}
+cerrados = {"alquiler": [cer(1, 1, "Julio", 2026, 600), cer(2, 1, "Agosto", 2026, 600, [(200, "2026-10-04", "Efectivo", "pago de ex inquilino")]),
+                         cer(3, 2, "Septiembre", 2026, 800, [(800, "2026-09-20", "QR", None)])],
+            "electricidad": [cer(4, 1, "Agosto", 2026, 40, [], "pagos_electricidad")],
+            "agua": [cer(5, 1, "Agosto", 2026, 30, [(30, "2026-10-05", "QR", None)], "pagos_agua")]}
+historial = [{"id": 1, "apartamento_id": 1, "inquilino_nombre": "carlos", "celular": "7111", "fecha_salida": "2026-08-31"},
+             {"id": 2, "apartamento_id": 2, "inquilino_nombre": "lucia", "celular": "7222", "fecha_salida": "2026-09-30"},
+             {"id": 3, "apartamento_id": 3, "inquilino_nombre": "sin periodos", "fecha_salida": "2026-05-31"}]
+con = r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 10, 1), D(2026, 10, 31), HOY, cerrados=cerrados, historial=historial)
+exf = [x for x in con["filas"] if x.get("ex_inquilino")]
+assert len(exf) == 1 and con["n_ex_inquilinos"] == 1 and con["n_apartamentos"] == 4                       # lucía no aporta (sin pagos en octubre y sin deuda); el 3.º no tiene periodos
+e1 = exf[0]
+assert e1["estado"] == "Ex inquilino" and e1["inquilino"] == "carlos (ex inquilino)" and e1["apartamento"] == "PB - APARTAMENTO 1"
+assert e1["celular"] == "7111" and e1["contrato"] == "Salió 31/08/2026" and e1["aire"] == "—"
+assert (e1["alquiler"], e1["luz"], e1["agua"], e1["total"]) == (200, 0, 30, 230)                           # lo que pagó en octubre
+assert e1["deuda"] == 1040 == 1000 + 40 + 0                                                                # TODO lo que aún debe, no solo de octubre
+assert (e1["alquiler_acobrar"], e1["alquiler_pagado"], e1["alquiler_deuda"], e1["luz_deuda"], e1["agua_deuda"]) == (1200, 200, 1000, 40, 0)
+assert con["filas"][-1] is e1 and [x["apartamento"] for x in con["filas"][:4]] == [x["apartamento"] for x in oct_["filas"]]   # los ex inquilinos van al final
+tc = con["totales"]
+assert (tc["alquiler"], tc["luz"], tc["agua"], tc["total"], tc["deuda"]) == (1000, 113, 118, 1231, 2265)    # 1001 + 230 ; 1225 + 1040
+assert con["cobrado_ex"] == 230 and con["deuda_ex"] == 1040 and con["con_deuda"] == 3
+mx = [m for m in con["movimientos"] if "ex inquilino" in m["inquilino"]]
+assert len(con["movimientos"]) == 8 and con["n_pagos"] == 8 and len(mx) == 2
+assert {(m["concepto"], m["periodo"], m["monto"]) for m in mx} == {("Alquiler", "Agosto 2026", 200), ("Agua", "Agosto 2026", 30)}
+assert sum(m["monto"] for m in con["movimientos"]) == tc["total"] == 1231                                   # los pagos listados suman el total del resumen
+assert [(p["concepto"], p["total"]) for p in con["pagos_por_concepto"]] == [("Alquiler", 1000), ("Luz", 113), ("Agua", 118)]
+# la rendición SIN ex inquilinos no cambia (y los datos de ex inquilinos son opcionales)
+assert r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 10, 1), D(2026, 10, 31), HOY, cerrados=cerrados)["n_ex_inquilinos"] == 0
+assert r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 10, 1), D(2026, 10, 31), HOY)["totales"] == oct_["totales"]
+# lo que pagó un ex inquilino en OTRO periodo no aparece en este (cada pago, en su fecha)
+sep2 = r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 9, 1), D(2026, 9, 30), HOY, cerrados=cerrados, historial=historial)
+lucia = [x for x in sep2["filas"] if x.get("ex_inquilino") and "lucia" in x["inquilino"]][0]
+assert (lucia["alquiler"], lucia["total"], lucia["deuda"]) == (800, 800, 0) and sep2["cobrado_ex"] == 800 + 0   # en septiembre solo pagó lucía; carlos debe pero no pagó
+carlos_sep = [x for x in sep2["filas"] if x.get("ex_inquilino") and "carlos" in x["inquilino"]][0]
+assert carlos_sep["total"] == 0 and carlos_sep["deuda"] == 1040                                              # aparece por su deuda pendiente
+# filtros
+assert [x["inquilino"] for x in r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 11, 1), D(2026, 11, 30), HOY, cerrados=cerrados, historial=historial)["filas"] if x.get("ex_inquilino")] == ["carlos (ex inquilino)"]   # sin pagos, pero su deuda sigue
+noviembre_cobros = r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 11, 1), D(2026, 11, 30), HOY, solo_con_cobros=True, cerrados=cerrados, historial=historial)
+assert noviembre_cobros["n_ex_inquilinos"] == 0 and noviembre_cobros["filas"] == []
+solo_deuda = r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 10, 1), D(2026, 10, 31), HOY, solo_con_deuda=True, cerrados=cerrados, historial=historial)
+assert [x["inquilino"] for x in solo_deuda["filas"]][-1] == "carlos (ex inquilino)" and solo_deuda["n_ex_inquilinos"] == 1
+solo_cobros = r.construir_rendicion(apartamentos, alq, luz, agua, D(2026, 10, 1), D(2026, 10, 31), HOY, solo_con_cobros=True, cerrados=cerrados, historial=historial)
+assert solo_cobros["n_ex_inquilinos"] == 1 and solo_cobros["totales"]["total"] == 1231
+# un ex inquilino cuyo apartamento ya no está en la lista (p. ej. acceso restringido) no rompe el reporte
+sin_apt = r.construir_rendicion([], [], [], [], D(2026, 10, 1), D(2026, 10, 31), HOY, cerrados=cerrados, historial=historial)
+assert sin_apt["n_apartamentos"] == 0 and [x["apartamento"] for x in sin_apt["filas"]] == ["—", ] * len(sin_apt["filas"])
+# Excel y PDF con ex inquilinos
+wbx = openpyxl.load_workbook(io.BytesIO(r.generar_excel_rendicion(con, "Vio")))
+wsx = wbx["Rendición"]
+assert [wsx.cell(9, i).value for i in (1, 3, 4, 6, 8, 9, 10, 12)] == ["PB - APARTAMENTO 1", "Ex inquilino", "carlos (ex inquilino)", 200, 30, 230, 1040, "Salió 31/08/2026"]
+assert [wsx.cell(10, i).value for i in (1, 6, 7, 8, 9, 10)] == ["TOTAL", 1000, 113, 118, 1231, 2265]
+assert wbx["Pagos recibidos"].max_row == 4 + 8 + 1
+assert r.generar_pdf_rendicion(con, "Vio")[:4] == b"%PDF"
+
 # ---- Excel ----
 wb = openpyxl.load_workbook(io.BytesIO(r.generar_excel_rendicion(oct_, "Vio")))
 assert wb.sheetnames == ["Rendición", "Deuda por servicio", "Pagos recibidos"]

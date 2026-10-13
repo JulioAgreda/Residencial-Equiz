@@ -12,6 +12,7 @@ import compromisos
 import cuadre
 import consumo as calc_consumo
 import estados
+import exinquilinos
 import moras
 import servicios_basicos
 import recibo
@@ -194,6 +195,21 @@ cargar_periodos_agua = _solo_permitidos(_cargar_periodos_agua_todos)
 cargar_periodos_abiertos = _solo_permitidos(_cargar_periodos_abiertos_todos)
 
 
+@st.cache_data(ttl=60)
+def _cargar_periodos_cerrados_todos(tipo):
+    """Periodos cerrados de los ex inquilinos (alquiler / electricidad / agua), con sus abonos."""
+    return db.listar_periodos_cerrados(tipo)
+
+
+@st.cache_data(ttl=60)
+def _cargar_historial_todos():
+    return db.listar_inquilinos_historial()
+
+
+cargar_periodos_cerrados = _solo_permitidos(_cargar_periodos_cerrados_todos)
+cargar_historial = _solo_permitidos(_cargar_historial_todos)
+
+
 AVISO_MIGRACION_DEVOLUCION = (
     "Para registrar **a quién se realizó la devolución**, ejecuta el archivo "
     "`migracion_devolucion_usuario.sql` en el SQL Editor de Supabase. Mientras tanto, esta sección "
@@ -278,6 +294,15 @@ def selector_devolucion_a(key, actual=None):
         "Nombre del tercero (solo si elegiste «Tercero»)", value=nombre_guardado, key=f"{key}_tercero",
         disabled=not puede_editar_estado, max_chars=100, placeholder="Persona o empresa externa que recibió la devolución")
     return estados.componer_devolucion_a(None if elegido == "—" else elegido, nombre_tercero)
+
+
+def texto_error_historial(prefijo, error):
+    """Mensaje de error del historial de inquilinos; si parece que falta algo en la base de datos, lo dice."""
+    texto = str(error)
+    if any(x in texto.lower() for x in ("registrar_salida_inquilino", "inquilinos_historial", "inquilino_historial_id", "could not find", "does not exist")):
+        texto += ("\n\nParece que falta algo del historial de inquilinos en la base de datos. Ejecuta "
+                  "`verificar_historial_inquilinos.sql` en el SQL Editor de Supabase para ver qué falta.")
+    return f"{prefijo}: {texto}"
 
 
 def texto_error_guardado(prefijo, error):
@@ -431,6 +456,8 @@ def limpiar_cache():
     cargar_periodos_electricidad.clear()
     cargar_periodos_agua.clear()
     cargar_periodos_abiertos.clear()
+    cargar_periodos_cerrados.clear()
+    cargar_historial.clear()
     cargar_pendientes.clear()
     cargar_reuniones.clear()
     cargar_participantes_reuniones.clear()
@@ -501,9 +528,12 @@ SERVICIOS_UI = {
 
 
 def _formulario_editar_abono(servicio, p, prefijo):
-    """Formulario para editar o eliminar un abono (el mismo en el registro y en el historial).
+    """Formulario para editar o eliminar un abono (el mismo en el registro y en el historial; servicio=None = alquiler).
     'prefijo' mantiene únicas las claves de los widgets (p. ej. 'elec' o 'elec_hist')."""
     pid = p["id"]
+    # servicio=None: abono de ALQUILER; 'electricidad' / 'agua': abono de ese servicio
+    actualizar = (db.actualizar_pago if servicio is None else lambda i, datos: db.actualizar_pago_servicio(servicio, i, datos))
+    eliminar = (db.eliminar_pago if servicio is None else lambda i: db.eliminar_pago_servicio(servicio, i))
     with st.form(f"form_editar_pago_{prefijo}_{pid}"):
         colf, colm = st.columns(2)
         with colf:
@@ -528,7 +558,7 @@ def _formulario_editar_abono(servicio, p, prefijo):
 
         if guardar_edit:
             try:
-                db.actualizar_pago_servicio(servicio, pid, {
+                actualizar(pid, {
                     "fecha": str(edit_fecha), "monto": edit_monto,
                     "metodo_pago": edit_metodo, "observacion": edit_obs or None,
                 })
@@ -540,7 +570,7 @@ def _formulario_editar_abono(servicio, p, prefijo):
 
         if eliminar_edit:
             try:
-                db.eliminar_pago_servicio(servicio, pid)
+                eliminar(pid)
                 limpiar_cache()
                 st.success("Abono eliminado.")
                 st.rerun()
@@ -836,11 +866,11 @@ if _permitidos_barra is not None:
 
 if es_admin:
     opciones_principal = ["📊 Dashboard", "🏠 Apartamentos", "💵 Pagos de Alquiler", "⚡ Electricidad",
-                          "💧 Agua", "🤝 Compromisos de pago", "👥 Usuarios"]
+                          "💧 Agua", "🤝 Compromisos de pago", "🚪 Ex inquilinos", "👥 Usuarios"]
 else:
     # "🏠 Inquilinos" es la consulta de solo lectura de los datos de cada apartamento
     opciones_principal = ["📊 Dashboard", "🏠 Inquilinos", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua",
-                          "🤝 Compromisos de pago"]
+                          "🤝 Compromisos de pago", "🚪 Ex inquilinos"]
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
 opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "🗒️ Reuniones"]
@@ -1283,6 +1313,52 @@ elif pagina == "🏠 Apartamentos":
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al eliminar: {e}")
+
+            # ---------- Salida del inquilino: se archiva en el historial y su deuda queda a su nombre ----------
+            if apt.get("estado") == "Ocupado" and (apt.get("inquilino_nombre") or "").strip():
+                with st.expander(f"🚪 Registrar la salida de {apt['inquilino_nombre']}"):
+                    st.caption("Archiva al inquilino en el historial y deja el apartamento libre. Su deuda queda a su nombre: si "
+                               "después paga, se le registra el pago en «🚪 Ex inquilinos» y la deuda se actualiza.")
+                    sa1, sa2 = st.columns(2)
+                    with sa1:
+                        fecha_salida = st.date_input("Fecha de salida", value=recibo.hoy_bolivia(), format="DD/MM/YYYY",
+                                                     key=f'salida_fecha_{apt["id"]}')
+                    with sa2:
+                        registrar_meses = st.checkbox(
+                            "Registrar como deuda los meses de alquiler vencidos sin ningún pago", value=True,
+                            key=f'salida_meses_{apt["id"]}',
+                            help="Si no se marca, esos meses no quedarían registrados como deuda del ex inquilino.")
+                    obs_salida = st.text_area("Observación (motivo, estado del apartamento, acuerdo de pago…)", height=70,
+                                              key=f'salida_obs_{apt["id"]}')
+                    periodos_salida = {t: [p for p in cargar_periodos_abiertos(t) if p.get("apartamento_id") == apt["id"]]
+                                       for t in ("alquiler", "electricidad", "agua")}
+                    resumen_s = exinquilinos.resumen_salida(
+                        apt, periodos_salida["alquiler"], periodos_salida["electricidad"], periodos_salida["agua"],
+                        fecha_salida or recibo.hoy_bolivia(), registrar_meses)
+                    st.markdown(f"**Deuda con la que sale:** alquiler {fmt_money(resumen_s['alquiler'])} · luz {fmt_money(resumen_s['luz'])} · "
+                                f"agua {fmt_money(resumen_s['agua'])} · **total {fmt_money(resumen_s['total'])}**")
+                    if resumen_s["meses_sin_registro"]:
+                        st.caption("Meses de alquiler sin ningún pago: " + ", ".join(m["etiqueta"] for m in resumen_s["meses_sin_registro"]) + ".")
+                    confirmar_salida = st.checkbox(
+                        "Confirmo que este inquilino ya salió: su ficha se archivará y el apartamento quedará desocupado.",
+                        key=f'salida_confirmar_{apt["id"]}')
+                    if st.button("🚪 Registrar salida", key=f'salida_boton_{apt["id"]}'):
+                        errores_salida = exinquilinos.validar_salida(apt, fecha_salida, confirmar_salida)
+                        for e in errores_salida:
+                            st.error(e)
+                        if not errores_salida:
+                            try:
+                                if registrar_meses:
+                                    for m in resumen_s["meses_sin_registro"]:
+                                        db.obtener_o_crear_periodo(apt["id"], m["mes"], m["anio"], m["monto"], apt.get("inquilino_nombre"))
+                                db.registrar_salida_inquilino(
+                                    apt["id"], fecha_salida, obs_salida, usuario_actual.get("nombre") or usuario_actual.get("username"))
+                                limpiar_cache()
+                                st.success("Salida registrada. El inquilino quedó en el historial con su deuda. Si paga después, "
+                                           "regístralo en «🚪 Ex inquilinos».")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(texto_error_historial("No se pudo registrar la salida", e))
 
     with tab_nuevo:
         with st.form("nuevo_apartamento", clear_on_submit=True):
@@ -2100,9 +2176,16 @@ elif pagina == "📋 Rendición de alquileres":
         st.warning(f"⚠️ Hay **{n_ilegibles_rd}** periodo(s) de pagos con un mes o año que la app no reconoce. Sus pagos SÍ se cuentan "
                    "como dinero recibido (en «Mes que paga» aparece «—»), pero su deuda no entra en «Deuda pendiente». "
                    "Corrígelos en Supabase: el mes debe ser uno de Enero … Diciembre.")
+    try:                       # ex inquilinos: si pagan después, ese cobro también es dinero recibido
+        historial_rd = cargar_historial()
+        cerrados_rd = {t: cargar_periodos_cerrados(t) for t in ("alquiler", "electricidad", "agua")}
+    except Exception as e:
+        historial_rd, cerrados_rd = [], {}
+        st.warning(texto_error_historial("No se pudo leer el historial de ex inquilinos: este reporte NO incluye sus pagos ni su deuda", e))
     rd = rendicion.construir_rendicion(
         cargar_apartamentos(), periodos_rd["alquiler"], periodos_rd["electricidad"], periodos_rd["agua"], rd_desde, rd_hasta, hoy_rd,
-        solo_con_deuda=filtro_rd == "Solo con deuda pendiente", solo_con_cobros=filtro_rd == "Solo con cobros en el periodo")
+        solo_con_deuda=filtro_rd == "Solo con deuda pendiente", solo_con_cobros=filtro_rd == "Solo con cobros en el periodo",
+        cerrados=cerrados_rd, historial=historial_rd)
 
     td = rd["totales"]
     rk1, rk2, rk3, rk4, rk5 = st.columns(5)
@@ -2112,6 +2195,10 @@ elif pagina == "📋 Rendición de alquileres":
     rk4.metric("Agua", fmt_money(td["agua"]))
     rk5.metric("Deuda pendiente", fmt_money(td["deuda"]),
                help=f'Lo que aún falta pagar de {rendicion.texto_meses(rd)} (a hoy). {rd["con_deuda"]} de {rd["n_apartamentos"]} apartamentos con deuda.')
+
+    if rd["n_ex_inquilinos"]:
+        st.caption(f"👥 Incluye {fmt_money(rd['cobrado_ex'])} cobrados a ex inquilinos ({rd['n_ex_inquilinos']}), marcados «ex inquilino». "
+                   f"Lo que todavía deben suma {fmt_money(rd['deuda_ex'])}.")
 
     if not rd["filas"]:
         st.info("No hay apartamentos para mostrar en este periodo.")
@@ -2126,7 +2213,8 @@ elif pagina == "📋 Rendición de alquileres":
         filas_rd.append({enc: ("TOTAL" if clave == "apartamento" else td.get(clave, "")) for clave, enc, _t in rendicion.COLUMNAS_RESUMEN})
         st.dataframe(pd.DataFrame(filas_rd), use_container_width=True, hide_index=True, column_config=cfg_rd)
         st.caption("«Cobrado» es el dinero recibido entre las dos fechas. «Deuda pendiente» es lo que aún falta pagar de "
-                   f"{rendicion.texto_meses(rd)} (a hoy), sin importar cuándo se pagó. Solo se cuenta el inquilino actual de cada apartamento.")
+                   f"{rendicion.texto_meses(rd)} (a hoy), sin importar cuándo se pagó. Cada apartamento muestra a su inquilino actual; las filas "
+                   "«Ex inquilino» son inquilinos que ya salieron (su deuda es todo lo que aún deben).")
     with t_mov:
         if rd["movimientos"]:
             st.dataframe(pd.DataFrame([{enc: m[clave] for clave, enc, _t in rendicion.COLUMNAS_MOVIMIENTOS} for m in rd["movimientos"]]),
@@ -2150,6 +2238,149 @@ elif pagina == "📋 Rendición de alquileres":
     with rdl2:
         st.download_button("📄 Descargar PDF", data=_rendicion_pdf_cache(rd, nombre_emisor_rd), file_name=f"{base_rd}.pdf",
                            mime="application/pdf", key="rd_pdf", use_container_width=True)
+
+# ==================================================================
+# PÁGINA: EX INQUILINOS (historial, deuda y pagos de los inquilinos que ya salieron)
+# ==================================================================
+elif pagina == "🚪 Ex inquilinos":
+    st.title("🚪 Ex inquilinos")
+    st.caption(
+        "Inquilinos que ya salieron. Su ficha y su deuda quedan archivadas a su nombre: si pagan después, registra el pago "
+        "aquí y la deuda se actualiza. Esos cobros aparecen en la Rendición de alquileres marcados como «ex inquilino»."
+    )
+    try:
+        historial_ex = cargar_historial()
+        cerrados_ex = {t: cargar_periodos_cerrados(t) for t in ("alquiler", "electricidad", "agua")}
+    except Exception as e:
+        st.error(texto_error_historial("No se pudo leer el historial de inquilinos", e))
+        st.stop()
+    apts_ex = {a["id"]: a for a in cargar_apartamentos()}
+    por_hist_ex = exinquilinos.agrupar_por_historial(cerrados_ex)
+    vacio_ex = {"alquiler": [], "electricidad": [], "agua": []}
+
+    filas_ex = []
+    for h in historial_ex:
+        d_ex = exinquilinos.deuda_ex_inquilino(por_hist_ex.get(h["id"], vacio_ex))
+        filas_ex.append({"h": h, "deuda": d_ex, "codigo": (apts_ex.get(h.get("apartamento_id")) or {}).get("codigo") or "—"})
+    if not filas_ex:
+        st.info("Todavía no hay inquilinos en el historial. Cuando un inquilino se vaya, registra su salida en "
+                "**Apartamentos → Lista y edición → 🚪 Registrar la salida**.")
+        st.stop()
+
+    solo_deuda_ex = st.checkbox("Mostrar solo ex inquilinos con deuda", value=True, key="ex_solo_deuda")
+    visibles_ex = [f for f in filas_ex if not solo_deuda_ex or f["deuda"]["total"] > exinquilinos.TOLERANCIA]
+    ek1, ek2, ek3 = st.columns(3)
+    ek1.metric("Ex inquilinos con deuda", sum(1 for f in filas_ex if f["deuda"]["total"] > exinquilinos.TOLERANCIA))
+    ek2.metric("Deuda total de ex inquilinos", fmt_money(sum(f["deuda"]["total"] for f in filas_ex)))
+    ek3.metric("Ex inquilinos en el historial", len(filas_ex))
+    if not visibles_ex:
+        st.success("Ningún ex inquilino tiene deuda pendiente.")
+        st.stop()
+
+    st.dataframe(pd.DataFrame([{
+        "Apartamento": f["codigo"], "Ex inquilino": exinquilinos.nombre_ex_inquilino(f["h"]),
+        "Fecha de salida": (parse_fecha(f["h"].get("fecha_salida")) or "—") if f["h"].get("fecha_salida") else "—",
+        "Alquiler": f["deuda"]["alquiler"], "Luz": f["deuda"]["luz"], "Agua": f["deuda"]["agua"], "Deuda total": f["deuda"]["total"],
+    } for f in visibles_ex]), use_container_width=True, hide_index=True, column_config={
+        c: st.column_config.NumberColumn(format="Bs %.2f") for c in ("Alquiler", "Luz", "Agua", "Deuda total")})
+
+    idx_ex = st.selectbox(
+        "Elige un ex inquilino para ver su ficha y registrar pagos", range(len(visibles_ex)), key="ex_sel",
+        format_func=lambda i: (f'{visibles_ex[i]["codigo"]} — {exinquilinos.nombre_ex_inquilino(visibles_ex[i]["h"])} '
+                               f'— debe {fmt_money(visibles_ex[i]["deuda"]["total"])}'))
+    h = visibles_ex[idx_ex]["h"]
+    apt_h = apts_ex.get(h.get("apartamento_id")) or {}
+    apt_recibo = {"codigo": visibles_ex[idx_ex]["codigo"], "piso": apt_h.get("piso"),
+                  "inquilino_nombre": exinquilinos.nombre_ex_inquilino(h)}
+
+    with st.expander("📄 Ficha archivada del ex inquilino", expanded=False):
+        etiquetas_ficha = {"inquilino_nombre": "Nombre", "celular": "Celular", "cedula_identidad": "Cédula de identidad",
+                           "nacionalidad": "Nacionalidad", "referencia_nombre": "Referencia", "referencia_celular": "Celular de la referencia",
+                           "fecha_ingreso": "Fecha de ingreso", "fecha_salida": "Fecha de salida", "garantia": "Garantía",
+                           "monto_alquiler": "Alquiler mensual (Bs)", "tipo_contrato": "Tipo de contrato",
+                           "observacion": "Observación de la salida", "registrado_por": "Salida registrada por"}
+        ocultas = {"id", "apartamento_id", "created_at", "updated_at"}
+        ficha = [(etiquetas_ficha.get(k, k.replace("_", " ").capitalize()), str(v)) for k, v in h.items()
+                 if k not in ocultas and v not in (None, "")]
+        st.dataframe(pd.DataFrame(ficha, columns=["Dato", "Valor"]), use_container_width=True, hide_index=True)
+
+    # Periodos de este ex inquilino con todos los datos (lecturas incluidas, para los recibos)
+    try:
+        completos_ex = {
+            "alquiler": [p for p in db.listar_periodos(apartamento_id=h["apartamento_id"]) if p.get("inquilino_historial_id") == h["id"]],
+            "electricidad": [p for p in db.listar_periodos_servicio("electricidad", apartamento_id=h["apartamento_id"])
+                             if p.get("inquilino_historial_id") == h["id"]],
+            "agua": [p for p in db.listar_periodos_servicio("agua", apartamento_id=h["apartamento_id"])
+                     if p.get("inquilino_historial_id") == h["id"]],
+        }
+    except Exception as e:
+        st.error(texto_error_historial("No se pudieron leer los periodos del ex inquilino", e))
+        st.stop()
+
+    st.markdown("**Lo que debe, mes por mes**")
+    filas_per = []
+    for nombre_c, tipo_c, campo_c, _clave in exinquilinos.CONCEPTOS:
+        for p in sorted(completos_ex[tipo_c], key=lambda p: (moras._clave_periodo(p) or (0, 0))):
+            filas_per.append({"Concepto": nombre_c, "Mes": exinquilinos.etiqueta_periodo(p), "A cobrar": float(p.get("monto_esperado") or 0),
+                              "Pagado": float(exinquilinos.pagado(p, campo_c)), "Saldo": exinquilinos.saldo(p, campo_c)})
+    if filas_per:
+        st.dataframe(pd.DataFrame(filas_per), use_container_width=True, hide_index=True, column_config={
+            c: st.column_config.NumberColumn(format="Bs %.2f") for c in ("A cobrar", "Pagado", "Saldo")})
+    else:
+        st.info("Este ex inquilino no tiene periodos registrados.")
+
+    st.divider()
+    st.subheader("➕ Registrar un pago del ex inquilino")
+    conceptos_pend = [(n, t, c) for n, t, c, _k in exinquilinos.CONCEPTOS if exinquilinos.periodos_con_saldo(completos_ex[t], c)]
+    if not conceptos_pend:
+        st.success("Este ex inquilino no tiene deuda pendiente.")
+    else:
+        sel_c = st.selectbox("Concepto", range(len(conceptos_pend)), format_func=lambda i: conceptos_pend[i][0], key=f'ex_concepto_{h["id"]}')
+        nombre_c, tipo_c, campo_c = conceptos_pend[sel_c]
+        con_saldo = exinquilinos.periodos_con_saldo(completos_ex[tipo_c], campo_c)
+        sel_p = st.selectbox("Mes que paga", range(len(con_saldo)), key=f'ex_periodo_{h["id"]}_{tipo_c}',
+                             format_func=lambda i: f'{exinquilinos.etiqueta_periodo(con_saldo[i])} — saldo {fmt_money(exinquilinos.saldo(con_saldo[i], campo_c))}')
+        periodo_ex = con_saldo[sel_p]
+        saldo_ex = exinquilinos.saldo(periodo_ex, campo_c)
+        px1, px2 = st.columns(2)
+        with px1:
+            monto_ex = st.number_input("Monto abonado (Bs)", min_value=0.0, step=10.0, value=float(saldo_ex),
+                                       key=f'ex_monto_{h["id"]}_{tipo_c}_{periodo_ex["id"]}')
+        with px2:
+            fecha_ex = st.date_input("Fecha del pago", value=recibo.hoy_bolivia(), format="DD/MM/YYYY", key=f'ex_fecha_{h["id"]}_{tipo_c}')
+        metodo_ex = st.selectbox("Método de pago", METODOS_ABONO, key=f'ex_metodo_{h["id"]}_{tipo_c}')
+        obs_ex = st.text_input("Observación (opcional)", key=f'ex_obs_{h["id"]}_{tipo_c}_{periodo_ex["id"]}')
+        if st.button("💾 Registrar pago", key=f'ex_guardar_{h["id"]}_{tipo_c}'):
+            error_ex = exinquilinos.validar_abono(monto_ex, saldo_ex)
+            if error_ex:
+                st.error(error_ex)
+            else:
+                datos_pago = {"periodo_id": periodo_ex["id"], "fecha": str(fecha_ex), "monto": monto_ex,
+                              "metodo_pago": metodo_ex, "observacion": obs_ex or None}
+                try:
+                    if tipo_c == "alquiler":
+                        db.crear_pago(datos_pago)
+                    else:
+                        db.crear_pago_servicio(tipo_c, datos_pago)
+                    limpiar_cache()
+                    st.success(f"Pago registrado. Saldo restante de {exinquilinos.etiqueta_periodo(periodo_ex)}: "
+                               f"{fmt_money(max(saldo_ex - monto_ex, 0))}.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al guardar: {e}")
+
+    # Pagos ya registrados (con recibo y corrección)
+    pagos_ex = [(n, t, c, p, a) for n, t, c, _k in exinquilinos.CONCEPTOS for p in completos_ex[t] for a in (p.get(c) or [])]
+    if pagos_ex:
+        st.divider()
+        st.subheader("Pagos registrados")
+        for nombre_c, tipo_c, campo_c, p, a in sorted(pagos_ex, key=lambda t: str(t[4].get("fecha")), reverse=True):
+            with st.expander(f'{a["fecha"]} — {nombre_c} — {exinquilinos.etiqueta_periodo(p)} — {fmt_money(a["monto"])}'):
+                mostrar_botones_recibo(a, p, apt_recibo, float(exinquilinos.pagado(p, campo_c)),
+                                       key_sufijo=f'ex_{tipo_c}_{a["id"]}', servicio=None if tipo_c == "alquiler" else tipo_c)
+                st.divider()
+                _formulario_editar_abono(None if tipo_c == "alquiler" else tipo_c, a, f'ex_{tipo_c}')
+
 
 # ==================================================================
 # PÁGINA: INQUILINOS (solo lectura, para todos los usuarios)

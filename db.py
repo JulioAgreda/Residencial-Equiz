@@ -607,6 +607,30 @@ def listar_periodos_abiertos(tipo):
         inicio += tam
 
 
+def listar_periodos_cerrados(tipo):
+    """Todos los periodos CERRADOS (de inquilinos que ya salieron), con la misma forma que listar_periodos_abiertos y el
+    id del historial al que pertenecen. Sirven para la deuda y los pagos de los ex inquilinos.
+    tipo: 'alquiler' | 'electricidad' | 'agua'. Se pide por páginas (PostgREST corta en 1000 filas sin avisar)."""
+    tabla, tabla_pagos = _TABLAS_MORA[tipo]
+    sb = get_client()
+    filas, inicio, tam = [], 0, 1000
+    while True:
+        res = (
+            sb.table(tabla)
+            .select(f"id, apartamento_id, inquilino_historial_id, mes, anio, monto_esperado, "
+                    f"{tabla_pagos}(id, monto, fecha, metodo_pago, observacion)")
+            .gt("inquilino_historial_id", 0)
+            .order("id")
+            .range(inicio, inicio + tam - 1)
+            .execute()
+        )
+        datos = res.data or []
+        filas.extend(datos)
+        if len(datos) < tam:
+            return filas
+        inicio += tam
+
+
 # ---------- Reporte de actividad por usuario ----------
 
 _TABLAS_ACTIVIDAD = {

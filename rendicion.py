@@ -8,7 +8,9 @@ Reglas:
   * Alquiler, luz y agua se muestran por separado. Cada pago indica además el «mes que paga».
   * «Deuda pendiente» es lo que todavía falta pagar de los MESES que toca el periodo (alquiler, luz y agua), a la fecha de
     hoy: pago parcial o ningún pago; si se pagó de más, la deuda es 0, no negativa. No depende de cuándo se pagó.
-  * Solo cuenta el inquilino ACTUAL de cada apartamento (periodos abiertos), igual que el Dashboard y el Estado de cuenta.
+  * Cada apartamento muestra a su inquilino ACTUAL (periodos abiertos), como el Dashboard y el Estado de cuenta. Los
+    inquilinos que ya salieron (EX INQUILINOS) se muestran aparte, en filas marcadas «Ex inquilino»: si pagan después, ese
+    cobro suma al dinero recibido, y su «deuda pendiente» es todo lo que todavía deben (no depende del mes).
   * Alquiler: la deuda se calcula como en el estado de cuenta (moras.deuda_real_inquilino): un mes sin ningún registro se
     cobra con el alquiler de la ficha. Luz y agua: solo los meses con lectura registrada.
   * Contratos de anticrético y apartamentos desocupados no generan alquiler mensual.
@@ -26,6 +28,7 @@ from reportlab.platypus import CondPageBreak, Paragraph, Spacer
 
 import aire_acondicionado
 import cuadre as cd
+import exinquilinos as ex
 import moras
 import reportes as rp
 
@@ -82,10 +85,12 @@ CONCEPTOS = ("Alquiler", "Luz", "Agua")
 
 
 def construir_rendicion(apartamentos, periodos_alquiler, periodos_electricidad, periodos_agua, desde, hasta,
-                        hoy=None, solo_con_deuda=False, solo_con_cobros=False):
+                        hoy=None, solo_con_deuda=False, solo_con_cobros=False, cerrados=None, historial=None):
     """Todo lo que muestra y exporta el reporte. Los periodos son los ABIERTOS (inquilino actual) con sus abonos
     embebidos ('pagos' / 'pagos_electricidad' / 'pagos_agua', cada uno con monto, fecha, metodo_pago y observacion).
-    desde / hasta: fechas (ambas incluidas) entre las que se recibió el dinero."""
+    desde / hasta: fechas (ambas incluidas) entre las que se recibió el dinero.
+    cerrados / historial: periodos cerrados ({'alquiler': [...], 'electricidad': [...], 'agua': [...]}) y filas de
+    `inquilinos_historial` de los ex inquilinos; si se dan, sus cobros y deudas se agregan en filas «Ex inquilino»."""
     hoy = hoy or date.today()
     meses = set(meses_en_rango(desde, hasta))                     # solo para la deuda pendiente
     alq, luz, agua = _agrupar(periodos_alquiler), _agrupar(periodos_electricidad), _agrupar(periodos_agua)
@@ -144,6 +149,59 @@ def construir_rendicion(apartamentos, periodos_alquiler, periodos_electricidad, 
             fila[f"{clave}_acobrar"], fila[f"{clave}_pagado"], fila[f"{clave}_deuda"] = cd._f(e), cd._f(g), cd._f(dd)
         filas.append(fila)
         movimientos.extend(movs_apt)
+    n_apartamentos = len(filas)
+
+    # ---- ex inquilinos: dinero que pagaron en esas fechas y lo que todavía deben ----
+    if cerrados and historial:
+        por_hist = ex.agrupar_por_historial(cerrados)
+        apt_por_id = {a["id"]: a for a in apartamentos}
+        lista = sorted((h for h in historial if h.get("id") in por_hist),
+                       key=lambda h: ((apt_por_id.get(h.get("apartamento_id")) or {}).get("codigo") or "~", -(h.get("id") or 0)))
+        for h in lista:
+            periodos_h = por_hist[h["id"]]
+            apt = apt_por_id.get(h.get("apartamento_id")) or {}
+            nombre = f"{ex.nombre_ex_inquilino(h)} (ex inquilino)"
+            cobrado, movs_h, detalle = {}, [], {}
+            for concepto, tipo, campo, clave_c in ex.CONCEPTOS:
+                cobrado[clave_c] = Decimal(0)
+                esperado = sum((cd._d(p.get("monto_esperado")) for p in periodos_h[tipo]), Decimal(0))
+                pagado_c = sum((ex.pagado(p, campo) for p in periodos_h[tipo]), Decimal(0))
+                detalle[clave_c] = (esperado, pagado_c)
+                for p in periodos_h[tipo]:
+                    for a in p.get(campo) or []:
+                        f = cd._fecha(a.get("fecha"))
+                        if not f or not (desde <= f <= hasta):
+                            continue
+                        cobrado[clave_c] += cd._d(a.get("monto"))
+                        movs_h.append({
+                            "fecha": f, "fecha_txt": rp._fmt_fecha(f), "apartamento": apt.get("codigo") or "—",
+                            "inquilino": nombre, "concepto": concepto, "periodo": ex.etiqueta_periodo(p),
+                            "metodo": rp._txt(a.get("metodo_pago")) or "—", "observacion": rp._txt(a.get("observacion")),
+                            "monto": cd._f(cd._d(a.get("monto")))})
+            total_cobrado = sum(cobrado.values(), Decimal(0))
+            deuda_h = ex.deuda_ex_inquilino(periodos_h)
+            hay_cobros, hay_deuda = total_cobrado > _TOL, deuda_h["total"] > _TOL
+            if solo_con_deuda and not hay_deuda:
+                continue
+            if solo_con_cobros and not hay_cobros:
+                continue
+            if not (hay_cobros or hay_deuda):
+                continue                                  # ex inquilino sin pagos en esas fechas y sin deuda: no aporta
+            salida = cd._fecha(h.get("fecha_salida"))
+            fila = {
+                "apartamento_id": h.get("apartamento_id"), "ex_inquilino": True, "historial_id": h["id"],
+                "apartamento": apt.get("codigo") or "—", "piso": apt.get("piso") or "—", "estado": "Ex inquilino",
+                "inquilino": nombre, "celular": h.get("celular") or "—", "aire": "—",
+                "contrato": f"Salió {rp._fmt_fecha(salida)}" if salida else "Salió —",
+                "alquiler": cd._f(cobrado["alquiler"]), "luz": cd._f(cobrado["luz"]), "agua": cd._f(cobrado["agua"]),
+                "total": cd._f(total_cobrado), "deuda": deuda_h["total"],
+            }
+            for clave_c, (esperado, pagado_c) in detalle.items():
+                fila[f"{clave_c}_acobrar"], fila[f"{clave_c}_pagado"] = cd._f(esperado), cd._f(pagado_c)
+                fila[f"{clave_c}_deuda"] = deuda_h[clave_c]
+            filas.append(fila)
+            movimientos.extend(movs_h)
+
     movimientos.sort(key=lambda m: (m["fecha"], m["apartamento"], m["concepto"]))
 
     def suma(clave):
@@ -155,7 +213,11 @@ def construir_rendicion(apartamentos, periodos_alquiler, periodos_electricidad, 
         sel = [m for m in movimientos if m["concepto"] == concepto]
         por_concepto_mov.append({"concepto": concepto, "n": len(sel),
                                  "total": cd._f(sum((cd._d(m["monto"]) for m in sel), Decimal(0)))})
-    return {"desde": desde, "hasta": hasta, "meses": sorted(meses), "n_apartamentos": len(filas), "filas": filas,
+    filas_ex = [f for f in filas if f.get("ex_inquilino")]
+    return {"desde": desde, "hasta": hasta, "meses": sorted(meses), "n_apartamentos": n_apartamentos, "filas": filas,
+            "n_ex_inquilinos": len(filas_ex),
+            "cobrado_ex": cd._f(sum((cd._d(f["total"]) for f in filas_ex), Decimal(0))),
+            "deuda_ex": cd._f(sum((cd._d(f["deuda"]) for f in filas_ex), Decimal(0))),
             "totales": totales, "movimientos": movimientos, "n_pagos": len(movimientos),
             "pagos_por_concepto": por_concepto_mov, "con_deuda": sum(1 for f in filas if f["deuda"] > _TOL)}
 
@@ -223,7 +285,9 @@ def generar_pdf_rendicion(r, emitido_por=None):
     story.append(Paragraph(f"<b>Pagos recibidos:</b> {r['n_pagos']} &nbsp;&nbsp;|&nbsp;&nbsp; "
                            f"<b>Total cobrado:</b> {bs(t['total'])} &nbsp;&nbsp;|&nbsp;&nbsp; "
                            f"<b>Apartamentos:</b> {r['n_apartamentos']} &nbsp;&nbsp;|&nbsp;&nbsp; "
-                           f"<b>Con deuda:</b> {r['con_deuda']}", est.chico))
+                           f"<b>Con deuda:</b> {r['con_deuda']}"
+                           + (f" &nbsp;&nbsp;|&nbsp;&nbsp; <b>De ex inquilinos:</b> {bs(r['cobrado_ex'])}" if r["n_ex_inquilinos"] else ""),
+                           est.chico))
     story.append(Spacer(1, 4))
     if r["filas"]:
         filas = [[f["apartamento"], f["piso"], f["estado"], f["inquilino"], f["celular"], bs(f["alquiler"]), bs(f["luz"]),
@@ -236,7 +300,9 @@ def generar_pdf_rendicion(r, emitido_por=None):
     else:
         story.append(Paragraph("No hay apartamentos para mostrar en este periodo.", est.nota))
     story.append(Paragraph("«Cobrado» es el dinero recibido entre las dos fechas (por fecha de pago), sin importar a qué mes corresponda. "
-                           f"«Deuda pendiente» es lo que aún falta pagar de {pdf(texto_meses(r))}, a la fecha de emisión.", est.nota))
+                           f"«Deuda pendiente» es lo que aún falta pagar de {pdf(texto_meses(r))}, a la fecha de emisión."
+                           + (" Las filas «Ex inquilino» son pagos o deudas de inquilinos que ya salieron; su deuda es todo lo que aún deben."
+                              if r["n_ex_inquilinos"] else ""), est.nota))
 
     story.append(CondPageBreak(40 * mm))
     story.append(Paragraph("Pagos recibidos en el periodo", est.sec))
