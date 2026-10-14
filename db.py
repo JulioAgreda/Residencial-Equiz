@@ -631,6 +631,60 @@ def listar_periodos_cerrados(tipo):
         inicio += tam
 
 
+# ---------- Inventario (artículos, movimientos de entrada/salida y Kardex) ----------
+
+def listar_inventario_articulos():
+    res = get_client().table("inventario_articulos").select("*").order("nombre").execute()
+    return res.data or []
+
+
+def crear_inventario_articulo(payload: dict):
+    res = get_client().table("inventario_articulos").insert(payload).execute()
+    return res.data[0]
+
+
+def actualizar_inventario_articulo(articulo_id, payload: dict):
+    return get_client().table("inventario_articulos").update(payload).eq("id", articulo_id).execute()
+
+
+def eliminar_inventario_articulo(articulo_id):
+    """Solo funciona si el artículo no tiene movimientos (la base lo impide); si los tiene, se desactiva."""
+    return get_client().table("inventario_articulos").delete().eq("id", articulo_id).execute()
+
+
+def listar_inventario_movimientos():
+    """Todos los movimientos de inventario, por páginas (PostgREST corta en 1000 filas sin avisar)."""
+    sb = get_client()
+    filas, inicio, tam = [], 0, 1000
+    while True:
+        res = (
+            sb.table("inventario_movimientos")
+            .select("*")
+            .order("fecha")
+            .order("id")
+            .range(inicio, inicio + tam - 1)
+            .execute()
+        )
+        datos = res.data or []
+        filas.extend(datos)
+        if len(datos) < tam:
+            return filas
+        inicio += tam
+
+
+def crear_inventario_movimiento(payload: dict):
+    res = get_client().table("inventario_movimientos").insert(payload).execute()
+    return res.data[0]
+
+
+def actualizar_inventario_movimiento(movimiento_id, payload: dict):
+    return get_client().table("inventario_movimientos").update(payload).eq("id", movimiento_id).execute()
+
+
+def eliminar_inventario_movimiento(movimiento_id):
+    return get_client().table("inventario_movimientos").delete().eq("id", movimiento_id).execute()
+
+
 # ---------- Reporte de actividad por usuario ----------
 
 _TABLAS_ACTIVIDAD = {

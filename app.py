@@ -13,6 +13,8 @@ import cuadre
 import consumo as calc_consumo
 import estados
 import exinquilinos
+import inventario
+import inventario_reportes
 import moras
 import servicios_basicos
 import recibo
@@ -210,6 +212,16 @@ cargar_periodos_cerrados = _solo_permitidos(_cargar_periodos_cerrados_todos)
 cargar_historial = _solo_permitidos(_cargar_historial_todos)
 
 
+@st.cache_data(ttl=30)
+def cargar_inventario_articulos():
+    return db.listar_inventario_articulos()
+
+
+@st.cache_data(ttl=30)
+def cargar_inventario_movimientos():
+    return db.listar_inventario_movimientos()
+
+
 AVISO_MIGRACION_DEVOLUCION = (
     "Para registrar **a quién se realizó la devolución**, ejecuta el archivo "
     "`migracion_devolucion_usuario.sql` en el SQL Editor de Supabase. Mientras tanto, esta sección "
@@ -296,6 +308,15 @@ def selector_devolucion_a(key, actual=None):
     return estados.componer_devolucion_a(None if elegido == "—" else elegido, nombre_tercero)
 
 
+def texto_error_inventario(prefijo, error):
+    """Mensaje de error del inventario; si parece que falta crear las tablas, lo dice."""
+    texto = str(error)
+    if any(x in texto.lower() for x in ("inventario_", "does not exist", "could not find", "schema cache")):
+        texto += ("\n\nParece que falta crear las tablas del inventario: ejecuta `migracion_inventario.sql` en el SQL Editor "
+                  "de Supabase (una sola vez).")
+    return f"{prefijo}: {texto}"
+
+
 def texto_error_historial(prefijo, error):
     """Mensaje de error del historial de inquilinos; si parece que falta algo en la base de datos, lo dice."""
     texto = str(error)
@@ -351,6 +372,36 @@ def _rendicion_excel_cache(r, emitido_por):
 @st.cache_data(ttl=300, show_spinner=False)
 def _rendicion_pdf_cache(r, emitido_por):
     return rendicion.generar_pdf_rendicion(r, emitido_por=emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _inv_excel_existencias(filas, valor_total, hoy, emitido_por):
+    return inventario_reportes.generar_excel_existencias(filas, valor_total, hoy, emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _inv_pdf_existencias(filas, resumen, hoy, emitido_por):
+    return inventario_reportes.generar_pdf_existencias(filas, resumen, hoy, emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _inv_excel_kardex(articulo, kp, desde, hasta, emitido_por):
+    return inventario_reportes.generar_excel_kardex(articulo, kp, desde, hasta, emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _inv_pdf_kardex(articulo, kp, desde, hasta, emitido_por):
+    return inventario_reportes.generar_pdf_kardex(articulo, kp, desde, hasta, emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _inv_excel_movimientos(mv, desde, hasta, emitido_por):
+    return inventario_reportes.generar_excel_movimientos(mv, desde, hasta, emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _inv_pdf_movimientos(mv, desde, hasta, emitido_por):
+    return inventario_reportes.generar_pdf_movimientos(mv, desde, hasta, emitido_por)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -458,6 +509,8 @@ def limpiar_cache():
     cargar_periodos_abiertos.clear()
     cargar_periodos_cerrados.clear()
     cargar_historial.clear()
+    cargar_inventario_articulos.clear()
+    cargar_inventario_movimientos.clear()
     cargar_pendientes.clear()
     cargar_reuniones.clear()
     cargar_participantes_reuniones.clear()
@@ -873,7 +926,7 @@ else:
                           "🤝 Compromisos de pago", "🚪 Ex inquilinos"]
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
-opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "🗒️ Reuniones"]
+opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "📦 Inventario", "🗒️ Reuniones"]
 opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería"]
 
 # Los radios de abajo son independientes en el estado interno de Streamlit:
@@ -2238,6 +2291,377 @@ elif pagina == "📋 Rendición de alquileres":
     with rdl2:
         st.download_button("📄 Descargar PDF", data=_rendicion_pdf_cache(rd, nombre_emisor_rd), file_name=f"{base_rd}.pdf",
                            mime="application/pdf", key="rd_pdf", use_container_width=True)
+
+# ==================================================================
+# PÁGINA: INVENTARIO (materiales, repuestos y suministros: entradas, salidas y Kardex)
+# ==================================================================
+elif pagina == "📦 Inventario":
+    st.title("📦 Inventario")
+    st.caption("Materiales, repuestos y suministros del edificio: entradas, salidas y Kardex valorizado a costo promedio ponderado.")
+    try:
+        articulos_inv = cargar_inventario_articulos()
+        movimientos_inv = cargar_inventario_movimientos()
+    except Exception as e:
+        st.error(texto_error_inventario("No se pudo leer el inventario", e))
+        st.stop()
+
+    ex_inv = inventario.existencias(articulos_inv, movimientos_inv)
+    estado_art = {f["id"]: f for f in ex_inv["filas"]}
+    nombres_orden = [f["id"] for f in ex_inv["filas"]]
+    articulos_por_id = {a["id"]: a for a in articulos_inv}
+    activos_inv = [articulos_por_id[i] for i in nombres_orden if articulos_por_id[i].get("activo", True) is not False]
+    todos_inv = [articulos_por_id[i] for i in nombres_orden]
+    movs_de = lambda art_id: [m for m in movimientos_inv if m["articulo_id"] == art_id]
+    hoy_inv = recibo.hoy_bolivia()
+    emisor_inv = usuario_actual.get("nombre") or usuario_actual.get("username")
+    categorias_inv = inventario.CATEGORIAS + sorted({a["categoria"] for a in articulos_inv if a.get("categoria")} - set(inventario.CATEGORIAS))
+    cant = inventario.formato_cantidad
+    if st.session_state.get("inv_msg"):
+        st.success(st.session_state.pop("inv_msg"))
+
+    t_exist, t_mov, t_kardex, t_hist, t_art = st.tabs(
+        ["📊 Existencias", "➕ Registrar movimiento", "📒 Kardex", "🕘 Movimientos", "🧰 Artículos"])
+
+    # ------------------------------------------------------------ Existencias
+    with t_exist:
+        ik1, ik2, ik3, ik4 = st.columns(4)
+        ik1.metric("Artículos activos", ex_inv["n_activos"])
+        ik2.metric("Valor del inventario", fmt_money(ex_inv["valor_total"]))
+        ik3.metric("Stock bajo", ex_inv["n_bajo"], help="Artículos cuyo stock llegó al mínimo definido")
+        ik4.metric("Sin stock", ex_inv["n_sin_stock"])
+        if not ex_inv["filas"]:
+            st.info("Todavía no hay artículos. Regístralos en la pestaña **🧰 Artículos** y luego sus entradas en **➕ Registrar movimiento**.")
+        else:
+            if1, if2, if3 = st.columns([2, 1, 1])
+            with if1:
+                texto_inv = st.text_input("Buscar", placeholder="código, nombre, categoría o ubicación", key="inv_buscar")
+            with if2:
+                cat_inv = st.selectbox("Categoría", ["Todas"] + categorias_inv, key="inv_cat")
+            with if3:
+                solo_alertas = st.checkbox("Solo stock bajo o sin stock", key="inv_alertas")
+            vista_inv = inventario.filtrar_existencias(ex_inv["filas"], texto_inv, cat_inv, solo_alertas)
+            iconos = {"OK": "✅ OK", "Stock bajo": "⚠️ Stock bajo", "Sin stock": "🔴 Sin stock"}
+            if vista_inv:
+                st.dataframe(pd.DataFrame([{
+                    "Código": f["codigo"], "Artículo": f["nombre"], "Categoría": f["categoria"], "Unidad": f["unidad"],
+                    "Ubicación": f["ubicacion"], "Stock": f["cantidad"], "Mínimo": f["stock_minimo"],
+                    "Costo promedio": f["costo_promedio"], "Valor": f["valor"], "Estado": iconos[f["estado"]]} for f in vista_inv]),
+                    use_container_width=True, hide_index=True, column_config={
+                        "Costo promedio": st.column_config.NumberColumn(format="Bs %.4f"), "Valor": st.column_config.NumberColumn(format="Bs %.2f")})
+                st.caption(f"Valor de lo que se muestra: {fmt_money(sum(f['valor'] for f in vista_inv))}. Costo promedio ponderado.")
+                ie1, ie2 = st.columns(2)
+                with ie1:
+                    st.download_button("📊 Descargar Excel", data=_inv_excel_existencias(vista_inv, sum(f["valor"] for f in vista_inv), hoy_inv, emisor_inv),
+                                       file_name=f"existencias_inventario_{hoy_inv:%Y-%m-%d}.xlsx", key="inv_xlsx_ex", use_container_width=True,
+                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                with ie2:
+                    resumen_vista = {**ex_inv, "valor_total": round(sum(f["valor"] for f in vista_inv), 2),
+                                     "n_activos": sum(1 for f in vista_inv if f["activo"]),
+                                     "n_bajo": sum(1 for f in vista_inv if f["estado"] == "Stock bajo"),
+                                     "n_sin_stock": sum(1 for f in vista_inv if f["estado"] == "Sin stock")}
+                    st.download_button("📄 Descargar PDF", data=_inv_pdf_existencias(vista_inv, resumen_vista, hoy_inv, emisor_inv),
+                                       file_name=f"existencias_inventario_{hoy_inv:%Y-%m-%d}.pdf", mime="application/pdf", key="inv_pdf_ex",
+                                       use_container_width=True)
+            else:
+                st.info("Ningún artículo coincide con el filtro.")
+
+    # ------------------------------------------------------------ Registrar movimiento
+    with t_mov:
+        if not activos_inv:
+            st.info("Primero registra al menos un artículo en la pestaña **🧰 Artículos**.")
+        else:
+            n_form = st.session_state.get("inv_n_form", 0)          # cambia al guardar: así el formulario se limpia
+            idx_art = st.selectbox(
+                "Artículo", range(len(activos_inv)), key=f"inv_art_{n_form}",
+                format_func=lambda i: f'{activos_inv[i]["codigo"]} — {activos_inv[i]["nombre"]} '
+                                      f'(stock: {cant(estado_art[activos_inv[i]["id"]]["cantidad"])} {activos_inv[i]["unidad"]})')
+            art = activos_inv[idx_art]
+            stock_art = estado_art[art["id"]]["cantidad"]
+            tipo_inv = st.radio("Tipo de movimiento", ["Entrada", "Salida"], horizontal=True, key=f"inv_tipo_{n_form}",
+                                help="Entrada: llega material (compra, donación…). Salida: se usa o se pierde material.")
+            im1, im2, im3 = st.columns(3)
+            with im1:
+                fecha_inv = st.date_input("Fecha", value=hoy_inv, format="DD/MM/YYYY", key=f"inv_fecha_{n_form}")
+            with im2:
+                cantidad_inv = st.number_input(f"Cantidad ({art['unidad']})", min_value=0.0, step=1.0, format="%.3f", value=0.0,
+                                               key=f"inv_cant_{n_form}")
+            with im3:
+                costo_inv = (st.number_input("Costo unitario (Bs)", min_value=0.0, step=0.5, format="%.4f", value=0.0, key=f"inv_costo_{n_form}",
+                                             help="Lo que costó cada unidad. Pon 0 si fue una donación.")
+                             if tipo_inv == "Entrada" else None)
+                if tipo_inv == "Salida":
+                    st.caption(f"Se valora al costo promedio actual: Bs {inventario_reportes._costo(estado_art[art['id']]['costo_promedio'])}")
+            motivo_inv = st.selectbox("Motivo", inventario.MOTIVOS[tipo_inv], key=f"inv_motivo_{tipo_inv}_{n_form}")
+            destino_inv, apartamento_inv = None, None
+            if tipo_inv == "Salida":
+                id1, id2 = st.columns(2)
+                with id1:
+                    if motivo_inv == inventario.MOTIVO_USO_APARTAMENTO:
+                        destino_tipo = inventario.DESTINO_APARTAMENTO          # el motivo ya dice que es un apartamento
+                        st.caption("Destino: un apartamento (elige cuál)")
+                    else:
+                        destino_tipo = st.selectbox("Destino", inventario.DESTINOS, key=f"inv_destino_{n_form}")
+                if destino_tipo == inventario.DESTINO_APARTAMENTO:
+                    apts_inv = cargar_apartamentos()
+                    with id2:
+                        if apts_inv:
+                            j_apt = st.selectbox("Apartamento", range(len(apts_inv)), key=f"inv_apt_{n_form}",
+                                                 format_func=lambda j: f'{apts_inv[j]["codigo"]} — {apts_inv[j].get("inquilino_nombre") or "vacío"}')
+                            apartamento_inv, destino_inv = apts_inv[j_apt]["id"], apts_inv[j_apt]["codigo"]
+                        else:
+                            st.warning("No hay apartamentos registrados.")
+                else:
+                    destino_inv = destino_tipo
+            ido1, ido2 = st.columns(2)
+            with ido1:
+                documento_inv = st.text_input("N° de documento (factura, vale, recibo)", key=f"inv_doc_{n_form}")
+            with ido2:
+                obs_inv = st.text_input("Observación (opcional)", key=f"inv_obs_{n_form}")
+            if cantidad_inv > 0:
+                if tipo_inv == "Entrada":
+                    st.caption(f"Stock: {cant(stock_art)} → {cant(stock_art + cantidad_inv)} {art['unidad']} · Valor de la entrada: "
+                               f"{fmt_money(round(cantidad_inv * (costo_inv or 0), 2))}")
+                else:
+                    st.caption(f"Stock: {cant(stock_art)} → {cant(stock_art - cantidad_inv)} {art['unidad']}")
+            if st.button("💾 Registrar movimiento", key=f"inv_guardar_{n_form}"):
+                errores_inv = inventario.validar_movimiento(tipo_inv, cantidad_inv, costo_inv, fecha_inv, motivo_inv, destino_inv, apartamento_inv, hoy_inv)
+                nuevo_inv = inventario.armar_movimiento(art["id"], tipo_inv, fecha_inv, cantidad_inv, costo_inv, motivo_inv, destino_inv,
+                                                        apartamento_inv, documento_inv, obs_inv, emisor_inv)
+                if not errores_inv:
+                    error_kardex = inventario.validar_en_kardex(movs_de(art["id"]), nuevo_inv, unidad=art["unidad"])
+                    if error_kardex:
+                        errores_inv.append(error_kardex)
+                for e in errores_inv:
+                    st.error(e)
+                if not errores_inv:
+                    try:
+                        db.crear_inventario_movimiento(nuevo_inv)
+                        limpiar_cache()
+                        st.session_state["inv_n_form"] = n_form + 1
+                        st.session_state["inv_msg"] = (f"{tipo_inv} registrada: {cant(cantidad_inv)} {art['unidad']} de {art['nombre']} "
+                                                       f"({motivo_inv}).")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(texto_error_inventario("Error al guardar", e))
+
+    # ------------------------------------------------------------ Kardex
+    with t_kardex:
+        if not todos_inv:
+            st.info("Todavía no hay artículos.")
+        else:
+            ik_art = st.selectbox("Artículo", range(len(todos_inv)), key="inv_k_art",
+                                  format_func=lambda i: f'{todos_inv[i]["codigo"]} — {todos_inv[i]["nombre"]}'
+                                                        + ("" if todos_inv[i].get("activo", True) is not False else " (inactivo)"))
+            art_k = todos_inv[ik_art]
+            k_todo = st.checkbox("Todo el historial", value=True, key="inv_k_todo")
+            k_desde = k_hasta = None
+            if not k_todo:
+                kc1, kc2 = st.columns(2)
+                with kc1:
+                    k_desde = st.date_input("Desde", value=hoy_inv.replace(day=1), format="DD/MM/YYYY", key="inv_k_desde")
+                with kc2:
+                    k_hasta = st.date_input("Hasta", value=hoy_inv, format="DD/MM/YYYY", key="inv_k_hasta")
+                if not k_desde or not k_hasta or k_desde > k_hasta:
+                    st.error("Revisa las fechas: «Desde» no puede ser posterior a «Hasta».")
+                    st.stop()
+            kp = inventario.kardex_periodo(movs_de(art_k["id"]), k_desde, k_hasta)
+            sf = kp["saldo_final"]
+            kk1, kk2, kk3, kk4, kk5 = st.columns(5)
+            kk1.metric("Saldo", f"{cant(sf['cantidad'])} {art_k['unidad']}")
+            kk2.metric("Costo promedio", f"Bs {inventario_reportes._costo(sf['costo'])}")
+            kk3.metric("Valor", fmt_money(sf["valor"]))
+            kk4.metric("Entradas", fmt_money(kp["entradas"]["valor"]), help=f"{cant(kp['entradas']['cantidad'])} {art_k['unidad']} en el periodo")
+            kk5.metric("Salidas", fmt_money(kp["salidas"]["valor"]), help=f"{cant(kp['salidas']['cantidad'])} {art_k['unidad']} en el periodo")
+            if any(f["negativo"] for f in kp["filas"]):
+                st.error("⚠️ Este Kardex tiene un saldo negativo (hay más salidas que entradas). Revisa los movimientos del artículo.")
+            filas_k = inventario_reportes.filas_kardex(kp)
+            if filas_k:
+                st.dataframe(pd.DataFrame([{enc: f.get(clave) for clave, enc, _t in inventario_reportes.COLUMNAS_KARDEX} for f in filas_k]),
+                             use_container_width=True, hide_index=True, column_config={
+                                 **{enc: st.column_config.NumberColumn(format="Bs %.4f") for _c, enc, t in inventario_reportes.COLUMNAS_KARDEX if "costo" in enc.lower()},
+                                 **{enc: st.column_config.NumberColumn(format="Bs %.2f") for _c, enc, t in inventario_reportes.COLUMNAS_KARDEX if enc.endswith("valor")}})
+                st.caption("Kardex con costo promedio ponderado: cada salida se valora al costo promedio que tenía el artículo ese día.")
+            else:
+                st.info("Este artículo no tiene movimientos en el periodo.")
+            kd1, kd2 = st.columns(2)
+            with kd1:
+                st.download_button("📊 Descargar Excel", data=_inv_excel_kardex(art_k, kp, k_desde, k_hasta, emisor_inv),
+                                   file_name=f"kardex_{art_k['codigo']}.xlsx", key="inv_xlsx_k", use_container_width=True,
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            with kd2:
+                st.download_button("📄 Descargar PDF", data=_inv_pdf_kardex(art_k, kp, k_desde, k_hasta, emisor_inv),
+                                   file_name=f"kardex_{art_k['codigo']}.pdf", mime="application/pdf", key="inv_pdf_k", use_container_width=True)
+
+    # ------------------------------------------------------------ Movimientos (historial)
+    with t_hist:
+        hc1, hc2, hc3, hc4 = st.columns(4)
+        with hc1:
+            h_desde = st.date_input("Desde", value=hoy_inv.replace(day=1), format="DD/MM/YYYY", key="inv_h_desde")
+        with hc2:
+            h_hasta = st.date_input("Hasta", value=hoy_inv, format="DD/MM/YYYY", key="inv_h_hasta")
+        with hc3:
+            h_tipo = st.selectbox("Tipo", ["Todos"] + inventario.TIPOS, key="inv_h_tipo")
+        with hc4:
+            h_art = st.selectbox("Artículo", ["Todos"] + [f'{a["codigo"]} — {a["nombre"]}' for a in todos_inv], key="inv_h_art")
+        if not h_desde or not h_hasta or h_desde > h_hasta:
+            st.error("Revisa las fechas: «Desde» no puede ser posterior a «Hasta».")
+            st.stop()
+        h_art_id = None if h_art == "Todos" else todos_inv[[f'{a["codigo"]} — {a["nombre"]}' for a in todos_inv].index(h_art)]["id"]
+        mv_inv = inventario.movimientos_valorizados(articulos_inv, movimientos_inv, h_desde, h_hasta, h_art_id, h_tipo)
+        hk1, hk2, hk3 = st.columns(3)
+        hk1.metric("Entradas", fmt_money(mv_inv["entradas_valor"]), help=f'{mv_inv["n_entradas"]} movimiento(s)')
+        hk2.metric("Salidas", fmt_money(mv_inv["salidas_valor"]), help=f'{mv_inv["n_salidas"]} movimiento(s)')
+        hk3.metric("Movimientos", len(mv_inv["filas"]))
+        if not mv_inv["filas"]:
+            st.info("No hay movimientos con ese filtro.")
+        else:
+            st.dataframe(pd.DataFrame([{enc: f[clave] for clave, enc, _t in inventario_reportes.COLUMNAS_MOVIMIENTOS} for f in mv_inv["filas"]]),
+                         use_container_width=True, hide_index=True, column_config={
+                             "Costo unitario (Bs)": st.column_config.NumberColumn(format="Bs %.4f"), "Valor (Bs)": st.column_config.NumberColumn(format="Bs %.2f")})
+            st.caption("Las salidas se valoran al costo promedio que tenía el artículo ese día.")
+            hd1, hd2 = st.columns(2)
+            with hd1:
+                st.download_button("📊 Descargar Excel", data=_inv_excel_movimientos(mv_inv, h_desde, h_hasta, emisor_inv),
+                                   file_name=f"movimientos_inventario_{h_desde:%Y-%m-%d}_{h_hasta:%Y-%m-%d}.xlsx", key="inv_xlsx_h",
+                                   use_container_width=True, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            with hd2:
+                st.download_button("📄 Descargar PDF", data=_inv_pdf_movimientos(mv_inv, h_desde, h_hasta, emisor_inv),
+                                   file_name=f"movimientos_inventario_{h_desde:%Y-%m-%d}_{h_hasta:%Y-%m-%d}.pdf", mime="application/pdf",
+                                   key="inv_pdf_h", use_container_width=True)
+            with st.expander("✏️ Corregir o eliminar un movimiento"):
+                st.caption("Se pueden corregir el documento y la observación. Para cambiar la cantidad, la fecha o el costo hay que eliminar el "
+                           "movimiento (solo el Administrador) y registrarlo de nuevo: así el Kardex nunca queda alterado.")
+                i_mov = st.selectbox("Movimiento", range(len(mv_inv["filas"])), key="inv_h_sel",
+                                     format_func=lambda i: f'{mv_inv["filas"][i]["fecha_txt"]} — {mv_inv["filas"][i]["codigo"]} '
+                                                           f'{mv_inv["filas"][i]["articulo"]} — {mv_inv["filas"][i]["tipo"]} '
+                                                           f'{cant(mv_inv["filas"][i]["cantidad"])} {mv_inv["filas"][i]["unidad"]}')
+                fila_m = mv_inv["filas"][i_mov]
+                mov_orig = next(m for m in movimientos_inv if m["id"] == fila_m["id"])
+                art_m = articulos_por_id[mov_orig["articulo_id"]]
+                with st.form(f'inv_editar_{mov_orig["id"]}'):
+                    doc_nuevo = st.text_input("N° de documento", value=mov_orig.get("documento") or "")
+                    obs_nueva = st.text_input("Observación", value=mov_orig.get("observacion") or "")
+                    guardar_m = st.form_submit_button("💾 Guardar cambios")
+                if guardar_m:
+                    try:
+                        db.actualizar_inventario_movimiento(mov_orig["id"], inventario.armar_edicion(
+                            mov_orig.get("destino"), mov_orig.get("apartamento_id"), doc_nuevo, obs_nueva, mov_orig["tipo"]))
+                        limpiar_cache()
+                        st.success("Movimiento actualizado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(texto_error_inventario("Error al actualizar", e))
+                if es_admin:
+                    confirmar_del = st.checkbox("Confirmo que quiero eliminar este movimiento", key=f'inv_del_conf_{mov_orig["id"]}')
+                    if st.button("🗑️ Eliminar movimiento", key=f'inv_del_{mov_orig["id"]}'):
+                        error_del = inventario.validar_en_kardex(movs_de(art_m["id"]), excluir_id=mov_orig["id"], unidad=art_m["unidad"])
+                        if not confirmar_del:
+                            st.error("Marca la casilla de confirmación para eliminar.")
+                        elif error_del:
+                            st.error(error_del)
+                        else:
+                            try:
+                                db.eliminar_inventario_movimiento(mov_orig["id"])
+                                limpiar_cache()
+                                st.success("Movimiento eliminado.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(texto_error_inventario("Error al eliminar", e))
+
+    # ------------------------------------------------------------ Artículos
+    with t_art:
+        if todos_inv:
+            st.dataframe(pd.DataFrame([{
+                "Código": f["codigo"], "Artículo": f["nombre"], "Categoría": f["categoria"], "Unidad": f["unidad"], "Ubicación": f["ubicacion"],
+                "Stock mínimo": f["stock_minimo"], "Stock": f["cantidad"], "Movimientos": f["n_movimientos"],
+                "Activo": "Sí" if f["activo"] else "No"} for f in ex_inv["filas"]]), use_container_width=True, hide_index=True)
+        with st.expander("➕ Nuevo artículo", expanded=not todos_inv):
+            with st.form("inv_nuevo_articulo", clear_on_submit=True):
+                na1, na2 = st.columns(2)
+                with na1:
+                    n_codigo = st.text_input("Código", value=inventario.siguiente_codigo(articulos_inv),
+                                             help="Se sugiere el siguiente libre; puedes cambiarlo (no se puede repetir).")
+                with na2:
+                    n_nombre = st.text_input("Nombre del artículo", placeholder="Ej. Foco LED 9W")
+                na3, na4, na5 = st.columns(3)
+                with na3:
+                    n_cat = st.selectbox("Categoría", categorias_inv, index=len(inventario.CATEGORIAS) - 1)
+                with na4:
+                    n_uni = st.selectbox("Unidad de medida", inventario.UNIDADES)
+                with na5:
+                    n_min = st.number_input("Stock mínimo", min_value=0.0, step=1.0, format="%.3f", value=0.0,
+                                            help="Cuando el stock llegue a este número, el artículo se marca como «Stock bajo». 0 = sin alerta.")
+                n_ubic = st.text_input("Ubicación (opcional)", placeholder="Ej. Bodega, cuarto de máquinas")
+                n_notas = st.text_area("Notas (opcional)", height=70)
+                if st.form_submit_button("💾 Guardar artículo"):
+                    errores_art = inventario.validar_articulo(n_codigo, n_nombre, n_uni, n_min, articulos_inv)
+                    for e in errores_art:
+                        st.error(e)
+                    if not errores_art:
+                        try:
+                            db.crear_inventario_articulo(inventario.armar_articulo(n_codigo, n_nombre, n_cat, n_uni, n_min, n_ubic, n_notas,
+                                                                                    True, emisor_inv))
+                            limpiar_cache()
+                            st.session_state["inv_msg"] = f"Artículo «{n_nombre.strip()}» registrado. Ahora registra su entrada inicial en «➕ Registrar movimiento»."
+                            st.rerun()
+                        except Exception as e:
+                            st.error(texto_error_inventario("Error al guardar", e))
+        if todos_inv:
+            with st.expander("✏️ Editar un artículo"):
+                i_art = st.selectbox("Artículo", range(len(todos_inv)), key="inv_e_sel",
+                                     format_func=lambda i: f'{todos_inv[i]["codigo"]} — {todos_inv[i]["nombre"]}')
+                a_ed = todos_inv[i_art]
+                n_movs_ed = estado_art[a_ed["id"]]["n_movimientos"]
+                with st.form(f'inv_editar_art_{a_ed["id"]}'):
+                    ea1, ea2 = st.columns(2)
+                    with ea1:
+                        e_codigo = st.text_input("Código", value=a_ed.get("codigo") or "")
+                    with ea2:
+                        e_nombre = st.text_input("Nombre", value=a_ed.get("nombre") or "")
+                    ea3, ea4, ea5 = st.columns(3)
+                    with ea3:
+                        e_cat = st.selectbox("Categoría", categorias_inv, index=categorias_inv.index(a_ed["categoria"]) if a_ed.get("categoria") in categorias_inv else len(inventario.CATEGORIAS) - 1)
+                    with ea4:
+                        unidades_ed = inventario.UNIDADES + ([a_ed["unidad"]] if a_ed.get("unidad") not in inventario.UNIDADES else [])
+                        e_uni = st.selectbox("Unidad de medida", unidades_ed, index=unidades_ed.index(a_ed["unidad"]) if a_ed.get("unidad") in unidades_ed else 0)
+                    with ea5:
+                        e_min = st.number_input("Stock mínimo", min_value=0.0, step=1.0, format="%.3f", value=float(a_ed.get("stock_minimo") or 0))
+                    e_ubic = st.text_input("Ubicación", value=a_ed.get("ubicacion") or "")
+                    e_notas = st.text_area("Notas", value=a_ed.get("notas") or "", height=70)
+                    e_activo = st.checkbox("Activo", value=a_ed.get("activo", True) is not False,
+                                           help="Un artículo inactivo no aparece al registrar movimientos ni cuenta en el valor del inventario.")
+                    guardar_a = st.form_submit_button("💾 Guardar cambios")
+                if guardar_a:
+                    errores_ed = inventario.validar_articulo(e_codigo, e_nombre, e_uni, e_min, articulos_inv, a_ed["id"])
+                    if not e_activo and estado_art[a_ed["id"]]["cantidad"] > 0:
+                        st.warning("Este artículo todavía tiene stock; al desactivarlo deja de contar en el valor del inventario.")
+                    for e in errores_ed:
+                        st.error(e)
+                    if not errores_ed:
+                        try:
+                            db.actualizar_inventario_articulo(a_ed["id"], inventario.armar_articulo(e_codigo, e_nombre, e_cat, e_uni, e_min, e_ubic, e_notas, e_activo))
+                            limpiar_cache()
+                            st.success("Artículo actualizado.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(texto_error_inventario("Error al actualizar", e))
+                if es_admin:
+                    if n_movs_ed:
+                        st.caption(f"Este artículo tiene {n_movs_ed} movimiento(s), por eso no se puede eliminar: desmarca «Activo» para dejar de usarlo.")
+                    else:
+                        conf_art = st.checkbox("Confirmo que quiero eliminar este artículo", key=f'inv_delart_conf_{a_ed["id"]}')
+                        if st.button("🗑️ Eliminar artículo", key=f'inv_delart_{a_ed["id"]}'):
+                            if not conf_art:
+                                st.error("Marca la casilla de confirmación para eliminar.")
+                            else:
+                                try:
+                                    db.eliminar_inventario_articulo(a_ed["id"])
+                                    limpiar_cache()
+                                    st.success("Artículo eliminado.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(texto_error_inventario("Error al eliminar", e))
+
 
 # ==================================================================
 # PÁGINA: EX INQUILINOS (historial, deuda y pagos de los inquilinos que ya salieron)

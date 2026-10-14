@@ -431,8 +431,9 @@ def tabla_pdf(columnas, filas, pesos, alinear_der=(), fila_total=None, ancho_tab
     return t
 
 
-def cabecera_pdf(subtitulo, desde, hasta, emitido_por, ancho, est):
-    """Logo, nombre del residencial, título del reporte, periodo, fecha de emisión y quién lo emitió."""
+def cabecera_pdf(subtitulo, desde, hasta, emitido_por, ancho, est, texto_periodo=None):
+    """Logo, nombre del residencial, título del reporte, periodo, fecha de emisión y quién lo emitió.
+    texto_periodo: reemplaza «Periodo: desde al hasta» (p. ej. «Al 13/10/2026» en un reporte a una fecha)."""
     pdf = rp._pdf_texto
     logo = ""
     try:
@@ -444,9 +445,10 @@ def cabecera_pdf(subtitulo, desde, hasta, emitido_por, ancho, est):
                 colWidths=[20 * mm, ancho - 20 * mm])
     cab.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
     emitido = datetime.now(recibo._ZONA_BOLIVIA).strftime("%d/%m/%Y %H:%M")
+    periodo = (f"<b>Periodo:</b> {rp._fmt_fecha(desde)} al {rp._fmt_fecha(hasta)}" if texto_periodo is None
+               else f"<b>{pdf(texto_periodo)}</b>")
     return [cab, Spacer(1, 3), HRFlowable(width="100%", thickness=0.6, color=colors.black), Spacer(1, 4),
-            Paragraph(f"<b>Periodo:</b> {rp._fmt_fecha(desde)} al {rp._fmt_fecha(hasta)}"
-                      f" &nbsp;&nbsp;|&nbsp;&nbsp; <b>Emitido:</b> {emitido}"
+            Paragraph(periodo + f" &nbsp;&nbsp;|&nbsp;&nbsp; <b>Emitido:</b> {emitido}"
                       + (f" &nbsp;&nbsp;|&nbsp;&nbsp; <b>Por:</b> {pdf(emitido_por)}" if emitido_por else ""), est.chico),
             Spacer(1, 6)]
 
