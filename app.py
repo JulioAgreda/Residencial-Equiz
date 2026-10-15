@@ -1226,7 +1226,7 @@ elif pagina == "🏠 Apartamentos":
     elif not apt_con_propiedad:
         st.warning(AVISO_MIGRACION_AIRE_PROPIEDAD)
 
-    tab_lista, tab_nuevo, tab_importar = st.tabs(["📋 Lista y edición", "➕ Nuevo apartamento", "📥 Importar CSV"])
+    tab_lista, tab_salida, tab_nuevo, tab_importar = st.tabs(["📋 Lista y edición", "🚪 Salida de inquilino", "➕ Nuevo apartamento", "📥 Importar CSV"])
 
     with tab_lista:
         apartamentos = cargar_apartamentos()
@@ -1367,51 +1367,64 @@ elif pagina == "🏠 Apartamentos":
                     except Exception as e:
                         st.error(f"Error al eliminar: {e}")
 
-            # ---------- Salida del inquilino: se archiva en el historial y su deuda queda a su nombre ----------
             if apt.get("estado") == "Ocupado" and (apt.get("inquilino_nombre") or "").strip():
-                with st.expander(f"🚪 Registrar la salida de {apt['inquilino_nombre']}"):
-                    st.caption("Archiva al inquilino en el historial y deja el apartamento libre. Su deuda queda a su nombre: si "
-                               "después paga, se le registra el pago en «🚪 Ex inquilinos» y la deuda se actualiza.")
-                    sa1, sa2 = st.columns(2)
-                    with sa1:
-                        fecha_salida = st.date_input("Fecha de salida", value=recibo.hoy_bolivia(), format="DD/MM/YYYY",
-                                                     key=f'salida_fecha_{apt["id"]}')
-                    with sa2:
-                        registrar_meses = st.checkbox(
-                            "Registrar como deuda los meses de alquiler vencidos sin ningún pago", value=True,
-                            key=f'salida_meses_{apt["id"]}',
-                            help="Si no se marca, esos meses no quedarían registrados como deuda del ex inquilino.")
-                    obs_salida = st.text_area("Observación (motivo, estado del apartamento, acuerdo de pago…)", height=70,
-                                              key=f'salida_obs_{apt["id"]}')
-                    periodos_salida = {t: [p for p in cargar_periodos_abiertos(t) if p.get("apartamento_id") == apt["id"]]
-                                       for t in ("alquiler", "electricidad", "agua")}
-                    resumen_s = exinquilinos.resumen_salida(
-                        apt, periodos_salida["alquiler"], periodos_salida["electricidad"], periodos_salida["agua"],
-                        fecha_salida or recibo.hoy_bolivia(), registrar_meses)
-                    st.markdown(f"**Deuda con la que sale:** alquiler {fmt_money(resumen_s['alquiler'])} · luz {fmt_money(resumen_s['luz'])} · "
-                                f"agua {fmt_money(resumen_s['agua'])} · **total {fmt_money(resumen_s['total'])}**")
-                    if resumen_s["meses_sin_registro"]:
-                        st.caption("Meses de alquiler sin ningún pago: " + ", ".join(m["etiqueta"] for m in resumen_s["meses_sin_registro"]) + ".")
-                    confirmar_salida = st.checkbox(
-                        "Confirmo que este inquilino ya salió: su ficha se archivará y el apartamento quedará desocupado.",
-                        key=f'salida_confirmar_{apt["id"]}')
-                    if st.button("🚪 Registrar salida", key=f'salida_boton_{apt["id"]}'):
-                        errores_salida = exinquilinos.validar_salida(apt, fecha_salida, confirmar_salida)
-                        for e in errores_salida:
-                            st.error(e)
-                        if not errores_salida:
-                            try:
-                                if registrar_meses:
-                                    for m in resumen_s["meses_sin_registro"]:
-                                        db.obtener_o_crear_periodo(apt["id"], m["mes"], m["anio"], m["monto"], apt.get("inquilino_nombre"))
-                                db.registrar_salida_inquilino(
-                                    apt["id"], fecha_salida, obs_salida, usuario_actual.get("nombre") or usuario_actual.get("username"))
-                                limpiar_cache()
-                                st.success("Salida registrada. El inquilino quedó en el historial con su deuda. Si paga después, "
-                                           "regístralo en «🚪 Ex inquilinos».")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(texto_error_historial("No se pudo registrar la salida", e))
+                st.info("🚪 ¿Este inquilino se fue? Regístralo en la pestaña **«🚪 Salida de inquilino»** (arriba, junto a «Lista y edición»).")
+
+    with tab_salida:
+        st.markdown("**Registrar que un inquilino se fue**")
+        st.caption("Archiva al inquilino en el historial y deja el apartamento libre. Su deuda queda a su nombre: si después paga, "
+                   "se le registra el pago en «🚪 Ex inquilinos» y la deuda se actualiza. Solo aparecen los apartamentos ocupados "
+                   "que tienen un inquilino registrado.")
+        aptos_ocupados = [a for a in cargar_apartamentos() if a.get("estado") == "Ocupado" and (a.get("inquilino_nombre") or "").strip()]
+        if not aptos_ocupados:
+            st.info("No hay apartamentos ocupados con un inquilino registrado. Si un apartamento debería aparecer aquí, revisa en "
+                    "«Lista y edición» que esté como «Ocupado» y tenga el nombre del inquilino.")
+        else:
+            idx_salida = st.selectbox("Apartamento del que sale el inquilino", range(len(aptos_ocupados)), key="salida_apt_sel",
+                                      format_func=lambda i: f'{aptos_ocupados[i]["codigo"]} — {aptos_ocupados[i]["inquilino_nombre"]}')
+            apt = aptos_ocupados[idx_salida]
+            st.caption("Archiva al inquilino en el historial y deja el apartamento libre. Su deuda queda a su nombre: si "
+                       "después paga, se le registra el pago en «🚪 Ex inquilinos» y la deuda se actualiza.")
+            sa1, sa2 = st.columns(2)
+            with sa1:
+                fecha_salida = st.date_input("Fecha de salida", value=recibo.hoy_bolivia(), format="DD/MM/YYYY",
+                                             key=f'salida_fecha_{apt["id"]}')
+            with sa2:
+                registrar_meses = st.checkbox(
+                    "Registrar como deuda los meses de alquiler vencidos sin ningún pago", value=True,
+                    key=f'salida_meses_{apt["id"]}',
+                    help="Si no se marca, esos meses no quedarían registrados como deuda del ex inquilino.")
+            obs_salida = st.text_area("Observación (motivo, estado del apartamento, acuerdo de pago…)", height=70,
+                                      key=f'salida_obs_{apt["id"]}')
+            periodos_salida = {t: [p for p in cargar_periodos_abiertos(t) if p.get("apartamento_id") == apt["id"]]
+                               for t in ("alquiler", "electricidad", "agua")}
+            resumen_s = exinquilinos.resumen_salida(
+                apt, periodos_salida["alquiler"], periodos_salida["electricidad"], periodos_salida["agua"],
+                fecha_salida or recibo.hoy_bolivia(), registrar_meses)
+            st.markdown(f"**Deuda con la que sale:** alquiler {fmt_money(resumen_s['alquiler'])} · luz {fmt_money(resumen_s['luz'])} · "
+                        f"agua {fmt_money(resumen_s['agua'])} · **total {fmt_money(resumen_s['total'])}**")
+            if resumen_s["meses_sin_registro"]:
+                st.caption("Meses de alquiler sin ningún pago: " + ", ".join(m["etiqueta"] for m in resumen_s["meses_sin_registro"]) + ".")
+            confirmar_salida = st.checkbox(
+                "Confirmo que este inquilino ya salió: su ficha se archivará y el apartamento quedará desocupado.",
+                key=f'salida_confirmar_{apt["id"]}')
+            if st.button("🚪 Registrar salida", key=f'salida_boton_{apt["id"]}'):
+                errores_salida = exinquilinos.validar_salida(apt, fecha_salida, confirmar_salida)
+                for e in errores_salida:
+                    st.error(e)
+                if not errores_salida:
+                    try:
+                        if registrar_meses:
+                            for m in resumen_s["meses_sin_registro"]:
+                                db.obtener_o_crear_periodo(apt["id"], m["mes"], m["anio"], m["monto"], apt.get("inquilino_nombre"))
+                        db.registrar_salida_inquilino(
+                            apt["id"], fecha_salida, obs_salida, usuario_actual.get("nombre") or usuario_actual.get("username"))
+                        limpiar_cache()
+                        st.success("Salida registrada. El inquilino quedó en el historial con su deuda. Si paga después, "
+                                   "regístralo en «🚪 Ex inquilinos».")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(texto_error_historial("No se pudo registrar la salida", e))
 
     with tab_nuevo:
         with st.form("nuevo_apartamento", clear_on_submit=True):
@@ -2688,7 +2701,7 @@ elif pagina == "🚪 Ex inquilinos":
         filas_ex.append({"h": h, "deuda": d_ex, "codigo": (apts_ex.get(h.get("apartamento_id")) or {}).get("codigo") or "—"})
     if not filas_ex:
         st.info("Todavía no hay inquilinos en el historial. Cuando un inquilino se vaya, registra su salida en "
-                "**Apartamentos → Lista y edición → 🚪 Registrar la salida**.")
+                "**Apartamentos → pestaña 🚪 Salida de inquilino**.")
         st.stop()
 
     solo_deuda_ex = st.checkbox("Mostrar solo ex inquilinos con deuda", value=True, key="ex_solo_deuda")
