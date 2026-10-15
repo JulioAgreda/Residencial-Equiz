@@ -2347,7 +2347,7 @@ elif pagina == "📦 Inventario":
                     "Ubicación": f["ubicacion"], "Stock": f["cantidad"], "Mínimo": f["stock_minimo"],
                     "Costo promedio": f["costo_promedio"], "Valor": f["valor"], "Estado": iconos[f["estado"]]} for f in vista_inv]),
                     use_container_width=True, hide_index=True, column_config={
-                        "Costo promedio": st.column_config.NumberColumn(format="Bs %.4f"), "Valor": st.column_config.NumberColumn(format="Bs %.2f")})
+                        "Costo promedio": st.column_config.NumberColumn(format="Bs %.1f"), "Valor": st.column_config.NumberColumn(format="Bs %.2f")})
                 st.caption(f"Valor de lo que se muestra: {fmt_money(sum(f['valor'] for f in vista_inv))}. Costo promedio ponderado.")
                 ie1, ie2 = st.columns(2)
                 with ie1:
@@ -2383,11 +2383,11 @@ elif pagina == "📦 Inventario":
             with im1:
                 fecha_inv = st.date_input("Fecha", value=hoy_inv, format="DD/MM/YYYY", key=f"inv_fecha_{n_form}")
             with im2:
-                cantidad_inv = st.number_input(f"Cantidad ({art['unidad']})", min_value=0.0, step=1.0, format="%.3f", value=0.0,
+                cantidad_inv = st.number_input(f"Cantidad ({art['unidad']})", min_value=0.0, step=1.0, format="%.1f", value=0.0,
                                                key=f"inv_cant_{n_form}")
             with im3:
-                costo_inv = (st.number_input("Costo unitario (Bs)", min_value=0.0, step=0.5, format="%.4f", value=0.0, key=f"inv_costo_{n_form}",
-                                             help="Lo que costó cada unidad. Pon 0 si fue una donación.")
+                costo_inv = (st.number_input("Costo unitario (Bs)", min_value=0.0, step=0.5, format="%.1f", value=0.0, key=f"inv_costo_{n_form}",
+                                             help="Lo que costó cada unidad, con 1 decimal (ej. 3.5). Pon 0 si fue una donación.")
                              if tipo_inv == "Entrada" else None)
                 if tipo_inv == "Salida":
                     st.caption(f"Se valora al costo promedio actual: Bs {inventario_reportes._costo(estado_art[art['id']]['costo_promedio'])}")
@@ -2478,9 +2478,9 @@ elif pagina == "📦 Inventario":
             if filas_k:
                 st.dataframe(pd.DataFrame([{enc: f.get(clave) for clave, enc, _t in inventario_reportes.COLUMNAS_KARDEX} for f in filas_k]),
                              use_container_width=True, hide_index=True, column_config={
-                                 **{enc: st.column_config.NumberColumn(format="Bs %.4f") for _c, enc, t in inventario_reportes.COLUMNAS_KARDEX if "costo" in enc.lower()},
+                                 **{enc: st.column_config.NumberColumn(format="Bs %.1f") for _c, enc, t in inventario_reportes.COLUMNAS_KARDEX if "costo" in enc.lower()},
                                  **{enc: st.column_config.NumberColumn(format="Bs %.2f") for _c, enc, t in inventario_reportes.COLUMNAS_KARDEX if enc.endswith("valor")}})
-                st.caption("Kardex con costo promedio ponderado: cada salida se valora al costo promedio que tenía el artículo ese día.")
+                st.caption("Kardex con costo promedio ponderado: cada salida se valora al costo promedio que tenía el artículo ese día. El costo promedio se muestra con 1 decimal, pero el valor se calcula con el promedio exacto.")
             else:
                 st.info("Este artículo no tiene movimientos en el periodo.")
             kd1, kd2 = st.columns(2)
@@ -2517,7 +2517,7 @@ elif pagina == "📦 Inventario":
         else:
             st.dataframe(pd.DataFrame([{enc: f[clave] for clave, enc, _t in inventario_reportes.COLUMNAS_MOVIMIENTOS} for f in mv_inv["filas"]]),
                          use_container_width=True, hide_index=True, column_config={
-                             "Costo unitario (Bs)": st.column_config.NumberColumn(format="Bs %.4f"), "Valor (Bs)": st.column_config.NumberColumn(format="Bs %.2f")})
+                             "Costo unitario (Bs)": st.column_config.NumberColumn(format="Bs %.1f"), "Valor (Bs)": st.column_config.NumberColumn(format="Bs %.2f")})
             st.caption("Las salidas se valoran al costo promedio que tenía el artículo ese día.")
             hd1, hd2 = st.columns(2)
             with hd1:
@@ -2589,7 +2589,7 @@ elif pagina == "📦 Inventario":
                 with na4:
                     n_uni = st.selectbox("Unidad de medida", inventario.UNIDADES)
                 with na5:
-                    n_min = st.number_input("Stock mínimo", min_value=0.0, step=1.0, format="%.3f", value=0.0,
+                    n_min = st.number_input("Stock mínimo", min_value=0.0, step=1.0, format="%.1f", value=0.0,
                                             help="Cuando el stock llegue a este número, el artículo se marca como «Stock bajo». 0 = sin alerta.")
                 n_ubic = st.text_input("Ubicación (opcional)", placeholder="Ej. Bodega, cuarto de máquinas")
                 n_notas = st.text_area("Notas (opcional)", height=70)
@@ -2625,7 +2625,7 @@ elif pagina == "📦 Inventario":
                         unidades_ed = inventario.UNIDADES + ([a_ed["unidad"]] if a_ed.get("unidad") not in inventario.UNIDADES else [])
                         e_uni = st.selectbox("Unidad de medida", unidades_ed, index=unidades_ed.index(a_ed["unidad"]) if a_ed.get("unidad") in unidades_ed else 0)
                     with ea5:
-                        e_min = st.number_input("Stock mínimo", min_value=0.0, step=1.0, format="%.3f", value=float(a_ed.get("stock_minimo") or 0))
+                        e_min = st.number_input("Stock mínimo", min_value=0.0, step=1.0, format="%.1f", value=float(a_ed.get("stock_minimo") or 0))
                     e_ubic = st.text_input("Ubicación", value=a_ed.get("ubicacion") or "")
                     e_notas = st.text_area("Notas", value=a_ed.get("notas") or "", height=70)
                     e_activo = st.checkbox("Activo", value=a_ed.get("activo", True) is not False,

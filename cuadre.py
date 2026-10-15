@@ -241,6 +241,11 @@ def filas_por_origen(cuadre, origen):
 _FMT = rp._FMT_EXCEL
 
 
+def _formato_celda(tipo):
+    """Formato de número de Excel según el tipo de columna: 'bs' = dinero con 2 decimales, 'bs1' = dinero con 1 decimal."""
+    return {"bs": _FMT, "bs1": '"Bs" #,##0.0'}.get(tipo)
+
+
 def _hoja(wb, nombre, titulo, periodo, columnas, filas, totales=None):
     """Hoja con una tabla. columnas: [(clave, encabezado, 'txt'|'bs'|'num')]. totales: {clave: valor}."""
     ws = wb.create_sheet(nombre)
@@ -259,7 +264,7 @@ def _hoja(wb, nombre, titulo, periodo, columnas, filas, totales=None):
     for f in filas:
         for col, (clave, _e, tipo) in enumerate(columnas, start=1):
             valor = f.get(clave)
-            c = rp._poner(ws, fila, col, valor, Font(name="Calibri", size=10), _FMT if tipo == "bs" else None)
+            c = rp._poner(ws, fila, col, valor, Font(name="Calibri", size=10), _formato_celda(tipo))
             if tipo == "txt" and clave == "detalle":
                 c.alignment = Alignment(wrap_text=True, vertical="top")
             anchos[col] = max(anchos[col], 14 if tipo != "txt" else min(len(str(valor or "")), 45))
@@ -269,7 +274,7 @@ def _hoja(wb, nombre, titulo, periodo, columnas, filas, totales=None):
         rp._poner(ws, fila, 1, "TOTAL", f_total)
         for col, (clave, _e, _t) in enumerate(columnas, start=1):
             if clave in totales:
-                rp._poner(ws, fila, col, totales[clave], f_total, _FMT if columnas[col - 1][2] == "bs" else None)
+                rp._poner(ws, fila, col, totales[clave], f_total, _formato_celda(columnas[col - 1][2]))
     for col, ancho in anchos.items():
         ws.column_dimensions[get_column_letter(col)].width = max(12, min(48, ancho + 2))
     ws.freeze_panes = ws.cell(fila0 + 1, 1)
