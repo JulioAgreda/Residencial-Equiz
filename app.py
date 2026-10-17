@@ -172,17 +172,19 @@ def _cargar_apartamentos_todos():
 
 @st.cache_data(ttl=30)
 def _cargar_periodos_todos(apartamento_id=None, anio=None, mes=None):
-    return db.listar_periodos(apartamento_id=apartamento_id, anio=anio, mes=mes)
+    # solo_activos: los periodos cerrados de inquilinos que ya salieron NO se mezclan con los del inquilino actual
+    # (se ven en «🚪 Ex inquilinos»)
+    return db.listar_periodos(apartamento_id=apartamento_id, anio=anio, mes=mes, solo_activos=True)
 
 
 @st.cache_data(ttl=30)
 def _cargar_periodos_electricidad_todos(anio=None, mes=None):
-    return db.listar_periodos_servicio("electricidad", anio=anio, mes=mes)
+    return db.listar_periodos_servicio("electricidad", anio=anio, mes=mes, solo_activos=True)
 
 
 @st.cache_data(ttl=30)
 def _cargar_periodos_agua_todos(anio=None, mes=None):
-    return db.listar_periodos_servicio("agua", anio=anio, mes=mes)
+    return db.listar_periodos_servicio("agua", anio=anio, mes=mes, solo_activos=True)
 
 
 @st.cache_data(ttl=60)
@@ -842,11 +844,13 @@ def pagina_consumo(servicio):
         if filtro_apt != "Todos":
             apt_id = next(a["id"] for a in apartamentos if a["codigo"] == filtro_apt)
 
+        st.caption("Se muestran solo los registros del inquilino actual. Los de inquilinos que ya salieron están en «🚪 Ex inquilinos».")
         periodos = _solo_mis_apartamentos(db.listar_periodos_servicio(
             servicio,
             apartamento_id=apt_id,
             anio=None if filtro_anio == "Todos" else filtro_anio,
             mes=None if filtro_mes == "Todos" else filtro_mes,
+            solo_activos=True,
         ))
 
         if not periodos:
@@ -1705,10 +1709,12 @@ elif pagina == "💵 Pagos de Alquiler":
         if filtro_apt != "Todos":
             apt_id = next(a["id"] for a in apartamentos if a["codigo"] == filtro_apt)
 
+        st.caption("Se muestran solo los registros del inquilino actual. Los de inquilinos que ya salieron están en «🚪 Ex inquilinos».")
         periodos = _solo_mis_apartamentos(db.listar_periodos(
             apartamento_id=apt_id,
             anio=None if filtro_anio == "Todos" else filtro_anio,
             mes=None if filtro_mes == "Todos" else filtro_mes,
+            solo_activos=True,
         ))
 
         if not periodos:
@@ -1825,7 +1831,8 @@ elif pagina == "📑 Estado de cuenta":
     st.subheader("Estado de cuenta por apartamento")
     st.caption(
         "Reporte para entregar al inquilino con sus pagos realizados y su deuda real de alquiler y "
-        "electricidad, calculada a la fecha de hoy. Aplica a apartamentos ocupados con contrato de alquiler."
+        "electricidad, calculada a la fecha de hoy. Aplica a apartamentos ocupados con contrato de alquiler. Solo cuenta al "
+        "inquilino actual: los inquilinos que ya salieron aparecen aparte, al final."
     )
 
     hoy_rep = recibo.hoy_bolivia()
@@ -1962,6 +1969,31 @@ elif pagina == "📑 Estado de cuenta":
         with st.expander(f"Apartamentos sin reporte ({len(no_aplican)})"):
             for apt, motivo in no_aplican:
                 st.write(f'**{apt.get("codigo")}**: {motivo}')
+
+    # ---------- Ex inquilinos: su deuda queda a su nombre, separada de la del inquilino actual ----------
+    try:
+        historial_ec = cargar_historial()
+        cerrados_ec = {t: cargar_periodos_cerrados(t) for t in ("alquiler", "electricidad", "agua")}
+    except Exception:
+        historial_ec, cerrados_ec = [], {}          # si el historial no se puede leer, la pantalla «Ex inquilinos» muestra el detalle del error
+    por_hist_ec = exinquilinos.agrupar_por_historial(cerrados_ec)
+    apts_ec = {a["id"]: a for a in apartamentos}
+    filas_ex_ec = []
+    for h_ec in historial_ec:
+        deuda_ec = exinquilinos.deuda_ex_inquilino(por_hist_ec.get(h_ec["id"], {}))
+        if deuda_ec["total"] > exinquilinos.TOLERANCIA:
+            filas_ex_ec.append({"Apartamento": (apts_ec.get(h_ec.get("apartamento_id")) or {}).get("codigo") or "—",
+                                "Ex inquilino": exinquilinos.nombre_ex_inquilino(h_ec),
+                                "Fecha de salida": str(h_ec.get("fecha_salida") or "—")[:10],
+                                "Alquiler": deuda_ec["alquiler"], "Luz": deuda_ec["luz"], "Agua": deuda_ec["agua"],
+                                "Deuda total": deuda_ec["total"]})
+    if filas_ex_ec:
+        with st.container(border=True):
+            st.markdown("**👥 Ex inquilinos con deuda pendiente** (separada de la deuda de los inquilinos actuales)")
+            st.dataframe(pd.DataFrame(filas_ex_ec), use_container_width=True, hide_index=True, column_config={
+                c: st.column_config.NumberColumn(format="Bs %.2f") for c in ("Alquiler", "Luz", "Agua", "Deuda total")})
+            st.caption(f"Total: {fmt_money(sum(f['Deuda total'] for f in filas_ex_ec))}. Para ver el detalle o registrar un pago, "
+                       "ve a «🚪 Ex inquilinos».")
 
 elif pagina == "📊 Actividad por usuario":
     st.title("📊 Reporte de actividad por usuario")
