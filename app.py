@@ -1,5 +1,6 @@
 import calendar
 import io
+import openpyxl
 import zipfile
 import streamlit as st
 import pandas as pd
@@ -9,10 +10,13 @@ import db
 import accesos
 import aire_acondicionado
 import compromisos
+import conciliacion
+import conciliacion_reportes
 import cuadre
 import consumo as calc_consumo
 import estados
 import exinquilinos
+import extracto
 import inventario
 import inventario_reportes
 import moras
@@ -404,6 +408,22 @@ def _inv_excel_movimientos(mv, desde, hasta, emitido_por):
 @st.cache_data(ttl=300, show_spinner=False)
 def _inv_pdf_movimientos(mv, desde, hasta, emitido_por):
     return inventario_reportes.generar_pdf_movimientos(mv, desde, hasta, emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _leer_extracto_cache(contenido, nombre, mapeo):
+    """Lee el extracto del banco (mapeo: tupla de (campo, columna) para forzar las columnas, o None)."""
+    return extracto.leer_extracto(contenido, nombre, dict(mapeo) if mapeo else None)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _conc_excel_cache(r, ext, emitido_por):
+    return conciliacion_reportes.generar_excel(r, ext, emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _conc_pdf_cache(r, ext, emitido_por):
+    return conciliacion_reportes.generar_pdf(r, ext, emitido_por)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -931,7 +951,7 @@ else:
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
 opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "📦 Inventario", "🗒️ Reuniones"]
-opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería"]
+opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería", "🏦 Conciliación bancaria"]
 
 # Los radios de abajo son independientes en el estado interno de Streamlit:
 # si eliges algo en uno, los demás no se "enteran" y siguen marcando su
@@ -2706,6 +2726,201 @@ elif pagina == "📦 Inventario":
                                     st.rerun()
                                 except Exception as e:
                                     st.error(texto_error_inventario("Error al eliminar", e))
+
+
+# ==================================================================
+# PÁGINA: CONCILIACIÓN BANCARIA (extracto del banco vs. registros del sistema)
+# ==================================================================
+elif pagina == "🏦 Conciliación bancaria":
+    st.title("🏦 Conciliación bancaria")
+    st.caption(
+        "Compara el extracto de tu cuenta bancaria con lo registrado en el sistema: qué cobros y pagos coinciden y cuáles no, y por qué "
+        "(probablemente no se registraron, se registraron con otro monto o fecha, o fueron en efectivo)."
+    )
+    if not puede_editar_estado:
+        st.error("Esta pantalla es solo para el Administrador y la tesorería, porque muestra el extracto del banco.")
+        st.stop()
+
+    archivo_cb = st.file_uploader("Extracto del banco (Excel .xlsx o CSV)", type=["xlsx", "csv", "txt"], key="cb_archivo")
+    if archivo_cb is None:
+        st.info(
+            "Sube el extracto que descargas del banco. Debe tener una columna de **Fecha** y una de **Monto** (negativo = sale dinero), o bien "
+            "**Débito** y **Crédito**. Si trae **Nota** (a quién o de quién), **Saldo** y una columna **sin título entre la Nota y el Monto** donde "
+            "anotas de qué fue cada movimiento (ej. «Alquiler PP-03 (Ana - Octubre)»), la comparación es mucho más precisa."
+        )
+        st.caption("🔒 El archivo no se guarda: se lee solo para esta comparación.")
+        st.stop()
+    contenido_cb = archivo_cb.getvalue()
+    firma_cb = f"{archivo_cb.name}_{len(contenido_cb)}"
+    try:
+        ext_cb = _leer_extracto_cache(contenido_cb, archivo_cb.name, None)
+    except extracto.ErrorExtracto as e:
+        st.error(str(e))
+        st.stop()
+
+    campos_cb = ["fecha", "monto", "debito", "credito", "contraparte", "detalle", "saldo", "hora", "nro", "transaccion"]
+    with st.expander("🔧 Columnas del extracto (revisa que estén bien detectadas)", expanded=bool(ext_cb["faltan"])):
+        if ext_cb["faltan"]:
+            st.warning("No pude identificar todas las columnas obligatorias. Elígelas aquí (fecha y monto, o débito y crédito).")
+        opciones_cb = [-1] + list(range(len(ext_cb["encabezados"])))
+        nombre_col_cb = lambda i: "(ninguna)" if i < 0 else f'{openpyxl.utils.get_column_letter(i + 1)} — {ext_cb["encabezados"][i] or "(sin título)"}'
+        mapeo_cb, columnas_ui = {}, st.columns(2)
+        for i_cb, campo_cb in enumerate(campos_cb):
+            with columnas_ui[i_cb % 2]:
+                elegido_cb = st.selectbox(extracto.NOMBRES_CAMPOS[campo_cb], opciones_cb, index=opciones_cb.index(ext_cb["columnas"].get(campo_cb, -1)),
+                                          format_func=nombre_col_cb, key=f"cb_col_{campo_cb}_{firma_cb}")
+            if elegido_cb >= 0:
+                mapeo_cb[campo_cb] = elegido_cb
+        if mapeo_cb != ext_cb["columnas"]:
+            try:
+                ext_cb = _leer_extracto_cache(contenido_cb, archivo_cb.name, tuple(sorted(mapeo_cb.items())))
+            except extracto.ErrorExtracto as e:
+                st.error(str(e))
+                st.stop()
+    if ext_cb["faltan"] or not ext_cb["lineas"]:
+        st.error("Elige al menos la columna de fecha y la de monto (o las de débito y crédito) para continuar.")
+        st.stop()
+
+    # ---------------- 1. Lo que se leyó ----------------
+    st.subheader("1. Lo que leí del extracto")
+    ck1, ck2, ck3, ck4, ck5 = st.columns(5)
+    ck1.metric("Movimientos", len(ext_cb["lineas"]))
+    ck2.metric("Créditos (entra)", fmt_money(ext_cb["total_creditos"]))
+    ck3.metric("Débitos (sale)", fmt_money(ext_cb["total_debitos"]))
+    ck4.metric("Periodo", f'{ext_cb["desde"]:%d/%m} al {ext_cb["hasta"]:%d/%m/%Y}')
+    ck5.metric("Saldo final", fmt_money(ext_cb["saldo_final"]) if ext_cb["saldo_final"] is not None else "—")
+    for aviso_cb in ext_cb["avisos"]:
+        st.caption(f"ℹ️ {aviso_cb}")
+    if ext_cb["problemas_saldo"]:
+        st.warning(f"⚠️ El saldo del extracto no cuadra en {len(ext_cb['problemas_saldo'])} línea(s): puede faltar un movimiento, haber uno repetido o "
+                   "estar mal leído. Revisa antes de confiar en la comparación.")
+        st.dataframe(pd.DataFrame([{"Fila del archivo": p["fila"], "Fecha": p["fecha"], "Monto": p["monto"], "Saldo esperado": p["saldo_esperado"],
+                                    "Saldo del extracto": p["saldo_extracto"], "Diferencia": p["diferencia"]} for p in ext_cb["problemas_saldo"]]),
+                     use_container_width=True, hide_index=True)
+    elif ext_cb["saldo_final"] is not None:
+        st.success("✅ El saldo del extracto es coherente (saldo anterior + monto = saldo): no faltan ni sobran movimientos.")
+    else:
+        st.caption("El extracto no trae columna de saldo, así que no se pudo controlar que esté completo.")
+    with st.expander("Ver los movimientos leídos"):
+        st.dataframe(pd.DataFrame([{"Fecha": l["fecha"], "Hora": l["hora"], "N° transacción": l["nro"], "Transacción": l["transaccion"],
+                                    "Nota": l["contraparte"], "Detalle": l["detalle"], "Monto": l["monto"], "Saldo": l["saldo"]} for l in ext_cb["lineas"]]),
+                     use_container_width=True, hide_index=True)
+
+    # ---------------- 2. Cómo comparar ----------------
+    st.subheader("2. Cómo comparar")
+    co1, co2 = st.columns(2)
+    with co1:
+        dias_cb = int(st.number_input("Diferencia de fechas aceptada (días)", min_value=0, max_value=15, value=3, step=1, key="cb_dias",
+                                      help="Un pago se considera el mismo si el monto es exacto y las fechas del banco y del sistema difieren hasta estos días."))
+    with co2:
+        efectivo_cb = st.checkbox("Comparar también los pagos en efectivo", key="cb_efectivo",
+                                  help="Por defecto solo se comparan los registros que no son en efectivo (QR, transferencia…). Actívalo si a veces depositas "
+                                       "en el banco el efectivo cobrado.")
+    palabras_cb = st.text_input("Ignorar movimientos del banco que contengan (separa con comas)", key="cb_palabras", placeholder="pago de banco, traspaso propio",
+                                help="Para dejar fuera movimientos que no son del negocio (pagos personales, traspasos entre tus cuentas…).")
+    if ids_apartamentos_permitidos() is not None:
+        st.warning("Tu usuario ve solo algunos apartamentos: los cobros de los demás saldrán como «sin registrar» aunque estén registrados.")
+
+    # ---------------- 3. Registros del sistema ----------------
+    margen_cb = max(dias_cb, conciliacion.VENTANA_AGRUPADA)
+    desde_sis_cb = date.fromordinal(ext_cb["desde"].toordinal() - margen_cb)
+    hasta_sis_cb = date.fromordinal(ext_cb["hasta"].toordinal() + margen_cb)
+    try:
+        actividad_cb = cargar_actividad(str(desde_sis_cb), str(hasta_sis_cb))
+        movs_cuadre_cb = cuadre.construir_movimientos(actividad_cb["pagos_generales"], actividad_cb["compras"], actividad_cb["ventas"])
+        periodos_cb = {t: cargar_periodos_abiertos(t) for t in ("alquiler", "electricidad", "agua")}
+        try:
+            historial_cb = cargar_historial()
+            cerrados_cb = {t: cargar_periodos_cerrados(t) for t in ("alquiler", "electricidad", "agua")}
+        except Exception as e:
+            historial_cb, cerrados_cb = [], {}
+            st.warning(texto_error_historial("No se pudo leer el historial de ex inquilinos: no se incluyen sus pagos", e))
+        rd_cb = rendicion.construir_rendicion(cargar_apartamentos(), periodos_cb["alquiler"], periodos_cb["electricidad"], periodos_cb["agua"],
+                                              desde_sis_cb, hasta_sis_cb, recibo.hoy_bolivia(), cerrados=cerrados_cb, historial=historial_cb)
+    except Exception as e:
+        st.error(f"No se pudieron leer los registros del sistema: {e}")
+        st.stop()
+    r_cb = conciliacion.conciliar(
+        ext_cb["lineas"], conciliacion.unificar_sistema(rd_cb["movimientos"], movs_cuadre_cb), dias=dias_cb, incluir_efectivo=efectivo_cb,
+        palabras_excluir=[p.strip() for p in palabras_cb.split(",") if p.strip()], desde=ext_cb["desde"], hasta=ext_cb["hasta"])
+    rs_cb = r_cb["resumen"]
+
+    # ---------------- 4. Resultado ----------------
+    st.subheader("3. Resultado")
+    comparables_cb = rs_cb["banco"]["n"] - rs_cb["excluidos"]["n"]
+    pct_cb = round(100 * rs_cb["conciliado"]["n"] / comparables_cb) if comparables_cb else 0
+    cr1, cr2, cr3, cr4 = st.columns(4)
+    cr1.metric("Conciliados", f'{rs_cb["conciliado"]["n"]} de {comparables_cb}', help=f"{pct_cb}% de los movimientos del banco ya están en el sistema")
+    cr2.metric("En el banco, sin registrar", rs_cb["sin_registro"]["n"],
+               help=f'Entra {fmt_money(rs_cb["sin_registro"]["creditos"])} · Sale {fmt_money(rs_cb["sin_registro"]["debitos"])}')
+    cr3.metric("En el sistema, sin banco", rs_cb["sistema_sin_banco"]["n"],
+               help=f'Ingresos {fmt_money(rs_cb["sistema_sin_banco"]["ingresos"])} · Egresos {fmt_money(rs_cb["sistema_sin_banco"]["egresos"])}')
+    cr4.metric("Efectivo (no comparado)", rs_cb["efectivo_no_comparado"]["n"])
+    st.markdown(f"**{pct_cb}%** de los movimientos del banco ya están registrados en el sistema. "
+                f"Sin registrar: entra {fmt_money(rs_cb['sin_registro']['creditos'])} y sale {fmt_money(rs_cb['sin_registro']['debitos'])}.")
+    if rs_cb["por_confianza"]["Revisar"] or rs_cb["por_confianza"]["Media"]:
+        st.caption(f'Coincidencias: {rs_cb["por_confianza"]["Alta"]} con confianza alta, {rs_cb["por_confianza"]["Media"]} media y '
+                   f'{rs_cb["por_confianza"]["Revisar"]} para revisar (pestaña «Conciliados»).')
+
+    fmt_cb = {c: st.column_config.NumberColumn(format="Bs %.2f") for c in ("Monto", "Monto banco", "Monto sistema", "Saldo")}
+    t_sin, t_sis, t_con, t_ext, t_efe = st.tabs([
+        f"⚠️ En el banco, sin registrar ({rs_cb['sin_registro']['n']})", f"📋 En el sistema, sin banco ({rs_cb['sistema_sin_banco']['n']})",
+        f"✅ Conciliados ({len(r_cb['pares'])})", "🏦 Extracto completo", f"💵 Efectivo ({rs_cb['efectivo_no_comparado']['n']})"])
+    with t_sin:
+        filas_sin_cb = conciliacion_reportes.filas_banco_sin_registro(r_cb)
+        if filas_sin_cb:
+            st.caption("Movimientos que están en el banco pero no encontré en el sistema. «Causa probable» te dice por qué.")
+            st.dataframe(pd.DataFrame([{enc: f[c] for c, enc, _t in conciliacion_reportes.COL_BANCO_SIN if c not in ("hora", "nro", "transaccion", "otras")}
+                                       for f in filas_sin_cb]), use_container_width=True, hide_index=True, column_config=fmt_cb)
+            with st.expander("Ver todas las pistas de cada movimiento"):
+                for x_cb in r_cb["banco_sin_registro"]:
+                    l_cb = x_cb["linea"]
+                    st.markdown(f"**{l_cb['fecha']:%d/%m/%Y} · Bs {l_cb['monto']:,.2f} · {l_cb['contraparte'] or l_cb['transaccion']}**"
+                                + (f" — _{l_cb['detalle']}_" if l_cb["detalle"] else ""))
+                    for causa_cb in x_cb["causas"]:
+                        st.markdown(f"- {causa_cb}")
+        else:
+            st.success("Todos los movimientos del banco están registrados en el sistema. 🎉")
+    with t_sis:
+        filas_sis_cb = conciliacion_reportes.filas_sistema_sin_banco(r_cb)
+        if filas_sis_cb:
+            st.caption("Registros del sistema que no aparecen en el extracto (no incluye los pagos en efectivo, salvo que actives esa opción).")
+            st.dataframe(pd.DataFrame([{enc: f[c] for c, enc, _t in conciliacion_reportes.COL_SISTEMA_SIN if c != "otras"} for f in filas_sis_cb]),
+                         use_container_width=True, hide_index=True, column_config=fmt_cb)
+        else:
+            st.success("Todos los registros del sistema aparecen en el banco.")
+    with t_con:
+        filas_con_cb = conciliacion_reportes.filas_conciliados(r_cb)
+        if filas_con_cb:
+            filtro_con_cb = st.selectbox("Confianza", ["Todas", "Alta", "Media", "Revisar"], key="cb_filtro_conf",
+                                         help="Alta: el texto confirma la coincidencia. Media: coincide el monto y la fecha pero el texto no lo confirma. Revisar: conviene verificarla.")
+            vista_con_cb = [f for f in filas_con_cb if filtro_con_cb == "Todas" or f["confianza"] == filtro_con_cb]
+            st.dataframe(pd.DataFrame([{enc: f[c] for c, enc, _t in conciliacion_reportes.COL_CONCILIADOS} for f in vista_con_cb]),
+                         use_container_width=True, hide_index=True, column_config=fmt_cb)
+        else:
+            st.info("No hubo coincidencias.")
+    with t_ext:
+        iconos_cb = {"Conciliado": "✅ Conciliado", "Sin registrar en el sistema": "⚠️ Sin registrar", "Excluido": "➖ Excluido"}
+        st.dataframe(pd.DataFrame([{**{enc: f[c] for c, enc, _t in conciliacion_reportes.COL_EXTRACTO if c not in ("estado", "n", "hora", "nro")},
+                                    "Estado": iconos_cb[f["estado"]]} for f in conciliacion_reportes.filas_extracto(r_cb)]),
+                     use_container_width=True, hide_index=True, column_config=fmt_cb)
+    with t_efe:
+        if r_cb["efectivo"]:
+            st.caption("Registros pagados en efectivo en las fechas del extracto: no pasan por el banco, por eso no se compararon.")
+            st.dataframe(pd.DataFrame([{enc: f[c] for c, enc, _t in conciliacion_reportes.COL_EFECTIVO} for f in conciliacion_reportes.filas_efectivo(r_cb)]),
+                         use_container_width=True, hide_index=True, column_config=fmt_cb)
+        else:
+            st.info("No hay registros en efectivo para mostrar (o activaste «Comparar también los pagos en efectivo»).")
+
+    emisor_cb = usuario_actual.get("nombre") or usuario_actual.get("username")
+    base_cb = f"conciliacion_bancaria_{ext_cb['desde']:%Y-%m-%d}_{ext_cb['hasta']:%Y-%m-%d}"
+    dc1, dc2 = st.columns(2)
+    with dc1:
+        st.download_button("📊 Descargar Excel", data=_conc_excel_cache(r_cb, ext_cb, emisor_cb), file_name=f"{base_cb}.xlsx", key="cb_xlsx",
+                           use_container_width=True, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    with dc2:
+        st.download_button("📄 Descargar PDF", data=_conc_pdf_cache(r_cb, ext_cb, emisor_cb), file_name=f"{base_cb}.pdf", mime="application/pdf",
+                           key="cb_pdf", use_container_width=True)
 
 
 # ==================================================================
