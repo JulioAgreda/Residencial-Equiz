@@ -852,18 +852,17 @@ if es_admin:
 else:
     opciones_principal = ["📊 Dashboard", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua"]
 
-opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
+opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"] + (["🏦 Deudas"] if es_admin else []) + ["🤝 Cobros"]
 opciones_pendientes = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos"]
 opciones_reuniones = ["(ninguno)", "🗒️ Reuniones"]
 opciones_reportes = ["(ninguno)", "📑 Reportes"]
-opciones_deudas = ["(ninguno)", "🏦 Deudas"]
-opciones_cobros = ["(ninguno)", "🤝 Cobros"]
+
 
 
 
 # Las claves de session_state de todos los módulos secundarios (todo menos el
 # principal), para resetearlas entre sí cada vez que se elige uno.
-_CLAVES_NAV_SECUNDARIAS = ["nav_movimientos", "nav_deudas", "nav_cobros", "nav_pendientes", "nav_reuniones", "nav_servicios", "nav_reportes"]
+_CLAVES_NAV_SECUNDARIAS = ["nav_movimientos", "nav_pendientes", "nav_reuniones", "nav_servicios", "nav_reportes"]
 
 
 # Los radios de abajo son independientes en el estado interno de Streamlit:
@@ -891,18 +890,6 @@ st.sidebar.caption("📒 Módulo de Movimientos")
 pagina_movimientos = st.sidebar.radio("Compras y Ventas", opciones_movimientos, key="nav_movimientos",
                                        label_visibility="collapsed",
                                        on_change=lambda: _al_elegir_secundario("nav_movimientos"))
-pagina_deudas = "(ninguno)"
-if es_admin:
-    st.sidebar.divider()
-    st.sidebar.caption("🏦 Módulo de Deudas")
-    pagina_deudas = st.sidebar.radio("Deudas", opciones_deudas, key="nav_deudas",
-                                      label_visibility="collapsed",
-                                      on_change=lambda: _al_elegir_secundario("nav_deudas"))
-st.sidebar.divider()
-st.sidebar.caption("🤝 Módulo de Cobros")
-pagina_cobros = st.sidebar.radio("Cobros", opciones_cobros, key="nav_cobros",
-                                  label_visibility="collapsed",
-                                  on_change=lambda: _al_elegir_secundario("nav_cobros"))
 st.sidebar.divider()
 st.sidebar.caption("✅ Módulo de Pendientes")
 pagina_pendientes = st.sidebar.radio("Pendientes", opciones_pendientes, key="nav_pendientes",
@@ -923,10 +910,6 @@ pagina_reportes = st.sidebar.radio("Reportes", opciones_reportes, key="nav_repor
 
 if pagina_movimientos != "(ninguno)":
     pagina = pagina_movimientos
-elif pagina_deudas != "(ninguno)":
-    pagina = pagina_deudas
-elif pagina_cobros != "(ninguno)":
-    pagina = pagina_cobros
 elif pagina_pendientes != "(ninguno)":
     pagina = pagina_pendientes
 elif pagina_reuniones != "(ninguno)":
