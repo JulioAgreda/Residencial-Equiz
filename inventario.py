@@ -5,6 +5,9 @@ Reglas:
   * Cada artículo tiene movimientos. Una entrada suma stock y lleva su costo unitario; una salida resta stock.
   * El Kardex se calcula con COSTO PROMEDIO PONDERADO: cada entrada recalcula el costo promedio y cada salida se valora
     a ese costo promedio del momento. El saldo final siempre es igual a entradas - salidas.
+  * CANTIDADES y COSTOS UNITARIOS se registran con 1 SOLO DECIMAL (2.5 piezas, Bs 3.5 por unidad). Los cálculos internos
+    conservan toda su precisión: el costo promedio se muestra redondeado a 1 decimal, pero los valores en Bs (que se
+    muestran con 2 decimales) se calculan con el promedio exacto, así que entradas - salidas = saldo sin diferencias.
   * El Kardex no se guarda: se calcula siempre desde los movimientos (así nunca queda desactualizado).
   * El stock nunca puede quedar negativo: no se puede sacar más de lo que hay, ni registrar con fecha pasada una salida
     que dejaría un saldo negativo en una fecha posterior, ni eliminar una entrada de la que dependen salidas posteriores.
@@ -39,7 +42,8 @@ UNIDADES = ["Unidad", "Pieza", "Par", "Juego", "Metro", "Litro", "Galón", "Kilo
 ESTADO_OK, ESTADO_BAJO, ESTADO_SIN_STOCK = "OK", "Stock bajo", "Sin stock"
 
 MAX_CANTIDAD = Decimal("999999999.999")
-_D2, _D3, _D4 = Decimal("0.01"), Decimal("0.001"), Decimal("0.0001")
+DECIMALES = 1                                 # decimales permitidos al REGISTRAR cantidades y costos unitarios
+_D1, _D2, _D3, _D4 = Decimal("0.1"), Decimal("0.01"), Decimal("0.001"), Decimal("0.0001")
 
 
 # ============================================================
@@ -57,6 +61,23 @@ def _dec(valor):
 
 def _cant(valor):
     return _dec(valor).quantize(_D3, rounding=ROUND_HALF_UP)
+
+
+def _un_decimal(valor):
+    """True si el número tiene a lo sumo 1 decimal (2, 2.5, 0.3). Tolera el ruido de coma flotante (0.30000000000000004)."""
+    try:
+        d = Decimal(str(round(float(valor), 9)))
+    except (TypeError, ValueError):
+        return False
+    return d == d.quantize(_D1)
+
+
+def a_un_decimal(valor):
+    """El número redondeado a 1 decimal (float), con redondeo normal (0.25 -> 0.3)."""
+    try:
+        return float(Decimal(str(round(float(valor or 0), 9))).quantize(_D1, rounding=ROUND_HALF_UP))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _fecha(valor):
@@ -87,9 +108,12 @@ def _clave_orden(m):
 
 
 def formato_cantidad(valor):
-    """12 -> '12'; 2.5 -> '2.5'; 0.125 -> '0.125' (sin ceros de más)."""
-    texto = f"{float(valor):,.3f}".rstrip("0").rstrip(".")
-    return texto or "0"
+    """12 -> '12'; 2.5 -> '2.5'; 1234.5 -> '1,234.5' (1 decimal, sin ceros de más)."""
+    d = _dec(valor).quantize(_D1, rounding=ROUND_HALF_UP)
+    if d == 0:
+        return "0"
+    texto = f"{d:,.1f}"
+    return texto[:-2] if texto.endswith(".0") else texto
 
 
 # ============================================================
@@ -269,15 +293,17 @@ def validar_movimiento(tipo, cantidad, costo_unitario, fecha, motivo, destino=No
         errores.append("La cantidad debe ser mayor a 0.")
     elif q > MAX_CANTIDAD:
         errores.append("La cantidad es demasiado grande.")
-    elif q != q.quantize(_D3):
-        errores.append("La cantidad admite hasta 3 decimales.")
+    elif not _un_decimal(cantidad):
+        errores.append("La cantidad admite solo 1 decimal (por ejemplo 2.5).")
     if tipo == ENTRADA:
         if costo_unitario is None or costo_unitario == "":
             errores.append("Indica el costo unitario (puede ser 0 si fue una donación).")
         elif _dec(costo_unitario) < 0:
             errores.append("El costo unitario no puede ser negativo.")
-        elif _dec(costo_unitario) > Decimal("99999999.9999"):
+        elif _dec(costo_unitario) > Decimal("99999999.9"):
             errores.append("El costo unitario es demasiado grande.")
+        elif not _un_decimal(costo_unitario):
+            errores.append("El costo unitario admite solo 1 decimal (por ejemplo 3.5).")
     f = _fecha(fecha)
     if not f:
         errores.append("La fecha es obligatoria.")
@@ -296,8 +322,8 @@ def validar_movimiento(tipo, cantidad, costo_unitario, fecha, motivo, destino=No
 def armar_movimiento(articulo_id, tipo, fecha, cantidad, costo_unitario, motivo, destino, apartamento_id, documento, observacion, usuario):
     """Registro listo para guardar. En las salidas no se guarda el costo: se calcula en el Kardex."""
     return {"articulo_id": articulo_id, "fecha": str(_fecha(fecha)), "tipo": tipo, "motivo": motivo,
-            "cantidad": float(_cant(cantidad)),
-            "costo_unitario": float(_dec(costo_unitario).quantize(_D4, rounding=ROUND_HALF_UP)) if tipo == ENTRADA else None,
+            "cantidad": a_un_decimal(cantidad),
+            "costo_unitario": a_un_decimal(costo_unitario) if tipo == ENTRADA else None,
             "apartamento_id": apartamento_id if tipo == SALIDA else None, "destino": _limpio(destino) if tipo == SALIDA else None,
             "documento": _limpio(documento), "observacion": _limpio(observacion), "registrado_por": usuario}
 
@@ -360,12 +386,14 @@ def validar_articulo(codigo, nombre, unidad, stock_minimo, articulos, articulo_i
         errores.append("La unidad es obligatoria.")
     if _dec(stock_minimo) < 0:
         errores.append("El stock mínimo no puede ser negativo.")
+    elif not _un_decimal(stock_minimo):
+        errores.append("El stock mínimo admite solo 1 decimal (por ejemplo 2.5).")
     return errores
 
 
 def armar_articulo(codigo, nombre, categoria, unidad, stock_minimo, ubicacion, notas, activo=True, creado_por=None):
     registro = {"codigo": (codigo or "").strip(), "nombre": (nombre or "").strip(), "categoria": _limpio(categoria),
-                "unidad": (unidad or "").strip(), "stock_minimo": float(_cant(stock_minimo)), "ubicacion": _limpio(ubicacion),
+                "unidad": (unidad or "").strip(), "stock_minimo": a_un_decimal(stock_minimo), "ubicacion": _limpio(ubicacion),
                 "notas": _limpio(notas), "activo": bool(activo)}
     if creado_por is not None:
         registro["creado_por"] = creado_por
