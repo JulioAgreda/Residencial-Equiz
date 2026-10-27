@@ -656,38 +656,41 @@ def render_modulo_deudas_cobros(tipo):
                             except Exception as e:
                                 st.error(f"Error al eliminar: {e}")
 
-                sub = [f"💵 {accion_pago}"] + (["✏️ Editar / eliminar"] if es_admin else [])
-                subtabs = st.tabs(sub)
-                with subtabs[0]:
-                    if saldo <= 0.009:
-                        st.success("Esta cuenta está saldada.")
-                    else:
-                        with st.form(f"{pref}_form_pago_{cid}", clear_on_submit=True):
-                            f1, f2 = st.columns(2)
-                            fecha_p = f1.date_input("Fecha", value=hoy, format="DD/MM/YYYY", key=f"{pref}_fp_{cid}")
-                            monto_p = f2.number_input(f"Monto (Bs) — saldo {fmt_money(saldo)}", min_value=0.0,
-                                                       step=10.0, key=f"{pref}_mp_{cid}")
-                            f3, f4 = st.columns(2)
-                            metodo_p = f3.selectbox("Método", METODOS_PAGO_MOVIMIENTOS, key=f"{pref}_met_{cid}")
-                            obs_p = f4.text_input("Observación", key=f"{pref}_op_{cid}")
-                            st.caption(f"Registrado por: **{nombre_usuario}**")
-                            if st.form_submit_button(f"💾 {accion_pago}"):
-                                if monto_p <= 0:
-                                    st.error("El monto debe ser mayor a 0.")
-                                elif monto_p > saldo + 0.009:
-                                    st.error(f"El monto no puede superar el saldo ({fmt_money(saldo)}).")
-                                else:
-                                    try:
-                                        db.crear_pago_deuda_cobro({
-                                            "cuenta_id": cid, "fecha": str(fecha_p), "monto": monto_p,
-                                            "metodo_pago": metodo_p, "observacion": obs_p or None,
-                                            "registrado_por": nombre_usuario,
-                                        })
-                                        limpiar_cache()
-                                        st.success("Registrado.")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Error al guardar: {e}")
+                if not es_admin:
+                    subtabs = []
+                else:
+                    subtabs = st.tabs([f"💵 {accion_pago}", "✏️ Editar / eliminar"])
+                if es_admin:
+                    with subtabs[0]:
+                        if saldo <= 0.009:
+                            st.success("Esta cuenta está saldada.")
+                        else:
+                            with st.form(f"{pref}_form_pago_{cid}", clear_on_submit=True):
+                                f1, f2 = st.columns(2)
+                                fecha_p = f1.date_input("Fecha", value=hoy, format="DD/MM/YYYY", key=f"{pref}_fp_{cid}")
+                                monto_p = f2.number_input(f"Monto (Bs) — saldo {fmt_money(saldo)}", min_value=0.0,
+                                                           step=10.0, key=f"{pref}_mp_{cid}")
+                                f3, f4 = st.columns(2)
+                                metodo_p = f3.selectbox("Método", METODOS_PAGO_MOVIMIENTOS, key=f"{pref}_met_{cid}")
+                                obs_p = f4.text_input("Observación", key=f"{pref}_op_{cid}")
+                                st.caption(f"Registrado por: **{nombre_usuario}**")
+                                if st.form_submit_button(f"💾 {accion_pago}"):
+                                    if monto_p <= 0:
+                                        st.error("El monto debe ser mayor a 0.")
+                                    elif monto_p > saldo + 0.009:
+                                        st.error(f"El monto no puede superar el saldo ({fmt_money(saldo)}).")
+                                    else:
+                                        try:
+                                            db.crear_pago_deuda_cobro({
+                                                "cuenta_id": cid, "fecha": str(fecha_p), "monto": monto_p,
+                                                "metodo_pago": metodo_p, "observacion": obs_p or None,
+                                                "registrado_por": nombre_usuario,
+                                            })
+                                            limpiar_cache()
+                                            st.success("Registrado.")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Error al guardar: {e}")
                 if es_admin:
                     with subtabs[1]:
                         with st.form(f"{pref}_form_edit_{cid}"):
@@ -854,7 +857,7 @@ if es_admin:
 else:
     opciones_principal = ["📊 Dashboard", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua"]
 
-opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"] + (["🏦 Deudas"] if es_admin else []) + ["🤝 Cobros"]
+opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"] + ["🏦 Deudas", "🤝 Cobros"]
 opciones_pendientes = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos"]
 opciones_reuniones = ["(ninguno)", "🗒️ Reuniones"]
 opciones_reportes = ["(ninguno)", "📑 Reportes"]
@@ -2361,7 +2364,7 @@ elif pagina == "💧 Agua":
 # ==================================================================
 # PÁGINA: PENDIENTES (tareas de colaboradores)
 # ==================================================================
-elif pagina == "🏦 Deudas" and es_admin:
+elif pagina == "🏦 Deudas":
     render_modulo_deudas_cobros("Deuda")
 
 elif pagina == "🤝 Cobros":
