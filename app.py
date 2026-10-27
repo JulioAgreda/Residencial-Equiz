@@ -1,5 +1,6 @@
 import calendar
 import io
+import openpyxl
 import zipfile
 import streamlit as st
 import pandas as pd
@@ -9,10 +10,15 @@ import db
 import accesos
 import aire_acondicionado
 import compromisos
+import conciliacion
+import conciliacion_reportes
 import cuadre
 import consumo as calc_consumo
 import estados
 import exinquilinos
+import extracto
+import inventario
+import inventario_reportes
 import moras
 import servicios_basicos
 import recibo
@@ -170,17 +176,19 @@ def _cargar_apartamentos_todos():
 
 @st.cache_data(ttl=30)
 def _cargar_periodos_todos(apartamento_id=None, anio=None, mes=None):
-    return db.listar_periodos(apartamento_id=apartamento_id, anio=anio, mes=mes)
+    # solo_activos: los periodos cerrados de inquilinos que ya salieron NO se mezclan con los del inquilino actual
+    # (se ven en «🚪 Ex inquilinos»)
+    return db.listar_periodos(apartamento_id=apartamento_id, anio=anio, mes=mes, solo_activos=True)
 
 
 @st.cache_data(ttl=30)
 def _cargar_periodos_electricidad_todos(anio=None, mes=None):
-    return db.listar_periodos_servicio("electricidad", anio=anio, mes=mes)
+    return db.listar_periodos_servicio("electricidad", anio=anio, mes=mes, solo_activos=True)
 
 
 @st.cache_data(ttl=30)
 def _cargar_periodos_agua_todos(anio=None, mes=None):
-    return db.listar_periodos_servicio("agua", anio=anio, mes=mes)
+    return db.listar_periodos_servicio("agua", anio=anio, mes=mes, solo_activos=True)
 
 
 @st.cache_data(ttl=60)
@@ -208,6 +216,16 @@ def _cargar_historial_todos():
 
 cargar_periodos_cerrados = _solo_permitidos(_cargar_periodos_cerrados_todos)
 cargar_historial = _solo_permitidos(_cargar_historial_todos)
+
+
+@st.cache_data(ttl=30)
+def cargar_inventario_articulos():
+    return db.listar_inventario_articulos()
+
+
+@st.cache_data(ttl=30)
+def cargar_inventario_movimientos():
+    return db.listar_inventario_movimientos()
 
 
 AVISO_MIGRACION_DEVOLUCION = (
@@ -296,6 +314,15 @@ def selector_devolucion_a(key, actual=None):
     return estados.componer_devolucion_a(None if elegido == "—" else elegido, nombre_tercero)
 
 
+def texto_error_inventario(prefijo, error):
+    """Mensaje de error del inventario; si parece que falta crear las tablas, lo dice."""
+    texto = str(error)
+    if any(x in texto.lower() for x in ("inventario_", "does not exist", "could not find", "schema cache")):
+        texto += ("\n\nParece que falta crear las tablas del inventario: ejecuta `migracion_inventario.sql` en el SQL Editor "
+                  "de Supabase (una sola vez).")
+    return f"{prefijo}: {texto}"
+
+
 def texto_error_historial(prefijo, error):
     """Mensaje de error del historial de inquilinos; si parece que falta algo en la base de datos, lo dice."""
     texto = str(error)
@@ -351,6 +378,52 @@ def _rendicion_excel_cache(r, emitido_por):
 @st.cache_data(ttl=300, show_spinner=False)
 def _rendicion_pdf_cache(r, emitido_por):
     return rendicion.generar_pdf_rendicion(r, emitido_por=emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _inv_excel_existencias(filas, valor_total, hoy, emitido_por):
+    return inventario_reportes.generar_excel_existencias(filas, valor_total, hoy, emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _inv_pdf_existencias(filas, resumen, hoy, emitido_por):
+    return inventario_reportes.generar_pdf_existencias(filas, resumen, hoy, emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _inv_excel_kardex(articulo, kp, desde, hasta, emitido_por):
+    return inventario_reportes.generar_excel_kardex(articulo, kp, desde, hasta, emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _inv_pdf_kardex(articulo, kp, desde, hasta, emitido_por):
+    return inventario_reportes.generar_pdf_kardex(articulo, kp, desde, hasta, emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _inv_excel_movimientos(mv, desde, hasta, emitido_por):
+    return inventario_reportes.generar_excel_movimientos(mv, desde, hasta, emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _inv_pdf_movimientos(mv, desde, hasta, emitido_por):
+    return inventario_reportes.generar_pdf_movimientos(mv, desde, hasta, emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _leer_extracto_cache(contenido, nombre, mapeo):
+    """Lee el extracto del banco (mapeo: tupla de (campo, columna) para forzar las columnas, o None)."""
+    return extracto.leer_extracto(contenido, nombre, dict(mapeo) if mapeo else None)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _conc_excel_cache(r, ext, emitido_por):
+    return conciliacion_reportes.generar_excel(r, ext, emitido_por)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _conc_pdf_cache(r, ext, emitido_por):
+    return conciliacion_reportes.generar_pdf(r, ext, emitido_por)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -458,6 +531,8 @@ def limpiar_cache():
     cargar_periodos_abiertos.clear()
     cargar_periodos_cerrados.clear()
     cargar_historial.clear()
+    cargar_inventario_articulos.clear()
+    cargar_inventario_movimientos.clear()
     cargar_pendientes.clear()
     cargar_reuniones.clear()
     cargar_participantes_reuniones.clear()
@@ -789,11 +864,13 @@ def pagina_consumo(servicio):
         if filtro_apt != "Todos":
             apt_id = next(a["id"] for a in apartamentos if a["codigo"] == filtro_apt)
 
+        st.caption("Se muestran solo los registros del inquilino actual. Los de inquilinos que ya salieron están en «🚪 Ex inquilinos».")
         periodos = _solo_mis_apartamentos(db.listar_periodos_servicio(
             servicio,
             apartamento_id=apt_id,
             anio=None if filtro_anio == "Todos" else filtro_anio,
             mes=None if filtro_mes == "Todos" else filtro_mes,
+            solo_activos=True,
         ))
 
         if not periodos:
@@ -873,8 +950,8 @@ else:
                           "🤝 Compromisos de pago", "🚪 Ex inquilinos"]
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
-opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "🗒️ Reuniones"]
-opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería"]
+opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "📦 Inventario", "🗒️ Reuniones"]
+opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería", "🏦 Conciliación bancaria"]
 
 # Los radios de abajo son independientes en el estado interno de Streamlit:
 # si eliges algo en uno, los demás no se "enteran" y siguen marcando su
@@ -1173,7 +1250,7 @@ elif pagina == "🏠 Apartamentos":
     elif not apt_con_propiedad:
         st.warning(AVISO_MIGRACION_AIRE_PROPIEDAD)
 
-    tab_lista, tab_nuevo, tab_importar = st.tabs(["📋 Lista y edición", "➕ Nuevo apartamento", "📥 Importar CSV"])
+    tab_lista, tab_salida, tab_nuevo, tab_importar = st.tabs(["📋 Lista y edición", "🚪 Salida de inquilino", "➕ Nuevo apartamento", "📥 Importar CSV"])
 
     with tab_lista:
         apartamentos = cargar_apartamentos()
@@ -1314,51 +1391,64 @@ elif pagina == "🏠 Apartamentos":
                     except Exception as e:
                         st.error(f"Error al eliminar: {e}")
 
-            # ---------- Salida del inquilino: se archiva en el historial y su deuda queda a su nombre ----------
             if apt.get("estado") == "Ocupado" and (apt.get("inquilino_nombre") or "").strip():
-                with st.expander(f"🚪 Registrar la salida de {apt['inquilino_nombre']}"):
-                    st.caption("Archiva al inquilino en el historial y deja el apartamento libre. Su deuda queda a su nombre: si "
-                               "después paga, se le registra el pago en «🚪 Ex inquilinos» y la deuda se actualiza.")
-                    sa1, sa2 = st.columns(2)
-                    with sa1:
-                        fecha_salida = st.date_input("Fecha de salida", value=recibo.hoy_bolivia(), format="DD/MM/YYYY",
-                                                     key=f'salida_fecha_{apt["id"]}')
-                    with sa2:
-                        registrar_meses = st.checkbox(
-                            "Registrar como deuda los meses de alquiler vencidos sin ningún pago", value=True,
-                            key=f'salida_meses_{apt["id"]}',
-                            help="Si no se marca, esos meses no quedarían registrados como deuda del ex inquilino.")
-                    obs_salida = st.text_area("Observación (motivo, estado del apartamento, acuerdo de pago…)", height=70,
-                                              key=f'salida_obs_{apt["id"]}')
-                    periodos_salida = {t: [p for p in cargar_periodos_abiertos(t) if p.get("apartamento_id") == apt["id"]]
-                                       for t in ("alquiler", "electricidad", "agua")}
-                    resumen_s = exinquilinos.resumen_salida(
-                        apt, periodos_salida["alquiler"], periodos_salida["electricidad"], periodos_salida["agua"],
-                        fecha_salida or recibo.hoy_bolivia(), registrar_meses)
-                    st.markdown(f"**Deuda con la que sale:** alquiler {fmt_money(resumen_s['alquiler'])} · luz {fmt_money(resumen_s['luz'])} · "
-                                f"agua {fmt_money(resumen_s['agua'])} · **total {fmt_money(resumen_s['total'])}**")
-                    if resumen_s["meses_sin_registro"]:
-                        st.caption("Meses de alquiler sin ningún pago: " + ", ".join(m["etiqueta"] for m in resumen_s["meses_sin_registro"]) + ".")
-                    confirmar_salida = st.checkbox(
-                        "Confirmo que este inquilino ya salió: su ficha se archivará y el apartamento quedará desocupado.",
-                        key=f'salida_confirmar_{apt["id"]}')
-                    if st.button("🚪 Registrar salida", key=f'salida_boton_{apt["id"]}'):
-                        errores_salida = exinquilinos.validar_salida(apt, fecha_salida, confirmar_salida)
-                        for e in errores_salida:
-                            st.error(e)
-                        if not errores_salida:
-                            try:
-                                if registrar_meses:
-                                    for m in resumen_s["meses_sin_registro"]:
-                                        db.obtener_o_crear_periodo(apt["id"], m["mes"], m["anio"], m["monto"], apt.get("inquilino_nombre"))
-                                db.registrar_salida_inquilino(
-                                    apt["id"], fecha_salida, obs_salida, usuario_actual.get("nombre") or usuario_actual.get("username"))
-                                limpiar_cache()
-                                st.success("Salida registrada. El inquilino quedó en el historial con su deuda. Si paga después, "
-                                           "regístralo en «🚪 Ex inquilinos».")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(texto_error_historial("No se pudo registrar la salida", e))
+                st.info("🚪 ¿Este inquilino se fue? Regístralo en la pestaña **«🚪 Salida de inquilino»** (arriba, junto a «Lista y edición»).")
+
+    with tab_salida:
+        st.markdown("**Registrar que un inquilino se fue**")
+        st.caption("Archiva al inquilino en el historial y deja el apartamento libre. Su deuda queda a su nombre: si después paga, "
+                   "se le registra el pago en «🚪 Ex inquilinos» y la deuda se actualiza. Solo aparecen los apartamentos ocupados "
+                   "que tienen un inquilino registrado.")
+        aptos_ocupados = [a for a in cargar_apartamentos() if a.get("estado") == "Ocupado" and (a.get("inquilino_nombre") or "").strip()]
+        if not aptos_ocupados:
+            st.info("No hay apartamentos ocupados con un inquilino registrado. Si un apartamento debería aparecer aquí, revisa en "
+                    "«Lista y edición» que esté como «Ocupado» y tenga el nombre del inquilino.")
+        else:
+            idx_salida = st.selectbox("Apartamento del que sale el inquilino", range(len(aptos_ocupados)), key="salida_apt_sel",
+                                      format_func=lambda i: f'{aptos_ocupados[i]["codigo"]} — {aptos_ocupados[i]["inquilino_nombre"]}')
+            apt = aptos_ocupados[idx_salida]
+            st.caption("Archiva al inquilino en el historial y deja el apartamento libre. Su deuda queda a su nombre: si "
+                       "después paga, se le registra el pago en «🚪 Ex inquilinos» y la deuda se actualiza.")
+            sa1, sa2 = st.columns(2)
+            with sa1:
+                fecha_salida = st.date_input("Fecha de salida", value=recibo.hoy_bolivia(), format="DD/MM/YYYY",
+                                             key=f'salida_fecha_{apt["id"]}')
+            with sa2:
+                registrar_meses = st.checkbox(
+                    "Registrar como deuda los meses de alquiler vencidos sin ningún pago", value=True,
+                    key=f'salida_meses_{apt["id"]}',
+                    help="Si no se marca, esos meses no quedarían registrados como deuda del ex inquilino.")
+            obs_salida = st.text_area("Observación (motivo, estado del apartamento, acuerdo de pago…)", height=70,
+                                      key=f'salida_obs_{apt["id"]}')
+            periodos_salida = {t: [p for p in cargar_periodos_abiertos(t) if p.get("apartamento_id") == apt["id"]]
+                               for t in ("alquiler", "electricidad", "agua")}
+            resumen_s = exinquilinos.resumen_salida(
+                apt, periodos_salida["alquiler"], periodos_salida["electricidad"], periodos_salida["agua"],
+                fecha_salida or recibo.hoy_bolivia(), registrar_meses)
+            st.markdown(f"**Deuda con la que sale:** alquiler {fmt_money(resumen_s['alquiler'])} · luz {fmt_money(resumen_s['luz'])} · "
+                        f"agua {fmt_money(resumen_s['agua'])} · **total {fmt_money(resumen_s['total'])}**")
+            if resumen_s["meses_sin_registro"]:
+                st.caption("Meses de alquiler sin ningún pago: " + ", ".join(m["etiqueta"] for m in resumen_s["meses_sin_registro"]) + ".")
+            confirmar_salida = st.checkbox(
+                "Confirmo que este inquilino ya salió: su ficha se archivará y el apartamento quedará desocupado.",
+                key=f'salida_confirmar_{apt["id"]}')
+            if st.button("🚪 Registrar salida", key=f'salida_boton_{apt["id"]}'):
+                errores_salida = exinquilinos.validar_salida(apt, fecha_salida, confirmar_salida)
+                for e in errores_salida:
+                    st.error(e)
+                if not errores_salida:
+                    try:
+                        if registrar_meses:
+                            for m in resumen_s["meses_sin_registro"]:
+                                db.obtener_o_crear_periodo(apt["id"], m["mes"], m["anio"], m["monto"], apt.get("inquilino_nombre"))
+                        db.registrar_salida_inquilino(
+                            apt["id"], fecha_salida, obs_salida, usuario_actual.get("nombre") or usuario_actual.get("username"))
+                        limpiar_cache()
+                        st.success("Salida registrada. El inquilino quedó en el historial con su deuda. Si paga después, "
+                                   "regístralo en «🚪 Ex inquilinos».")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(texto_error_historial("No se pudo registrar la salida", e))
 
     with tab_nuevo:
         with st.form("nuevo_apartamento", clear_on_submit=True):
@@ -1639,10 +1729,12 @@ elif pagina == "💵 Pagos de Alquiler":
         if filtro_apt != "Todos":
             apt_id = next(a["id"] for a in apartamentos if a["codigo"] == filtro_apt)
 
+        st.caption("Se muestran solo los registros del inquilino actual. Los de inquilinos que ya salieron están en «🚪 Ex inquilinos».")
         periodos = _solo_mis_apartamentos(db.listar_periodos(
             apartamento_id=apt_id,
             anio=None if filtro_anio == "Todos" else filtro_anio,
             mes=None if filtro_mes == "Todos" else filtro_mes,
+            solo_activos=True,
         ))
 
         if not periodos:
@@ -1759,7 +1851,8 @@ elif pagina == "📑 Estado de cuenta":
     st.subheader("Estado de cuenta por apartamento")
     st.caption(
         "Reporte para entregar al inquilino con sus pagos realizados y su deuda real de alquiler y "
-        "electricidad, calculada a la fecha de hoy. Aplica a apartamentos ocupados con contrato de alquiler."
+        "electricidad, calculada a la fecha de hoy. Aplica a apartamentos ocupados con contrato de alquiler. Solo cuenta al "
+        "inquilino actual: los inquilinos que ya salieron aparecen aparte, al final."
     )
 
     hoy_rep = recibo.hoy_bolivia()
@@ -1896,6 +1989,31 @@ elif pagina == "📑 Estado de cuenta":
         with st.expander(f"Apartamentos sin reporte ({len(no_aplican)})"):
             for apt, motivo in no_aplican:
                 st.write(f'**{apt.get("codigo")}**: {motivo}')
+
+    # ---------- Ex inquilinos: su deuda queda a su nombre, separada de la del inquilino actual ----------
+    try:
+        historial_ec = cargar_historial()
+        cerrados_ec = {t: cargar_periodos_cerrados(t) for t in ("alquiler", "electricidad", "agua")}
+    except Exception:
+        historial_ec, cerrados_ec = [], {}          # si el historial no se puede leer, la pantalla «Ex inquilinos» muestra el detalle del error
+    por_hist_ec = exinquilinos.agrupar_por_historial(cerrados_ec)
+    apts_ec = {a["id"]: a for a in apartamentos}
+    filas_ex_ec = []
+    for h_ec in historial_ec:
+        deuda_ec = exinquilinos.deuda_ex_inquilino(por_hist_ec.get(h_ec["id"], {}))
+        if deuda_ec["total"] > exinquilinos.TOLERANCIA:
+            filas_ex_ec.append({"Apartamento": (apts_ec.get(h_ec.get("apartamento_id")) or {}).get("codigo") or "—",
+                                "Ex inquilino": exinquilinos.nombre_ex_inquilino(h_ec),
+                                "Fecha de salida": str(h_ec.get("fecha_salida") or "—")[:10],
+                                "Alquiler": deuda_ec["alquiler"], "Luz": deuda_ec["luz"], "Agua": deuda_ec["agua"],
+                                "Deuda total": deuda_ec["total"]})
+    if filas_ex_ec:
+        with st.container(border=True):
+            st.markdown("**👥 Ex inquilinos con deuda pendiente** (separada de la deuda de los inquilinos actuales)")
+            st.dataframe(pd.DataFrame(filas_ex_ec), use_container_width=True, hide_index=True, column_config={
+                c: st.column_config.NumberColumn(format="Bs %.2f") for c in ("Alquiler", "Luz", "Agua", "Deuda total")})
+            st.caption(f"Total: {fmt_money(sum(f['Deuda total'] for f in filas_ex_ec))}. Para ver el detalle o registrar un pago, "
+                       "ve a «🚪 Ex inquilinos».")
 
 elif pagina == "📊 Actividad por usuario":
     st.title("📊 Reporte de actividad por usuario")
@@ -2240,6 +2358,572 @@ elif pagina == "📋 Rendición de alquileres":
                            mime="application/pdf", key="rd_pdf", use_container_width=True)
 
 # ==================================================================
+# PÁGINA: INVENTARIO (materiales, repuestos y suministros: entradas, salidas y Kardex)
+# ==================================================================
+elif pagina == "📦 Inventario":
+    st.title("📦 Inventario")
+    st.caption("Materiales, repuestos y suministros del edificio: entradas, salidas y Kardex valorizado a costo promedio ponderado.")
+    try:
+        articulos_inv = cargar_inventario_articulos()
+        movimientos_inv = cargar_inventario_movimientos()
+    except Exception as e:
+        st.error(texto_error_inventario("No se pudo leer el inventario", e))
+        st.stop()
+
+    ex_inv = inventario.existencias(articulos_inv, movimientos_inv)
+    estado_art = {f["id"]: f for f in ex_inv["filas"]}
+    nombres_orden = [f["id"] for f in ex_inv["filas"]]
+    articulos_por_id = {a["id"]: a for a in articulos_inv}
+    activos_inv = [articulos_por_id[i] for i in nombres_orden if articulos_por_id[i].get("activo", True) is not False]
+    todos_inv = [articulos_por_id[i] for i in nombres_orden]
+    movs_de = lambda art_id: [m for m in movimientos_inv if m["articulo_id"] == art_id]
+    hoy_inv = recibo.hoy_bolivia()
+    emisor_inv = usuario_actual.get("nombre") or usuario_actual.get("username")
+    categorias_inv = inventario.CATEGORIAS + sorted({a["categoria"] for a in articulos_inv if a.get("categoria")} - set(inventario.CATEGORIAS))
+    cant = inventario.formato_cantidad
+    if st.session_state.get("inv_msg"):
+        st.success(st.session_state.pop("inv_msg"))
+
+    t_exist, t_mov, t_kardex, t_hist, t_art = st.tabs(
+        ["📊 Existencias", "➕ Registrar movimiento", "📒 Kardex", "🕘 Movimientos", "🧰 Artículos"])
+
+    # ------------------------------------------------------------ Existencias
+    with t_exist:
+        ik1, ik2, ik3, ik4 = st.columns(4)
+        ik1.metric("Artículos activos", ex_inv["n_activos"])
+        ik2.metric("Valor del inventario", fmt_money(ex_inv["valor_total"]))
+        ik3.metric("Stock bajo", ex_inv["n_bajo"], help="Artículos cuyo stock llegó al mínimo definido")
+        ik4.metric("Sin stock", ex_inv["n_sin_stock"])
+        if not ex_inv["filas"]:
+            st.info("Todavía no hay artículos. Regístralos en la pestaña **🧰 Artículos** y luego sus entradas en **➕ Registrar movimiento**.")
+        else:
+            if1, if2, if3 = st.columns([2, 1, 1])
+            with if1:
+                texto_inv = st.text_input("Buscar", placeholder="código, nombre, categoría o ubicación", key="inv_buscar")
+            with if2:
+                cat_inv = st.selectbox("Categoría", ["Todas"] + categorias_inv, key="inv_cat")
+            with if3:
+                solo_alertas = st.checkbox("Solo stock bajo o sin stock", key="inv_alertas")
+            vista_inv = inventario.filtrar_existencias(ex_inv["filas"], texto_inv, cat_inv, solo_alertas)
+            iconos = {"OK": "✅ OK", "Stock bajo": "⚠️ Stock bajo", "Sin stock": "🔴 Sin stock"}
+            if vista_inv:
+                st.dataframe(pd.DataFrame([{
+                    "Código": f["codigo"], "Artículo": f["nombre"], "Categoría": f["categoria"], "Unidad": f["unidad"],
+                    "Ubicación": f["ubicacion"], "Stock": f["cantidad"], "Mínimo": f["stock_minimo"],
+                    "Costo promedio": f["costo_promedio"], "Valor": f["valor"], "Estado": iconos[f["estado"]]} for f in vista_inv]),
+                    use_container_width=True, hide_index=True, column_config={
+                        "Costo promedio": st.column_config.NumberColumn(format="Bs %.1f"), "Valor": st.column_config.NumberColumn(format="Bs %.2f")})
+                st.caption(f"Valor de lo que se muestra: {fmt_money(sum(f['valor'] for f in vista_inv))}. Costo promedio ponderado.")
+                ie1, ie2 = st.columns(2)
+                with ie1:
+                    st.download_button("📊 Descargar Excel", data=_inv_excel_existencias(vista_inv, sum(f["valor"] for f in vista_inv), hoy_inv, emisor_inv),
+                                       file_name=f"existencias_inventario_{hoy_inv:%Y-%m-%d}.xlsx", key="inv_xlsx_ex", use_container_width=True,
+                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                with ie2:
+                    resumen_vista = {**ex_inv, "valor_total": round(sum(f["valor"] for f in vista_inv), 2),
+                                     "n_activos": sum(1 for f in vista_inv if f["activo"]),
+                                     "n_bajo": sum(1 for f in vista_inv if f["estado"] == "Stock bajo"),
+                                     "n_sin_stock": sum(1 for f in vista_inv if f["estado"] == "Sin stock")}
+                    st.download_button("📄 Descargar PDF", data=_inv_pdf_existencias(vista_inv, resumen_vista, hoy_inv, emisor_inv),
+                                       file_name=f"existencias_inventario_{hoy_inv:%Y-%m-%d}.pdf", mime="application/pdf", key="inv_pdf_ex",
+                                       use_container_width=True)
+            else:
+                st.info("Ningún artículo coincide con el filtro.")
+
+    # ------------------------------------------------------------ Registrar movimiento
+    with t_mov:
+        if not activos_inv:
+            st.info("Primero registra al menos un artículo en la pestaña **🧰 Artículos**.")
+        else:
+            n_form = st.session_state.get("inv_n_form", 0)          # cambia al guardar: así el formulario se limpia
+            idx_art = st.selectbox(
+                "Artículo", range(len(activos_inv)), key=f"inv_art_{n_form}",
+                format_func=lambda i: f'{activos_inv[i]["codigo"]} — {activos_inv[i]["nombre"]} '
+                                      f'(stock: {cant(estado_art[activos_inv[i]["id"]]["cantidad"])} {activos_inv[i]["unidad"]})')
+            art = activos_inv[idx_art]
+            stock_art = estado_art[art["id"]]["cantidad"]
+            tipo_inv = st.radio("Tipo de movimiento", ["Entrada", "Salida"], horizontal=True, key=f"inv_tipo_{n_form}",
+                                help="Entrada: llega material (compra, donación…). Salida: se usa o se pierde material.")
+            im1, im2, im3 = st.columns(3)
+            with im1:
+                fecha_inv = st.date_input("Fecha", value=hoy_inv, format="DD/MM/YYYY", key=f"inv_fecha_{n_form}")
+            with im2:
+                cantidad_inv = st.number_input(f"Cantidad ({art['unidad']})", min_value=0.0, step=1.0, format="%.1f", value=0.0,
+                                               key=f"inv_cant_{n_form}")
+            with im3:
+                costo_inv = (st.number_input("Costo unitario (Bs)", min_value=0.0, step=0.5, format="%.1f", value=0.0, key=f"inv_costo_{n_form}",
+                                             help="Lo que costó cada unidad, con 1 decimal (ej. 3.5). Pon 0 si fue una donación.")
+                             if tipo_inv == "Entrada" else None)
+                if tipo_inv == "Salida":
+                    st.caption(f"Se valora al costo promedio actual: Bs {inventario_reportes._costo(estado_art[art['id']]['costo_promedio'])}")
+            motivo_inv = st.selectbox("Motivo", inventario.MOTIVOS[tipo_inv], key=f"inv_motivo_{tipo_inv}_{n_form}")
+            destino_inv, apartamento_inv = None, None
+            if tipo_inv == "Salida":
+                id1, id2 = st.columns(2)
+                with id1:
+                    if motivo_inv == inventario.MOTIVO_USO_APARTAMENTO:
+                        destino_tipo = inventario.DESTINO_APARTAMENTO          # el motivo ya dice que es un apartamento
+                        st.caption("Destino: un apartamento (elige cuál)")
+                    else:
+                        destino_tipo = st.selectbox("Destino", inventario.DESTINOS, key=f"inv_destino_{n_form}")
+                if destino_tipo == inventario.DESTINO_APARTAMENTO:
+                    apts_inv = cargar_apartamentos()
+                    with id2:
+                        if apts_inv:
+                            j_apt = st.selectbox("Apartamento", range(len(apts_inv)), key=f"inv_apt_{n_form}",
+                                                 format_func=lambda j: f'{apts_inv[j]["codigo"]} — {apts_inv[j].get("inquilino_nombre") or "vacío"}')
+                            apartamento_inv, destino_inv = apts_inv[j_apt]["id"], apts_inv[j_apt]["codigo"]
+                        else:
+                            st.warning("No hay apartamentos registrados.")
+                else:
+                    destino_inv = destino_tipo
+            ido1, ido2 = st.columns(2)
+            with ido1:
+                documento_inv = st.text_input("N° de documento (factura, vale, recibo)", key=f"inv_doc_{n_form}")
+            with ido2:
+                obs_inv = st.text_input("Observación (opcional)", key=f"inv_obs_{n_form}")
+            if cantidad_inv > 0:
+                if tipo_inv == "Entrada":
+                    st.caption(f"Stock: {cant(stock_art)} → {cant(stock_art + cantidad_inv)} {art['unidad']} · Valor de la entrada: "
+                               f"{fmt_money(round(cantidad_inv * (costo_inv or 0), 2))}")
+                else:
+                    st.caption(f"Stock: {cant(stock_art)} → {cant(stock_art - cantidad_inv)} {art['unidad']}")
+            if st.button("💾 Registrar movimiento", key=f"inv_guardar_{n_form}"):
+                errores_inv = inventario.validar_movimiento(tipo_inv, cantidad_inv, costo_inv, fecha_inv, motivo_inv, destino_inv, apartamento_inv, hoy_inv)
+                nuevo_inv = inventario.armar_movimiento(art["id"], tipo_inv, fecha_inv, cantidad_inv, costo_inv, motivo_inv, destino_inv,
+                                                        apartamento_inv, documento_inv, obs_inv, emisor_inv)
+                if not errores_inv:
+                    error_kardex = inventario.validar_en_kardex(movs_de(art["id"]), nuevo_inv, unidad=art["unidad"])
+                    if error_kardex:
+                        errores_inv.append(error_kardex)
+                for e in errores_inv:
+                    st.error(e)
+                if not errores_inv:
+                    try:
+                        db.crear_inventario_movimiento(nuevo_inv)
+                        limpiar_cache()
+                        st.session_state["inv_n_form"] = n_form + 1
+                        st.session_state["inv_msg"] = (f"{tipo_inv} registrada: {cant(cantidad_inv)} {art['unidad']} de {art['nombre']} "
+                                                       f"({motivo_inv}).")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(texto_error_inventario("Error al guardar", e))
+
+    # ------------------------------------------------------------ Kardex
+    with t_kardex:
+        if not todos_inv:
+            st.info("Todavía no hay artículos.")
+        else:
+            ik_art = st.selectbox("Artículo", range(len(todos_inv)), key="inv_k_art",
+                                  format_func=lambda i: f'{todos_inv[i]["codigo"]} — {todos_inv[i]["nombre"]}'
+                                                        + ("" if todos_inv[i].get("activo", True) is not False else " (inactivo)"))
+            art_k = todos_inv[ik_art]
+            k_todo = st.checkbox("Todo el historial", value=True, key="inv_k_todo")
+            k_desde = k_hasta = None
+            if not k_todo:
+                kc1, kc2 = st.columns(2)
+                with kc1:
+                    k_desde = st.date_input("Desde", value=hoy_inv.replace(day=1), format="DD/MM/YYYY", key="inv_k_desde")
+                with kc2:
+                    k_hasta = st.date_input("Hasta", value=hoy_inv, format="DD/MM/YYYY", key="inv_k_hasta")
+                if not k_desde or not k_hasta or k_desde > k_hasta:
+                    st.error("Revisa las fechas: «Desde» no puede ser posterior a «Hasta».")
+                    st.stop()
+            kp = inventario.kardex_periodo(movs_de(art_k["id"]), k_desde, k_hasta)
+            sf = kp["saldo_final"]
+            kk1, kk2, kk3, kk4, kk5 = st.columns(5)
+            kk1.metric("Saldo", f"{cant(sf['cantidad'])} {art_k['unidad']}")
+            kk2.metric("Costo promedio", f"Bs {inventario_reportes._costo(sf['costo'])}")
+            kk3.metric("Valor", fmt_money(sf["valor"]))
+            kk4.metric("Entradas", fmt_money(kp["entradas"]["valor"]), help=f"{cant(kp['entradas']['cantidad'])} {art_k['unidad']} en el periodo")
+            kk5.metric("Salidas", fmt_money(kp["salidas"]["valor"]), help=f"{cant(kp['salidas']['cantidad'])} {art_k['unidad']} en el periodo")
+            if any(f["negativo"] for f in kp["filas"]):
+                st.error("⚠️ Este Kardex tiene un saldo negativo (hay más salidas que entradas). Revisa los movimientos del artículo.")
+            filas_k = inventario_reportes.filas_kardex(kp)
+            if filas_k:
+                st.dataframe(pd.DataFrame([{enc: f.get(clave) for clave, enc, _t in inventario_reportes.COLUMNAS_KARDEX} for f in filas_k]),
+                             use_container_width=True, hide_index=True, column_config={
+                                 **{enc: st.column_config.NumberColumn(format="Bs %.1f") for _c, enc, t in inventario_reportes.COLUMNAS_KARDEX if "costo" in enc.lower()},
+                                 **{enc: st.column_config.NumberColumn(format="Bs %.2f") for _c, enc, t in inventario_reportes.COLUMNAS_KARDEX if enc.endswith("valor")}})
+                st.caption("Kardex con costo promedio ponderado: cada salida se valora al costo promedio que tenía el artículo ese día. El costo promedio se muestra con 1 decimal, pero el valor se calcula con el promedio exacto.")
+            else:
+                st.info("Este artículo no tiene movimientos en el periodo.")
+            kd1, kd2 = st.columns(2)
+            with kd1:
+                st.download_button("📊 Descargar Excel", data=_inv_excel_kardex(art_k, kp, k_desde, k_hasta, emisor_inv),
+                                   file_name=f"kardex_{art_k['codigo']}.xlsx", key="inv_xlsx_k", use_container_width=True,
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            with kd2:
+                st.download_button("📄 Descargar PDF", data=_inv_pdf_kardex(art_k, kp, k_desde, k_hasta, emisor_inv),
+                                   file_name=f"kardex_{art_k['codigo']}.pdf", mime="application/pdf", key="inv_pdf_k", use_container_width=True)
+
+    # ------------------------------------------------------------ Movimientos (historial)
+    with t_hist:
+        hc1, hc2, hc3, hc4 = st.columns(4)
+        with hc1:
+            h_desde = st.date_input("Desde", value=hoy_inv.replace(day=1), format="DD/MM/YYYY", key="inv_h_desde")
+        with hc2:
+            h_hasta = st.date_input("Hasta", value=hoy_inv, format="DD/MM/YYYY", key="inv_h_hasta")
+        with hc3:
+            h_tipo = st.selectbox("Tipo", ["Todos"] + inventario.TIPOS, key="inv_h_tipo")
+        with hc4:
+            h_art = st.selectbox("Artículo", ["Todos"] + [f'{a["codigo"]} — {a["nombre"]}' for a in todos_inv], key="inv_h_art")
+        if not h_desde or not h_hasta or h_desde > h_hasta:
+            st.error("Revisa las fechas: «Desde» no puede ser posterior a «Hasta».")
+            st.stop()
+        h_art_id = None if h_art == "Todos" else todos_inv[[f'{a["codigo"]} — {a["nombre"]}' for a in todos_inv].index(h_art)]["id"]
+        mv_inv = inventario.movimientos_valorizados(articulos_inv, movimientos_inv, h_desde, h_hasta, h_art_id, h_tipo)
+        hk1, hk2, hk3 = st.columns(3)
+        hk1.metric("Entradas", fmt_money(mv_inv["entradas_valor"]), help=f'{mv_inv["n_entradas"]} movimiento(s)')
+        hk2.metric("Salidas", fmt_money(mv_inv["salidas_valor"]), help=f'{mv_inv["n_salidas"]} movimiento(s)')
+        hk3.metric("Movimientos", len(mv_inv["filas"]))
+        if not mv_inv["filas"]:
+            st.info("No hay movimientos con ese filtro.")
+        else:
+            st.dataframe(pd.DataFrame([{enc: f[clave] for clave, enc, _t in inventario_reportes.COLUMNAS_MOVIMIENTOS} for f in mv_inv["filas"]]),
+                         use_container_width=True, hide_index=True, column_config={
+                             "Costo unitario (Bs)": st.column_config.NumberColumn(format="Bs %.1f"), "Valor (Bs)": st.column_config.NumberColumn(format="Bs %.2f")})
+            st.caption("Las salidas se valoran al costo promedio que tenía el artículo ese día.")
+            hd1, hd2 = st.columns(2)
+            with hd1:
+                st.download_button("📊 Descargar Excel", data=_inv_excel_movimientos(mv_inv, h_desde, h_hasta, emisor_inv),
+                                   file_name=f"movimientos_inventario_{h_desde:%Y-%m-%d}_{h_hasta:%Y-%m-%d}.xlsx", key="inv_xlsx_h",
+                                   use_container_width=True, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            with hd2:
+                st.download_button("📄 Descargar PDF", data=_inv_pdf_movimientos(mv_inv, h_desde, h_hasta, emisor_inv),
+                                   file_name=f"movimientos_inventario_{h_desde:%Y-%m-%d}_{h_hasta:%Y-%m-%d}.pdf", mime="application/pdf",
+                                   key="inv_pdf_h", use_container_width=True)
+            with st.expander("✏️ Corregir o eliminar un movimiento"):
+                st.caption("Se pueden corregir el documento y la observación. Para cambiar la cantidad, la fecha o el costo hay que eliminar el "
+                           "movimiento (solo el Administrador) y registrarlo de nuevo: así el Kardex nunca queda alterado.")
+                i_mov = st.selectbox("Movimiento", range(len(mv_inv["filas"])), key="inv_h_sel",
+                                     format_func=lambda i: f'{mv_inv["filas"][i]["fecha_txt"]} — {mv_inv["filas"][i]["codigo"]} '
+                                                           f'{mv_inv["filas"][i]["articulo"]} — {mv_inv["filas"][i]["tipo"]} '
+                                                           f'{cant(mv_inv["filas"][i]["cantidad"])} {mv_inv["filas"][i]["unidad"]}')
+                fila_m = mv_inv["filas"][i_mov]
+                mov_orig = next(m for m in movimientos_inv if m["id"] == fila_m["id"])
+                art_m = articulos_por_id[mov_orig["articulo_id"]]
+                with st.form(f'inv_editar_{mov_orig["id"]}'):
+                    doc_nuevo = st.text_input("N° de documento", value=mov_orig.get("documento") or "")
+                    obs_nueva = st.text_input("Observación", value=mov_orig.get("observacion") or "")
+                    guardar_m = st.form_submit_button("💾 Guardar cambios")
+                if guardar_m:
+                    try:
+                        db.actualizar_inventario_movimiento(mov_orig["id"], inventario.armar_edicion(
+                            mov_orig.get("destino"), mov_orig.get("apartamento_id"), doc_nuevo, obs_nueva, mov_orig["tipo"]))
+                        limpiar_cache()
+                        st.success("Movimiento actualizado.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(texto_error_inventario("Error al actualizar", e))
+                if es_admin:
+                    confirmar_del = st.checkbox("Confirmo que quiero eliminar este movimiento", key=f'inv_del_conf_{mov_orig["id"]}')
+                    if st.button("🗑️ Eliminar movimiento", key=f'inv_del_{mov_orig["id"]}'):
+                        error_del = inventario.validar_en_kardex(movs_de(art_m["id"]), excluir_id=mov_orig["id"], unidad=art_m["unidad"])
+                        if not confirmar_del:
+                            st.error("Marca la casilla de confirmación para eliminar.")
+                        elif error_del:
+                            st.error(error_del)
+                        else:
+                            try:
+                                db.eliminar_inventario_movimiento(mov_orig["id"])
+                                limpiar_cache()
+                                st.success("Movimiento eliminado.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(texto_error_inventario("Error al eliminar", e))
+
+    # ------------------------------------------------------------ Artículos
+    with t_art:
+        if todos_inv:
+            st.dataframe(pd.DataFrame([{
+                "Código": f["codigo"], "Artículo": f["nombre"], "Categoría": f["categoria"], "Unidad": f["unidad"], "Ubicación": f["ubicacion"],
+                "Stock mínimo": f["stock_minimo"], "Stock": f["cantidad"], "Movimientos": f["n_movimientos"],
+                "Activo": "Sí" if f["activo"] else "No"} for f in ex_inv["filas"]]), use_container_width=True, hide_index=True)
+        with st.expander("➕ Nuevo artículo", expanded=not todos_inv):
+            with st.form("inv_nuevo_articulo", clear_on_submit=True):
+                na1, na2 = st.columns(2)
+                with na1:
+                    n_codigo = st.text_input("Código", value=inventario.siguiente_codigo(articulos_inv),
+                                             help="Se sugiere el siguiente libre; puedes cambiarlo (no se puede repetir).")
+                with na2:
+                    n_nombre = st.text_input("Nombre del artículo", placeholder="Ej. Foco LED 9W")
+                na3, na4, na5 = st.columns(3)
+                with na3:
+                    n_cat = st.selectbox("Categoría", categorias_inv, index=len(inventario.CATEGORIAS) - 1)
+                with na4:
+                    n_uni = st.selectbox("Unidad de medida", inventario.UNIDADES)
+                with na5:
+                    n_min = st.number_input("Stock mínimo", min_value=0.0, step=1.0, format="%.1f", value=0.0,
+                                            help="Cuando el stock llegue a este número, el artículo se marca como «Stock bajo». 0 = sin alerta.")
+                n_ubic = st.text_input("Ubicación (opcional)", placeholder="Ej. Bodega, cuarto de máquinas")
+                n_notas = st.text_area("Notas (opcional)", height=70)
+                if st.form_submit_button("💾 Guardar artículo"):
+                    errores_art = inventario.validar_articulo(n_codigo, n_nombre, n_uni, n_min, articulos_inv)
+                    for e in errores_art:
+                        st.error(e)
+                    if not errores_art:
+                        try:
+                            db.crear_inventario_articulo(inventario.armar_articulo(n_codigo, n_nombre, n_cat, n_uni, n_min, n_ubic, n_notas,
+                                                                                    True, emisor_inv))
+                            limpiar_cache()
+                            st.session_state["inv_msg"] = f"Artículo «{n_nombre.strip()}» registrado. Ahora registra su entrada inicial en «➕ Registrar movimiento»."
+                            st.rerun()
+                        except Exception as e:
+                            st.error(texto_error_inventario("Error al guardar", e))
+        if todos_inv:
+            with st.expander("✏️ Editar un artículo"):
+                i_art = st.selectbox("Artículo", range(len(todos_inv)), key="inv_e_sel",
+                                     format_func=lambda i: f'{todos_inv[i]["codigo"]} — {todos_inv[i]["nombre"]}')
+                a_ed = todos_inv[i_art]
+                n_movs_ed = estado_art[a_ed["id"]]["n_movimientos"]
+                with st.form(f'inv_editar_art_{a_ed["id"]}'):
+                    ea1, ea2 = st.columns(2)
+                    with ea1:
+                        e_codigo = st.text_input("Código", value=a_ed.get("codigo") or "")
+                    with ea2:
+                        e_nombre = st.text_input("Nombre", value=a_ed.get("nombre") or "")
+                    ea3, ea4, ea5 = st.columns(3)
+                    with ea3:
+                        e_cat = st.selectbox("Categoría", categorias_inv, index=categorias_inv.index(a_ed["categoria"]) if a_ed.get("categoria") in categorias_inv else len(inventario.CATEGORIAS) - 1)
+                    with ea4:
+                        unidades_ed = inventario.UNIDADES + ([a_ed["unidad"]] if a_ed.get("unidad") not in inventario.UNIDADES else [])
+                        e_uni = st.selectbox("Unidad de medida", unidades_ed, index=unidades_ed.index(a_ed["unidad"]) if a_ed.get("unidad") in unidades_ed else 0)
+                    with ea5:
+                        e_min = st.number_input("Stock mínimo", min_value=0.0, step=1.0, format="%.1f", value=float(a_ed.get("stock_minimo") or 0))
+                    e_ubic = st.text_input("Ubicación", value=a_ed.get("ubicacion") or "")
+                    e_notas = st.text_area("Notas", value=a_ed.get("notas") or "", height=70)
+                    e_activo = st.checkbox("Activo", value=a_ed.get("activo", True) is not False,
+                                           help="Un artículo inactivo no aparece al registrar movimientos ni cuenta en el valor del inventario.")
+                    guardar_a = st.form_submit_button("💾 Guardar cambios")
+                if guardar_a:
+                    errores_ed = inventario.validar_articulo(e_codigo, e_nombre, e_uni, e_min, articulos_inv, a_ed["id"])
+                    if not e_activo and estado_art[a_ed["id"]]["cantidad"] > 0:
+                        st.warning("Este artículo todavía tiene stock; al desactivarlo deja de contar en el valor del inventario.")
+                    for e in errores_ed:
+                        st.error(e)
+                    if not errores_ed:
+                        try:
+                            db.actualizar_inventario_articulo(a_ed["id"], inventario.armar_articulo(e_codigo, e_nombre, e_cat, e_uni, e_min, e_ubic, e_notas, e_activo))
+                            limpiar_cache()
+                            st.success("Artículo actualizado.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(texto_error_inventario("Error al actualizar", e))
+                if es_admin:
+                    if n_movs_ed:
+                        st.caption(f"Este artículo tiene {n_movs_ed} movimiento(s), por eso no se puede eliminar: desmarca «Activo» para dejar de usarlo.")
+                    else:
+                        conf_art = st.checkbox("Confirmo que quiero eliminar este artículo", key=f'inv_delart_conf_{a_ed["id"]}')
+                        if st.button("🗑️ Eliminar artículo", key=f'inv_delart_{a_ed["id"]}'):
+                            if not conf_art:
+                                st.error("Marca la casilla de confirmación para eliminar.")
+                            else:
+                                try:
+                                    db.eliminar_inventario_articulo(a_ed["id"])
+                                    limpiar_cache()
+                                    st.success("Artículo eliminado.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(texto_error_inventario("Error al eliminar", e))
+
+
+# ==================================================================
+# PÁGINA: CONCILIACIÓN BANCARIA (extracto del banco vs. registros del sistema)
+# ==================================================================
+elif pagina == "🏦 Conciliación bancaria":
+    st.title("🏦 Conciliación bancaria")
+    st.caption(
+        "Compara el extracto de tu cuenta bancaria con lo registrado en el sistema: qué cobros y pagos coinciden y cuáles no, y por qué "
+        "(probablemente no se registraron, se registraron con otro monto o fecha, o fueron en efectivo)."
+    )
+    if not puede_editar_estado:
+        st.error("Esta pantalla es solo para el Administrador y la tesorería, porque muestra el extracto del banco.")
+        st.stop()
+
+    archivo_cb = st.file_uploader("Extracto del banco (Excel .xlsx o CSV)", type=["xlsx", "csv", "txt"], key="cb_archivo")
+    if archivo_cb is None:
+        st.info(
+            "Sube el extracto que descargas del banco. Debe tener una columna de **Fecha** y una de **Monto** (negativo = sale dinero), o bien "
+            "**Débito** y **Crédito**. Si trae **Nota** (a quién o de quién), **Saldo** y una columna **sin título entre la Nota y el Monto** donde "
+            "anotas de qué fue cada movimiento (ej. «Alquiler PP-03 (Ana - Octubre)»), la comparación es mucho más precisa."
+        )
+        st.caption("🔒 El archivo no se guarda: se lee solo para esta comparación.")
+        st.stop()
+    contenido_cb = archivo_cb.getvalue()
+    firma_cb = f"{archivo_cb.name}_{len(contenido_cb)}"
+    try:
+        ext_cb = _leer_extracto_cache(contenido_cb, archivo_cb.name, None)
+    except extracto.ErrorExtracto as e:
+        st.error(str(e))
+        st.stop()
+
+    campos_cb = ["fecha", "monto", "debito", "credito", "contraparte", "detalle", "saldo", "hora", "nro", "transaccion"]
+    with st.expander("🔧 Columnas del extracto (revisa que estén bien detectadas)", expanded=bool(ext_cb["faltan"])):
+        if ext_cb["faltan"]:
+            st.warning("No pude identificar todas las columnas obligatorias. Elígelas aquí (fecha y monto, o débito y crédito).")
+        opciones_cb = [-1] + list(range(len(ext_cb["encabezados"])))
+        nombre_col_cb = lambda i: "(ninguna)" if i < 0 else f'{openpyxl.utils.get_column_letter(i + 1)} — {ext_cb["encabezados"][i] or "(sin título)"}'
+        mapeo_cb, columnas_ui = {}, st.columns(2)
+        for i_cb, campo_cb in enumerate(campos_cb):
+            with columnas_ui[i_cb % 2]:
+                elegido_cb = st.selectbox(extracto.NOMBRES_CAMPOS[campo_cb], opciones_cb, index=opciones_cb.index(ext_cb["columnas"].get(campo_cb, -1)),
+                                          format_func=nombre_col_cb, key=f"cb_col_{campo_cb}_{firma_cb}")
+            if elegido_cb >= 0:
+                mapeo_cb[campo_cb] = elegido_cb
+        if mapeo_cb != ext_cb["columnas"]:
+            try:
+                ext_cb = _leer_extracto_cache(contenido_cb, archivo_cb.name, tuple(sorted(mapeo_cb.items())))
+            except extracto.ErrorExtracto as e:
+                st.error(str(e))
+                st.stop()
+    if ext_cb["faltan"] or not ext_cb["lineas"]:
+        st.error("Elige al menos la columna de fecha y la de monto (o las de débito y crédito) para continuar.")
+        st.stop()
+
+    # ---------------- 1. Lo que se leyó ----------------
+    st.subheader("1. Lo que leí del extracto")
+    ck1, ck2, ck3, ck4, ck5 = st.columns(5)
+    ck1.metric("Movimientos", len(ext_cb["lineas"]))
+    ck2.metric("Créditos (entra)", fmt_money(ext_cb["total_creditos"]))
+    ck3.metric("Débitos (sale)", fmt_money(ext_cb["total_debitos"]))
+    ck4.metric("Periodo", f'{ext_cb["desde"]:%d/%m} al {ext_cb["hasta"]:%d/%m/%Y}')
+    ck5.metric("Saldo final", fmt_money(ext_cb["saldo_final"]) if ext_cb["saldo_final"] is not None else "—")
+    for aviso_cb in ext_cb["avisos"]:
+        st.caption(f"ℹ️ {aviso_cb}")
+    if ext_cb["problemas_saldo"]:
+        st.warning(f"⚠️ El saldo del extracto no cuadra en {len(ext_cb['problemas_saldo'])} línea(s): puede faltar un movimiento, haber uno repetido o "
+                   "estar mal leído. Revisa antes de confiar en la comparación.")
+        st.dataframe(pd.DataFrame([{"Fila del archivo": p["fila"], "Fecha": p["fecha"], "Monto": p["monto"], "Saldo esperado": p["saldo_esperado"],
+                                    "Saldo del extracto": p["saldo_extracto"], "Diferencia": p["diferencia"]} for p in ext_cb["problemas_saldo"]]),
+                     use_container_width=True, hide_index=True)
+    elif ext_cb["saldo_final"] is not None:
+        st.success("✅ El saldo del extracto es coherente (saldo anterior + monto = saldo): no faltan ni sobran movimientos.")
+    else:
+        st.caption("El extracto no trae columna de saldo, así que no se pudo controlar que esté completo.")
+    with st.expander("Ver los movimientos leídos"):
+        st.dataframe(pd.DataFrame([{"Fecha": l["fecha"], "Hora": l["hora"], "N° transacción": l["nro"], "Transacción": l["transaccion"],
+                                    "Nota": l["contraparte"], "Detalle": l["detalle"], "Monto": l["monto"], "Saldo": l["saldo"]} for l in ext_cb["lineas"]]),
+                     use_container_width=True, hide_index=True)
+
+    # ---------------- 2. Cómo comparar ----------------
+    st.subheader("2. Cómo comparar")
+    co1, co2 = st.columns(2)
+    with co1:
+        dias_cb = int(st.number_input("Diferencia de fechas aceptada (días)", min_value=0, max_value=15, value=3, step=1, key="cb_dias",
+                                      help="Un pago se considera el mismo si el monto es exacto y las fechas del banco y del sistema difieren hasta estos días."))
+    with co2:
+        efectivo_cb = st.checkbox("Comparar también los pagos en efectivo", key="cb_efectivo",
+                                  help="Por defecto solo se comparan los registros que no son en efectivo (QR, transferencia…). Actívalo si a veces depositas "
+                                       "en el banco el efectivo cobrado.")
+    palabras_cb = st.text_input("Ignorar movimientos del banco que contengan (separa con comas)", key="cb_palabras", placeholder="pago de banco, traspaso propio",
+                                help="Para dejar fuera movimientos que no son del negocio (pagos personales, traspasos entre tus cuentas…).")
+    if ids_apartamentos_permitidos() is not None:
+        st.warning("Tu usuario ve solo algunos apartamentos: los cobros de los demás saldrán como «sin registrar» aunque estén registrados.")
+
+    # ---------------- 3. Registros del sistema ----------------
+    margen_cb = max(dias_cb, conciliacion.VENTANA_AGRUPADA)
+    desde_sis_cb = date.fromordinal(ext_cb["desde"].toordinal() - margen_cb)
+    hasta_sis_cb = date.fromordinal(ext_cb["hasta"].toordinal() + margen_cb)
+    try:
+        actividad_cb = cargar_actividad(str(desde_sis_cb), str(hasta_sis_cb))
+        movs_cuadre_cb = cuadre.construir_movimientos(actividad_cb["pagos_generales"], actividad_cb["compras"], actividad_cb["ventas"])
+        periodos_cb = {t: cargar_periodos_abiertos(t) for t in ("alquiler", "electricidad", "agua")}
+        try:
+            historial_cb = cargar_historial()
+            cerrados_cb = {t: cargar_periodos_cerrados(t) for t in ("alquiler", "electricidad", "agua")}
+        except Exception as e:
+            historial_cb, cerrados_cb = [], {}
+            st.warning(texto_error_historial("No se pudo leer el historial de ex inquilinos: no se incluyen sus pagos", e))
+        rd_cb = rendicion.construir_rendicion(cargar_apartamentos(), periodos_cb["alquiler"], periodos_cb["electricidad"], periodos_cb["agua"],
+                                              desde_sis_cb, hasta_sis_cb, recibo.hoy_bolivia(), cerrados=cerrados_cb, historial=historial_cb)
+    except Exception as e:
+        st.error(f"No se pudieron leer los registros del sistema: {e}")
+        st.stop()
+    r_cb = conciliacion.conciliar(
+        ext_cb["lineas"], conciliacion.unificar_sistema(rd_cb["movimientos"], movs_cuadre_cb), dias=dias_cb, incluir_efectivo=efectivo_cb,
+        palabras_excluir=[p.strip() for p in palabras_cb.split(",") if p.strip()], desde=ext_cb["desde"], hasta=ext_cb["hasta"])
+    rs_cb = r_cb["resumen"]
+
+    # ---------------- 4. Resultado ----------------
+    st.subheader("3. Resultado")
+    comparables_cb = rs_cb["banco"]["n"] - rs_cb["excluidos"]["n"]
+    pct_cb = round(100 * rs_cb["conciliado"]["n"] / comparables_cb) if comparables_cb else 0
+    cr1, cr2, cr3, cr4 = st.columns(4)
+    cr1.metric("Conciliados", f'{rs_cb["conciliado"]["n"]} de {comparables_cb}', help=f"{pct_cb}% de los movimientos del banco ya están en el sistema")
+    cr2.metric("En el banco, sin registrar", rs_cb["sin_registro"]["n"],
+               help=f'Entra {fmt_money(rs_cb["sin_registro"]["creditos"])} · Sale {fmt_money(rs_cb["sin_registro"]["debitos"])}')
+    cr3.metric("En el sistema, sin banco", rs_cb["sistema_sin_banco"]["n"],
+               help=f'Ingresos {fmt_money(rs_cb["sistema_sin_banco"]["ingresos"])} · Egresos {fmt_money(rs_cb["sistema_sin_banco"]["egresos"])}')
+    cr4.metric("Efectivo (no comparado)", rs_cb["efectivo_no_comparado"]["n"])
+    st.markdown(f"**{pct_cb}%** de los movimientos del banco ya están registrados en el sistema. "
+                f"Sin registrar: entra {fmt_money(rs_cb['sin_registro']['creditos'])} y sale {fmt_money(rs_cb['sin_registro']['debitos'])}.")
+    if rs_cb["por_confianza"]["Revisar"] or rs_cb["por_confianza"]["Media"]:
+        st.caption(f'Coincidencias: {rs_cb["por_confianza"]["Alta"]} con confianza alta, {rs_cb["por_confianza"]["Media"]} media y '
+                   f'{rs_cb["por_confianza"]["Revisar"]} para revisar (pestaña «Conciliados»).')
+
+    fmt_cb = {c: st.column_config.NumberColumn(format="Bs %.2f") for c in ("Monto", "Monto banco", "Monto sistema", "Saldo")}
+    t_sin, t_sis, t_con, t_ext, t_efe = st.tabs([
+        f"⚠️ En el banco, sin registrar ({rs_cb['sin_registro']['n']})", f"📋 En el sistema, sin banco ({rs_cb['sistema_sin_banco']['n']})",
+        f"✅ Conciliados ({len(r_cb['pares'])})", "🏦 Extracto completo", f"💵 Efectivo ({rs_cb['efectivo_no_comparado']['n']})"])
+    with t_sin:
+        filas_sin_cb = conciliacion_reportes.filas_banco_sin_registro(r_cb)
+        if filas_sin_cb:
+            st.caption("Movimientos que están en el banco pero no encontré en el sistema. «Causa probable» te dice por qué.")
+            st.dataframe(pd.DataFrame([{enc: f[c] for c, enc, _t in conciliacion_reportes.COL_BANCO_SIN if c not in ("hora", "nro", "transaccion", "otras")}
+                                       for f in filas_sin_cb]), use_container_width=True, hide_index=True, column_config=fmt_cb)
+            with st.expander("Ver todas las pistas de cada movimiento"):
+                for x_cb in r_cb["banco_sin_registro"]:
+                    l_cb = x_cb["linea"]
+                    st.markdown(f"**{l_cb['fecha']:%d/%m/%Y} · Bs {l_cb['monto']:,.2f} · {l_cb['contraparte'] or l_cb['transaccion']}**"
+                                + (f" — _{l_cb['detalle']}_" if l_cb["detalle"] else ""))
+                    for causa_cb in x_cb["causas"]:
+                        st.markdown(f"- {causa_cb}")
+        else:
+            st.success("Todos los movimientos del banco están registrados en el sistema. 🎉")
+    with t_sis:
+        filas_sis_cb = conciliacion_reportes.filas_sistema_sin_banco(r_cb)
+        if filas_sis_cb:
+            st.caption("Registros del sistema que no aparecen en el extracto (no incluye los pagos en efectivo, salvo que actives esa opción).")
+            st.dataframe(pd.DataFrame([{enc: f[c] for c, enc, _t in conciliacion_reportes.COL_SISTEMA_SIN if c != "otras"} for f in filas_sis_cb]),
+                         use_container_width=True, hide_index=True, column_config=fmt_cb)
+        else:
+            st.success("Todos los registros del sistema aparecen en el banco.")
+    with t_con:
+        filas_con_cb = conciliacion_reportes.filas_conciliados(r_cb)
+        if filas_con_cb:
+            filtro_con_cb = st.selectbox("Confianza", ["Todas", "Alta", "Media", "Revisar"], key="cb_filtro_conf",
+                                         help="Alta: el texto confirma la coincidencia. Media: coincide el monto y la fecha pero el texto no lo confirma. Revisar: conviene verificarla.")
+            vista_con_cb = [f for f in filas_con_cb if filtro_con_cb == "Todas" or f["confianza"] == filtro_con_cb]
+            st.dataframe(pd.DataFrame([{enc: f[c] for c, enc, _t in conciliacion_reportes.COL_CONCILIADOS} for f in vista_con_cb]),
+                         use_container_width=True, hide_index=True, column_config=fmt_cb)
+        else:
+            st.info("No hubo coincidencias.")
+    with t_ext:
+        iconos_cb = {"Conciliado": "✅ Conciliado", "Sin registrar en el sistema": "⚠️ Sin registrar", "Excluido": "➖ Excluido"}
+        st.dataframe(pd.DataFrame([{**{enc: f[c] for c, enc, _t in conciliacion_reportes.COL_EXTRACTO if c not in ("estado", "n", "hora", "nro")},
+                                    "Estado": iconos_cb[f["estado"]]} for f in conciliacion_reportes.filas_extracto(r_cb)]),
+                     use_container_width=True, hide_index=True, column_config=fmt_cb)
+    with t_efe:
+        if r_cb["efectivo"]:
+            st.caption("Registros pagados en efectivo en las fechas del extracto: no pasan por el banco, por eso no se compararon.")
+            st.dataframe(pd.DataFrame([{enc: f[c] for c, enc, _t in conciliacion_reportes.COL_EFECTIVO} for f in conciliacion_reportes.filas_efectivo(r_cb)]),
+                         use_container_width=True, hide_index=True, column_config=fmt_cb)
+        else:
+            st.info("No hay registros en efectivo para mostrar (o activaste «Comparar también los pagos en efectivo»).")
+
+    emisor_cb = usuario_actual.get("nombre") or usuario_actual.get("username")
+    base_cb = f"conciliacion_bancaria_{ext_cb['desde']:%Y-%m-%d}_{ext_cb['hasta']:%Y-%m-%d}"
+    dc1, dc2 = st.columns(2)
+    with dc1:
+        st.download_button("📊 Descargar Excel", data=_conc_excel_cache(r_cb, ext_cb, emisor_cb), file_name=f"{base_cb}.xlsx", key="cb_xlsx",
+                           use_container_width=True, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    with dc2:
+        st.download_button("📄 Descargar PDF", data=_conc_pdf_cache(r_cb, ext_cb, emisor_cb), file_name=f"{base_cb}.pdf", mime="application/pdf",
+                           key="cb_pdf", use_container_width=True)
+
+
+# ==================================================================
 # PÁGINA: EX INQUILINOS (historial, deuda y pagos de los inquilinos que ya salieron)
 # ==================================================================
 elif pagina == "🚪 Ex inquilinos":
@@ -2264,7 +2948,7 @@ elif pagina == "🚪 Ex inquilinos":
         filas_ex.append({"h": h, "deuda": d_ex, "codigo": (apts_ex.get(h.get("apartamento_id")) or {}).get("codigo") or "—"})
     if not filas_ex:
         st.info("Todavía no hay inquilinos en el historial. Cuando un inquilino se vaya, registra su salida en "
-                "**Apartamentos → Lista y edición → 🚪 Registrar la salida**.")
+                "**Apartamentos → pestaña 🚪 Salida de inquilino**.")
         st.stop()
 
     solo_deuda_ex = st.checkbox("Mostrar solo ex inquilinos con deuda", value=True, key="ex_solo_deuda")
