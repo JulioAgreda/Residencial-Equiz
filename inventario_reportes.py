@@ -25,8 +25,11 @@ def _cant(valor):
 
 
 def _costo(valor):
-    """Costo unitario con 1 decimal (3.5). El costo promedio se muestra redondeado; los valores en Bs usan el promedio exacto."""
-    return "" if valor is None else f"{inv.a_un_decimal(valor):,.1f}"
+    """Costo unitario con 2 decimales, o hasta 4 si hacen falta (1.5714)."""
+    if valor is None:
+        return ""
+    texto = f"{valor:,.4f}".rstrip("0")
+    return texto + "0" * max(0, 2 - len(texto.split(".")[1]))
 
 
 def _libro(nombre_hoja, titulo, subtitulo, columnas, filas, totales=None):
@@ -48,7 +51,7 @@ def _a_bytes(wb):
 
 COLUMNAS_EXISTENCIAS = [("codigo", "Código", "txt"), ("nombre", "Artículo", "txt"), ("categoria", "Categoría", "txt"),
                         ("unidad", "Unidad", "txt"), ("ubicacion", "Ubicación", "txt"), ("cantidad", "Stock", "num"),
-                        ("stock_minimo", "Mínimo", "num"), ("costo_promedio", "Costo promedio (Bs)", "bs1"),
+                        ("stock_minimo", "Mínimo", "num"), ("costo_promedio", "Costo promedio (Bs)", "bs"),
                         ("valor", "Valor (Bs)", "bs"), ("estado", "Estado", "txt")]
 
 
@@ -89,10 +92,10 @@ def generar_pdf_existencias(filas, resumen, hoy=None, emitido_por=None):
 # ============================================================
 
 COLUMNAS_KARDEX = [("fecha_txt", "Fecha", "txt"), ("detalle", "Detalle", "txt"),
-                   ("entrada_cantidad", "Entrada: cantidad", "num"), ("entrada_costo", "Entrada: costo unit.", "bs1"),
+                   ("entrada_cantidad", "Entrada: cantidad", "num"), ("entrada_costo", "Entrada: costo unit.", "bs"),
                    ("entrada_valor", "Entrada: valor", "bs"), ("salida_cantidad", "Salida: cantidad", "num"),
-                   ("salida_costo", "Salida: costo unit.", "bs1"), ("salida_valor", "Salida: valor", "bs"),
-                   ("saldo_cantidad", "Saldo: cantidad", "num"), ("saldo_costo", "Saldo: costo prom.", "bs1"),
+                   ("salida_costo", "Salida: costo unit.", "bs"), ("salida_valor", "Salida: valor", "bs"),
+                   ("saldo_cantidad", "Saldo: cantidad", "num"), ("saldo_costo", "Saldo: costo prom.", "bs"),
                    ("saldo_valor", "Saldo: valor", "bs")]
 
 
@@ -152,7 +155,7 @@ def generar_pdf_kardex(articulo, kp, desde=None, hasta=None, emitido_por=None):
             [1.1, 3.6, 1.1, 1.1, 1.2, 1.1, 1.1, 1.2, 1.1, 1.1, 1.3], tuple(range(2, 11)),
             ["TOTAL", "", _cant(kp["entradas"]["cantidad"]), "", _n(kp["entradas"]["valor"]), _cant(kp["salidas"]["cantidad"]), "",
              _n(kp["salidas"]["valor"]), "", "", ""], ancho=ancho, est=est))
-        story.append(Paragraph("Costo promedio ponderado: cada salida se valora al costo promedio que tenía el artículo ese día. El costo se muestra con 1 decimal; el valor se calcula con el promedio exacto.", est.nota))
+        story.append(Paragraph("Costo promedio ponderado: cada salida se valora al costo promedio que tenía el artículo ese día.", est.nota))
     else:
         story.append(Paragraph("Este artículo no tiene movimientos en el periodo.", est.nota))
     story += cd.firmas_pdf(ancho, "Elaborado por", "Revisado por (Administración)")
@@ -167,7 +170,7 @@ def generar_pdf_kardex(articulo, kp, desde=None, hasta=None, emitido_por=None):
 COLUMNAS_MOVIMIENTOS = [("fecha_txt", "Fecha", "txt"), ("codigo", "Código", "txt"), ("articulo", "Artículo", "txt"),
                         ("tipo", "Tipo", "txt"), ("motivo", "Motivo", "txt"), ("destino", "Destino", "txt"),
                         ("documento", "Documento", "txt"), ("cantidad", "Cantidad", "num"), ("unidad", "Unidad", "txt"),
-                        ("costo_unitario", "Costo unitario (Bs)", "bs1"), ("valor", "Valor (Bs)", "bs"),
+                        ("costo_unitario", "Costo unitario (Bs)", "bs"), ("valor", "Valor (Bs)", "bs"),
                         ("registrado_por", "Registrado por", "txt")]
 COLUMNAS_POR_MOTIVO = [("tipo", "Tipo", "txt"), ("motivo", "Motivo", "txt"), ("n", "Movimientos", "num"), ("valor", "Valor (Bs)", "bs")]
 

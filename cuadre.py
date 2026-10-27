@@ -241,11 +241,6 @@ def filas_por_origen(cuadre, origen):
 _FMT = rp._FMT_EXCEL
 
 
-def _formato_celda(tipo):
-    """Formato de número de Excel según el tipo de columna: 'bs' = dinero con 2 decimales, 'bs1' = dinero con 1 decimal."""
-    return {"bs": _FMT, "bs1": '"Bs" #,##0.0'}.get(tipo)
-
-
 def _hoja(wb, nombre, titulo, periodo, columnas, filas, totales=None):
     """Hoja con una tabla. columnas: [(clave, encabezado, 'txt'|'bs'|'num')]. totales: {clave: valor}."""
     ws = wb.create_sheet(nombre)
@@ -264,7 +259,7 @@ def _hoja(wb, nombre, titulo, periodo, columnas, filas, totales=None):
     for f in filas:
         for col, (clave, _e, tipo) in enumerate(columnas, start=1):
             valor = f.get(clave)
-            c = rp._poner(ws, fila, col, valor, Font(name="Calibri", size=10), _formato_celda(tipo))
+            c = rp._poner(ws, fila, col, valor, Font(name="Calibri", size=10), _FMT if tipo == "bs" else None)
             if tipo == "txt" and clave == "detalle":
                 c.alignment = Alignment(wrap_text=True, vertical="top")
             anchos[col] = max(anchos[col], 14 if tipo != "txt" else min(len(str(valor or "")), 45))
@@ -274,7 +269,7 @@ def _hoja(wb, nombre, titulo, periodo, columnas, filas, totales=None):
         rp._poner(ws, fila, 1, "TOTAL", f_total)
         for col, (clave, _e, _t) in enumerate(columnas, start=1):
             if clave in totales:
-                rp._poner(ws, fila, col, totales[clave], f_total, _formato_celda(columnas[col - 1][2]))
+                rp._poner(ws, fila, col, totales[clave], f_total, _FMT if columnas[col - 1][2] == "bs" else None)
     for col, ancho in anchos.items():
         ws.column_dimensions[get_column_letter(col)].width = max(12, min(48, ancho + 2))
     ws.freeze_panes = ws.cell(fila0 + 1, 1)
@@ -436,9 +431,8 @@ def tabla_pdf(columnas, filas, pesos, alinear_der=(), fila_total=None, ancho_tab
     return t
 
 
-def cabecera_pdf(subtitulo, desde, hasta, emitido_por, ancho, est, texto_periodo=None):
-    """Logo, nombre del residencial, título del reporte, periodo, fecha de emisión y quién lo emitió.
-    texto_periodo: reemplaza «Periodo: desde al hasta» (p. ej. «Al 13/10/2026» en un reporte a una fecha)."""
+def cabecera_pdf(subtitulo, desde, hasta, emitido_por, ancho, est):
+    """Logo, nombre del residencial, título del reporte, periodo, fecha de emisión y quién lo emitió."""
     pdf = rp._pdf_texto
     logo = ""
     try:
@@ -450,10 +444,9 @@ def cabecera_pdf(subtitulo, desde, hasta, emitido_por, ancho, est, texto_periodo
                 colWidths=[20 * mm, ancho - 20 * mm])
     cab.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
     emitido = datetime.now(recibo._ZONA_BOLIVIA).strftime("%d/%m/%Y %H:%M")
-    periodo = (f"<b>Periodo:</b> {rp._fmt_fecha(desde)} al {rp._fmt_fecha(hasta)}" if texto_periodo is None
-               else f"<b>{pdf(texto_periodo)}</b>")
     return [cab, Spacer(1, 3), HRFlowable(width="100%", thickness=0.6, color=colors.black), Spacer(1, 4),
-            Paragraph(periodo + f" &nbsp;&nbsp;|&nbsp;&nbsp; <b>Emitido:</b> {emitido}"
+            Paragraph(f"<b>Periodo:</b> {rp._fmt_fecha(desde)} al {rp._fmt_fecha(hasta)}"
+                      f" &nbsp;&nbsp;|&nbsp;&nbsp; <b>Emitido:</b> {emitido}"
                       + (f" &nbsp;&nbsp;|&nbsp;&nbsp; <b>Por:</b> {pdf(emitido_por)}" if emitido_por else ""), est.chico),
             Spacer(1, 6)]
 
