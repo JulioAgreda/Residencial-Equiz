@@ -282,6 +282,13 @@ def limpiar_cache():
     cargar_periodos_electricidad_basico.clear()
 
 
+def _total_reporte(r):
+    """Total general de un reporte de usuario (tolera que falte la clave)."""
+    if "total_general" in r:
+        return r["total_general"]
+    return round(sum(c.get("total", 0) for c in r.get("categorias", {}).values()), 2)
+
+
 def _nombre_mes_anio(periodo):
     if not periodo:
         return "—"
@@ -1002,26 +1009,23 @@ if pagina == "📊 Dashboard":
 
     if filas_contrato or filas_mora:
         st.subheader("⚠️ Alertas")
-        colA, colB = st.columns(2)
-        with colA:
-            st.markdown("**📄 Contratos vencidos o por vencer (30 días)**")
-            if filas_contrato:
-                filas_contrato.sort(key=lambda f: f["_orden"])
-                df_contrato = pd.DataFrame(filas_contrato).drop(columns=["_orden"])
-                st.dataframe(df_contrato, use_container_width=True, hide_index=True)
-            else:
-                st.success("Sin contratos vencidos ni por vencer en los próximos 30 días.")
-        with colB:
-            st.markdown("**💰 Alquileres en mora (suma de todos los meses impagos)**")
-            if filas_mora:
-                filas_mora.sort(key=lambda f: -f["Deuda"])
-                total_mora = sum(f["Deuda"] for f in filas_mora)
-                st.metric("Total en mora", fmt_money(total_mora))
-                df_mora = pd.DataFrame(filas_mora)
-                df_mora["Deuda"] = df_mora["Deuda"].apply(fmt_money)
-                st.dataframe(df_mora, use_container_width=True, hide_index=True)
-            else:
-                st.success("Sin alquileres atrasados por ahora.")
+        st.markdown("**📄 Contratos vencidos o por vencer (30 días)**")
+        if filas_contrato:
+            filas_contrato.sort(key=lambda f: f["_orden"])
+            df_contrato = pd.DataFrame(filas_contrato).drop(columns=["_orden"])
+            st.dataframe(df_contrato, use_container_width=True, hide_index=True)
+        else:
+            st.success("Sin contratos vencidos ni por vencer en los próximos 30 días.")
+        st.markdown("**💰 Alquileres en mora (suma de todos los meses impagos)**")
+        if filas_mora:
+            filas_mora.sort(key=lambda f: -f["Deuda"])
+            total_mora = sum(f["Deuda"] for f in filas_mora)
+            st.metric("Total en mora", fmt_money(total_mora))
+            df_mora = pd.DataFrame(filas_mora)
+            df_mora["Deuda"] = df_mora["Deuda"].apply(fmt_money)
+            st.dataframe(df_mora, use_container_width=True, hide_index=True)
+        else:
+            st.success("Sin alquileres atrasados por ahora.")
         st.divider()
 
     if filas_mora_elec:
@@ -2908,7 +2912,7 @@ elif pagina == "📑 Reportes":
                     datos_usuario = _filtrar_datos_reporte_por_usuario(datos_todos, usuario_sel)
                     reporte_ind = reportes.construir_reporte_usuario(usuario_sel, datos_usuario)
 
-                    st.metric(f"Total general — {usuario_sel}", fmt_money(reporte_ind["total_general"]))
+                    st.metric(f"Total general — {usuario_sel}", fmt_money(_total_reporte(reporte_ind)))
 
                     for clave, titulo, _color in reportes.CATEGORIAS:
                         datos_cat = reporte_ind["categorias"][clave]
@@ -2955,11 +2959,11 @@ elif pagina == "📑 Reportes":
                         for nombre in nombres_usuarios_con_sin_asignar
                     ]
 
-                    total_todos = sum(r["total_general"] for r in reportes_todos)
+                    total_todos = sum(_total_reporte(r) for r in reportes_todos)
                     st.metric("Total general (todos los usuarios)", fmt_money(total_todos))
 
                     for r in reportes_todos:
-                        with st.expander(f'{r["usuario"]} — Total: {fmt_money(r["total_general"])}'):
+                        with st.expander(f'{r["usuario"]} — Total: {fmt_money(_total_reporte(r))}'):
                             for clave, titulo, _color in reportes.CATEGORIAS:
                                 datos_cat = r["categorias"][clave]
                                 st.markdown(f'**{titulo}** — Subtotal: {fmt_money(datos_cat["total"])}')
