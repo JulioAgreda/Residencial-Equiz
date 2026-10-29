@@ -393,3 +393,194 @@ def generar_reporte_inquilino_png(datos):
                 draw.text((60,y), f"{str(key).replace('_',' ').capitalize()}: {value if value is not None else '—'}", fill="black", font=f_v); y += 32
                 if y > alto-40: break
     buf=io.BytesIO(); img.crop((0,0,ancho,min(y+30,alto))).save(buf,format="PNG"); buf.seek(0); return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Estado de cuenta detallado del inquilino (versión corregida)
+# Conserva el detalle de alquiler y electricidad que calcula moras.py.
+# ---------------------------------------------------------------------------
+def construir_datos_reporte_inquilino(apartamento, deuda, emitido_por=None):
+    deuda = dict(deuda or {}) if isinstance(deuda, dict) else {}
+    ultimo_alq = deuda.get("alquiler", {}).get("ultimo_pago") or {}
+    ultimo_elec = deuda.get("electricidad", {}).get("ultimo_pago") or {}
+    def fecha_txt(valor):
+        return valor.strftime("%d/%m/%Y") if hasattr(valor, "strftime") else (str(valor)[:10] if valor else "Sin pagos")
+    ahora = datetime.now(_ZONA_BOLIVIA)
+    corte = deuda.get("fecha_corte")
+    return {
+        "apartamento": dict(apartamento or {}), "deuda": deuda,
+        "fecha_emision": ahora.strftime("%d/%m/%Y %H:%M"),
+        "fecha_corte": fecha_txt(corte), "emitido_por": emitido_por or "—",
+        "numero_recibo": f"EC-{int((apartamento or {}).get('id') or 0):06d}",
+        "apartamento_codigo": (apartamento or {}).get("codigo") or "—",
+        "apartamento_piso": (apartamento or {}).get("piso") or "—",
+        "inquilino_nombre": (apartamento or {}).get("inquilino_nombre") or "—",
+        "ultimo_pago_alquiler": ultimo_alq,
+        "ultimo_pago_electricidad": ultimo_elec,
+        "deuda_alquiler": float(deuda.get("alquiler", {}).get("deuda") or 0),
+        "deuda_electricidad": float(deuda.get("electricidad", {}).get("deuda") or 0),
+        "deuda_total": float(deuda.get("deuda_total") or 0),
+        "aplica": bool(deuda.get("aplica", True)), "motivo": deuda.get("motivo") or "",
+    }
+
+
+def _fecha_y_monto_ultimo(ultimo):
+    if not ultimo:
+        return "Sin pagos registrados"
+    fecha = ultimo.get("fecha")
+    if hasattr(fecha, "strftime"):
+        fecha = fecha.strftime("%d/%m/%Y")
+    elif fecha:
+        fecha = str(fecha)[:10]
+    else:
+        fecha = "Fecha no disponible"
+    return f"{fecha} - {_fmt_bs(ultimo.get('monto') or 0)}"
+
+
+def generar_reporte_inquilino_pdf(datos):
+    """PDF con tablas detalladas de alquiler y electricidad y resumen de deuda."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_LEFT, TA_RIGHT
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage, HRFlowable
+    from reportlab.lib.utils import ImageReader
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=14*mm, leftMargin=14*mm,
+                            topMargin=12*mm, bottomMargin=12*mm, title="Estado de cuenta del inquilino")
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="ECHeader", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=18, leading=22, alignment=TA_LEFT, textColor=colors.HexColor("#111111"), spaceAfter=2))
+    styles.add(ParagraphStyle(name="ECSub", parent=styles["Normal"], fontSize=10, textColor=colors.HexColor("#555555"), leading=13))
+    styles.add(ParagraphStyle(name="ECTableHead", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=8, leading=10, textColor=colors.white))
+    styles.add(ParagraphStyle(name="ECTable", parent=styles["Normal"], fontSize=8, leading=10))
+    styles.add(ParagraphStyle(name="ECTableRight", parent=styles["ECTable"], alignment=TA_RIGHT))
+    story=[]
+    header_cells=[]
+    if os.path.exists(LOGO_PATH):
+        try:
+            logo=RLImage(LOGO_PATH, width=23*mm, height=23*mm, kind="proportional")
+            header_cells.append(logo)
+        except Exception:
+            header_cells.append(Paragraph("", styles["Normal"]))
+    else:
+        header_cells.append(Paragraph("", styles["Normal"]))
+    header_cells.append([Paragraph("Residencial Equise", styles["ECHeader"]), Paragraph("Estado de Cuenta del Inquilino", styles["ECSub"])])
+    ht=Table([header_cells], colWidths=[27*mm, 150*mm])
+    ht.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),0),("RIGHTPADDING",(0,0),(-1,-1),5),("TOPPADDING",(0,0),(-1,-1),0),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
+    story += [ht, Spacer(1,4*mm), HRFlowable(width="100%", thickness=0.7, color=colors.HexColor("#BBBBBB")), Spacer(1,3*mm)]
+    d=datos.get("deuda") or {}
+    corte=datos.get("fecha_corte") or "—"
+    story.append(Paragraph(f"Fecha de corte: {corte} <font color='#777777'>|</font> Emitido: {datos.get('fecha_emision','—')}", styles["ECTable"]))
+    story.append(Spacer(1,2*mm))
+    apto=f"{datos.get('apartamento_codigo','—')} - {datos.get('apartamento_piso','—')}"
+    for label,value in [("Apartamento:",apto),("Inquilino:",datos.get("inquilino_nombre","—")),
+                        ("Último pago de alquiler:",_fecha_y_monto_ultimo(datos.get("ultimo_pago_alquiler"))),
+                        ("Último pago de electricidad:",_fecha_y_monto_ultimo(datos.get("ultimo_pago_electricidad")))]:
+        story.append(Paragraph(f"<b>{label}</b> {value}", styles["ECTable"]))
+        story.append(Spacer(1,1.2*mm))
+    story += [Spacer(1,2*mm), HRFlowable(width="100%", thickness=0.7, color=colors.HexColor("#BBBBBB")), Spacer(1,3*mm)]
+
+    def tabla_servicio(titulo, bloque):
+        story.append(Paragraph(f"<b>{titulo}</b>", styles["Heading3"]))
+        filas=[[Paragraph(x,styles["ECTableHead"]) for x in ("Periodo","Esperado","Pagado","Saldo","Estado")]]
+        for f in (bloque or {}).get("filas",[]):
+            estado=str(f.get("estado") or "—")
+            filas.append([Paragraph(str(f.get("periodo") or "—"),styles["ECTable"]),
+                          Paragraph(_fmt_bs(f.get("esperado")),styles["ECTableRight"]),
+                          Paragraph(_fmt_bs(f.get("pagado")),styles["ECTableRight"]),
+                          Paragraph(_fmt_bs(f.get("saldo")),styles["ECTableRight"]),
+                          Paragraph(estado,styles["ECTable"])])
+        if len(filas)==1:
+            filas.append([Paragraph("Sin periodos registrados",styles["ECTable"]),"","","",""])
+        t=Table(filas, colWidths=[43*mm,32*mm,32*mm,25*mm,35*mm], repeatRows=1, hAlign="LEFT")
+        cmds=[("BACKGROUND",(0,0),(-1,0),colors.HexColor("#30425B")),("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+              ("LEFTPADDING",(0,0),(-1,-1),5),("RIGHTPADDING",(0,0),(-1,-1),5),
+              ("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5),
+              ("LINEBELOW",(0,1),(-1,-1),0.35,colors.HexColor("#D7D7D7"))]
+        for ri,row in enumerate(filas[1:],1):
+            if len(row)>4 and isinstance(row[4],Paragraph) and "Pagado" in str((bloque or {}).get("filas",[])[ri-1].get("estado","")):
+                cmds.append(("TEXTCOLOR",(4,ri),(4,ri),colors.HexColor("#27823B")))
+        t.setStyle(TableStyle(cmds)); story.append(t); story.append(Spacer(1,2*mm))
+        deuda_serv=float((bloque or {}).get("deuda") or 0)
+        story.append(Paragraph(f"<b>Deuda de {titulo.lower()}: {_fmt_bs(deuda_serv)}</b>", ParagraphStyle("right_"+titulo,parent=styles["ECTable"],alignment=TA_RIGHT)))
+        story.append(Spacer(1,3*mm))
+
+    tabla_servicio("Alquiler",d.get("alquiler",{}))
+    tabla_servicio("Electricidad",d.get("electricidad",{}))
+    total=float(d.get("deuda_total") or 0)
+    al_dia=total <= 0.009
+    estado_txt="ESTADO: AL DÍA" if al_dia else "ESTADO: DEUDA PENDIENTE"
+    final=Table([[Paragraph(f"<b>{estado_txt}</b>",styles["Heading3"]),Paragraph(f"<b>{_fmt_bs(total)}</b>",ParagraphStyle("total",parent=styles["Heading2"],alignment=TA_RIGHT,textColor=colors.white))]],colWidths=[100*mm,67*mm])
+    final.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#2E7D32" if al_dia else "#B3261E")),("TEXTCOLOR",(0,0),(-1,-1),colors.white),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),10),("RIGHTPADDING",(0,0),(-1,-1),10),("TOPPADDING",(0,0),(-1,-1),8),("BOTTOMPADDING",(0,0),(-1,-1),8)]))
+    story += [final,Spacer(1,6*mm),HRFlowable(width="100%",thickness=0.7,color=colors.HexColor("#BBBBBB")),Spacer(1,3*mm),Paragraph(f"Emitido por: {datos.get('emitido_por') or '—'}",styles["ECTable"])]
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def generar_reporte_inquilino_png(datos):
+    """PNG detallado con tablas de alquiler/electricidad y resumen visual de deuda."""
+    from PIL import ImageColor
+    ancho=1000; margen=58; ancho_util=ancho-2*margen
+    d=datos.get("deuda") or {}
+    alquiler=(d.get("alquiler") or {}); electricidad=(d.get("electricidad") or {})
+    filas_alq=alquiler.get("filas") or []; filas_elec=electricidad.get("filas") or []
+    alto=310 + 56*(len(filas_alq)+len(filas_elec)) + 170
+    img=Image.new("RGB",(ancho,alto),"white"); draw=ImageDraw.Draw(img)
+    ft=_fuente(31,negrita=True); fs=_fuente(17); fb=_fuente(17,negrita=True); fc=_fuente(14); fcb=_fuente(14,negrita=True)
+    y=30
+    if os.path.exists(LOGO_PATH):
+        try:
+            logo=Image.open(LOGO_PATH).convert("RGB"); logo.thumbnail((112,112))
+            img.paste(logo,(margen,y)); x_text=margen+132
+        except Exception: x_text=margen
+    else: x_text=margen
+    draw.text((x_text,y+8),"Residencial Equise",font=ft,fill="#111111")
+    draw.text((x_text,y+52),"Estado de Cuenta del Inquilino",font=fs,fill="#555555")
+    y+=128; draw.line((margen,y,ancho-margen,y),fill="#BBBBBB",width=2); y+=20
+    def line(label,value):
+        nonlocal y
+        draw.text((margen,y),label,font=fb,fill="#111111")
+        text=str(value or "—"); bbox=draw.textbbox((0,0),text,font=fs)
+        draw.text((ancho-margen-(bbox[2]-bbox[0]),y),text,font=fs,fill="#111111")
+        y+=35
+    line("Fecha de corte:",datos.get("fecha_corte","—"))
+    line("Emitido:",datos.get("fecha_emision","—"))
+    line("Apartamento:",f"{datos.get('apartamento_codigo','—')} - {datos.get('apartamento_piso','—')}")
+    line("Inquilino:",datos.get("inquilino_nombre","—"))
+    line("Último pago de alquiler:",_fecha_y_monto_ultimo(datos.get("ultimo_pago_alquiler")))
+    line("Último pago de electricidad:",_fecha_y_monto_ultimo(datos.get("ultimo_pago_electricidad")))
+    y+=5; draw.line((margen,y,ancho-margen,y),fill="#BBBBBB",width=2); y+=18
+    cols=[margen,margen+190,margen+380,margen+560,margen+690,ancho-margen]
+    def tabla(titulo,bloque,filas):
+        nonlocal y
+        draw.text((margen,y),titulo,font=fb,fill="#111111"); y+=25
+        draw.rectangle((margen,y,ancho-margen,y+38),fill="#30425B")
+        heads=["Periodo","Esperado","Pagado","Saldo","Estado"]
+        for i,h in enumerate(heads): draw.text((cols[i]+8,y+10),h,font=fcb,fill="white")
+        y+=38
+        if not filas:
+            draw.text((cols[0]+8,y+9),"Sin periodos registrados",font=fc,fill="#222222"); y+=34
+        for f in filas:
+            vals=[f.get("periodo","—"),_fmt_bs(f.get("esperado")),_fmt_bs(f.get("pagado")),_fmt_bs(f.get("saldo")),f.get("estado","—")]
+            for i,val in enumerate(vals):
+                font=fcb if i==4 and str(val).lower().startswith("pagado") else fc
+                color="#27823B" if i==4 and str(val).lower().startswith("pagado") else "#111111"
+                draw.text((cols[i]+8,y+9),str(val),font=font,fill=color)
+            y+=34; draw.line((margen,y,ancho-margen,y),fill="#DDDDDD",width=1)
+        y+=5
+        draw.text((margen,y),f"Deuda de {titulo.lower()}: {_fmt_bs(bloque.get('deuda') or 0)}",font=fcb,fill="#111111")
+        y+=36
+    tabla("Alquiler",alquiler,filas_alq)
+    tabla("Electricidad",electricidad,filas_elec)
+    total=float(d.get("deuda_total") or 0); al_dia=total<=0.009
+    color="#2E7D32" if al_dia else "#B3261E"
+    draw.rounded_rectangle((margen,y,ancho-margen,y+76),radius=12,fill=color)
+    estado="ESTADO: AL DÍA" if al_dia else "ESTADO: DEUDA PENDIENTE"
+    draw.text((margen+20,y+22),estado,font=fb,fill="white")
+    monto=_fmt_bs(total); bbox=draw.textbbox((0,0),monto,font=ft)
+    draw.text((ancho-margen-20-(bbox[2]-bbox[0]),y+18),monto,font=ft,fill="white")
+    y+=100; draw.line((margen,y,ancho-margen,y),fill="#BBBBBB",width=2); y+=18
+    draw.text((margen,y),f"Emitido por: {datos.get('emitido_por') or '—'}",font=fc,fill="#111111")
+    out=io.BytesIO(); img.crop((0,0,ancho,y+35)).save(out,format="PNG"); out.seek(0); return out.getvalue()
