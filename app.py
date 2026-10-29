@@ -436,13 +436,18 @@ def _cuadre_pdf_cache(q, emitido_por):
     return cuadre.generar_pdf_cuadre(q, emitido_por=emitido_por)
 
 
+# Incrementar esta versión cuando cambie el diseño del Estado de Cuenta.
+# Forma parte de la clave de caché para evitar que se reutilicen documentos antiguos.
+REPORTE_DISENO_VERSION = "equise-estado-cuenta-2026-10-29-v2"
+
+
 @st.cache_data(ttl=300, show_spinner=False)
-def _reporte_pdf_cache(datos):
+def _reporte_pdf_cache(datos, version=REPORTE_DISENO_VERSION):
     return recibo.generar_reporte_inquilino_pdf(datos)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _reporte_png_cache(datos):
+def _reporte_png_cache(datos, version=REPORTE_DISENO_VERSION):
     return recibo.generar_reporte_inquilino_png(datos)
 
 
@@ -1921,8 +1926,8 @@ elif pagina == "📑 Estado de cuenta":
                               key="rep_apartamento")
         apt_sel, deuda_sel = estados_cuenta[indice]
         datos_rep = recibo.construir_datos_reporte_inquilino(apt_sel, deuda_sel, emitido_por=nombre_emisor)
-        pdf_rep = _reporte_pdf_cache(datos_rep)
-        png_rep = _reporte_png_cache(datos_rep)
+        pdf_rep = _reporte_pdf_cache(datos_rep, REPORTE_DISENO_VERSION)
+        png_rep = _reporte_png_cache(datos_rep, REPORTE_DISENO_VERSION)
 
         b1, b2 = st.columns(2)
         with b1:
@@ -1977,7 +1982,7 @@ elif pagina == "📑 Estado de cuenta":
                 with zipfile.ZipFile(memoria, "w", zipfile.ZIP_DEFLATED) as zf:
                     for apt, d in estados_cuenta:
                         datos_i = recibo.construir_datos_reporte_inquilino(apt, d, emitido_por=nombre_emisor)
-                        zf.writestr(_nombre_archivo_reporte(apt, hoy_rep, "pdf"), _reporte_pdf_cache(datos_i))
+                        zf.writestr(_nombre_archivo_reporte(apt, hoy_rep, "pdf"), _reporte_pdf_cache(datos_i, REPORTE_DISENO_VERSION))
                 st.session_state["rep_zip"] = (hoy_rep, memoria.getvalue(), len(estados_cuenta))
         zip_guardado = st.session_state.get("rep_zip")
         if zip_guardado and zip_guardado[0] == hoy_rep:
