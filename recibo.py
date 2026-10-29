@@ -9,62 +9,27 @@ a este archivo) a tu repositorio, en la misma carpeta que app.py.
 """
 import io
 import os
-import re
-from datetime import datetime, timedelta, timezone
-from functools import lru_cache
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-import consumo as _consumo
-
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A5, letter
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import A5
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdfcanvas
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
 from PIL import Image, ImageDraw, ImageFont
-
-# El servidor (Streamlit Cloud) corre en UTC, no en la hora de Bolivia (UTC-4).
-# Sin esto, la hora de emisión del recibo saldría adelantada.
-_ZONA_BOLIVIA = timezone(timedelta(hours=-4))
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 LOGO_PATH = os.path.join(_DIR, "assets", "logo_equise.png")
 NOMBRE_RESIDENCIAL = "Residencial Equise"
+_ZONA_BOLIVIA = ZoneInfo("America/La_Paz")
 
-_COLOR_ACENTO = (46, 125, 50)      # verde, para PNG (RGB)
-_COLOR_ACENTO_PDF = "#2E7D32"      # mismo verde, para PDF
-
-# PB=Planta Baja, PP=Primer Piso, SP=Segundo Piso, TP=Tercer Piso
-_MAPA_PISO_ABREV = {"PB": "Planta Baja", "PP": "Primer Piso", "SP": "Segundo Piso", "TP": "Tercer Piso"}
+_METODOS_ESTANDAR = ["Efectivo", "Transferencia", "QR", "Otro"]
 
 
 def _fmt_bs(monto):
     try:
-        return f"Bs {float(monto):,.1f}"
+        return f"Bs {float(monto):,.2f}"
     except (TypeError, ValueError):
-        return "Bs 0.0"
-
-
-def formatear_apartamento(apartamento):
-    """Arma un texto legible tipo 'Apartamento 4 - Segundo Piso' a partir del código y el
-    piso guardados, sin importar si el código se escribió como 'PB-01', '4' o
-    'SP - Apartamento 4'. Usa el campo "piso" del apartamento cuando existe (ya viene
-    con el nombre completo); si no, lo deduce de las letras iniciales del código."""
-    apartamento = apartamento or {}
-    codigo = str(apartamento.get("codigo") or "").strip()
-    piso = str(apartamento.get("piso") or "").strip()
-
-    m_num = re.search(r"(\d+)\s*$", codigo)
-    numero = str(int(m_num.group(1))) if m_num else None
-
-    if not piso:
-        m_abrev = re.match(r"^\s*([A-Za-zÁÉÍÓÚáéíóú]+)", codigo)
-        abrev = (m_abrev.group(1) if m_abrev else "").upper()
-        piso = _MAPA_PISO_ABREV.get(abrev, "")
-
-    if numero and piso:
-        return f"Apartamento {numero} - {piso}"
-    return codigo or "—"
+        return "Bs 0.00"
 
 
 def _fuente(tamano, negrita=False, cursiva=False):
@@ -92,9 +57,10 @@ def construir_datos_recibo(pago, periodo, apartamento, total_pagado_periodo, rec
     saldo = monto_esperado - float(total_pagado_periodo or 0)
     return {
         "numero_recibo": f'REC-{int(pago["id"]):06d}',
-        "fecha_emision": datetime.now(_ZONA_BOLIVIA).strftime("%d/%m/%Y %H:%M"),
-        "apartamento_texto": formatear_apartamento(apartamento),
-        "inquilino_nombre": (periodo or {}).get("inquilino_nombre") or (apartamento or {}).get("inquilino_nombre") or "—",
+        "fecha_emision": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "apartamento_codigo": (apartamento or {}).get("codigo", ""),
+        "apartamento_piso": (apartamento or {}).get("piso", ""),
+        "inquilino_nombre": (apartamento or {}).get("inquilino_nombre") or "—",
         "periodo": f'{(periodo or {}).get("mes", "")} {(periodo or {}).get("anio", "")}'.strip(),
         "fecha_pago": pago.get("fecha", ""),
         "monto_pagado": float(pago.get("monto") or 0),
@@ -108,179 +74,83 @@ def construir_datos_recibo(pago, periodo, apartamento, total_pagado_periodo, rec
 
 
 # ============================================================
-# Recibos de LUZ y AGUA: mismo formato que el de alquiler + lecturas del medidor
-# ============================================================
-
-SERVICIOS = {
-    "electricidad": {"titulo": "Recibo de Pago de Electricidad", "prefijo": "REC-L", "unidad": "Kwh",
-                     "campo_anterior": "kwh_anterior", "campo_actual": "kwh_actual", "campo_tarifa": "tarifa_kwh"},
-    "agua": {"titulo": "Recibo de Pago de Agua", "prefijo": "REC-A", "unidad": "m³",
-             "campo_anterior": "lectura_anterior", "campo_actual": "lectura_actual", "campo_tarifa": "tarifa_agua"},
-}
-
-
-def _fmt_num(valor):
-    """6509 -> '6,509'; 1200.1 -> '1,200.1'; 12.50 -> '12.5'."""
-    texto = f"{float(valor):,.2f}"
-    return texto.rstrip("0").rstrip(".")
-
-
-def _fmt_tarifa(valor):
-    """1.3 -> '1.30'; 1.2345 -> '1.2345' (mínimo 2 decimales, máximo 4)."""
-    texto = f"{float(valor or 0):.4f}"
-    while texto.endswith("0") and len(texto.split(".")[1]) > 2:
-        texto = texto[:-1]
-    return texto
-
-
-def _detalle_lecturas(cfg, periodo, servicio=None):
-    """Filas (etiqueta, valor) con las lecturas del medidor. El consumo y la tarifa solo se imprimen si
-    el monto guardado de ese periodo corresponde a esa cuenta: los periodos guardados antes de redondear
-    el cobro a boliviano entero tienen otro monto, y un recibo no debe mostrar números que no cuadran.
-    Si el periodo tiene dos medidores de luz, se imprimen las lecturas de cada uno y el consumo total."""
-    periodo = periodo or {}
-    if servicio is None:
-        servicio = next(k for k, v in SERVICIOS.items() if v is cfg)
-    anterior, actual = periodo.get(cfg["campo_anterior"]), periodo.get(cfg["campo_actual"])
-    if anterior is None or actual is None:
-        return []
-    unidad = cfg["unidad"]
-    pares = _consumo.pares_lecturas(periodo, servicio)
-    if len(pares) == 1:
-        filas = [("Lectura anterior:", f"{_fmt_num(anterior)} {unidad}"),
-                 ("Lectura actual:", f"{_fmt_num(actual)} {unidad}")]
-    else:
-        filas = []
-        for n, (ant, act) in enumerate(pares, start=1):
-            filas += [(f"Medidor {n} - anterior:", f"{_fmt_num(ant or 0)} {unidad}"),
-                      (f"Medidor {n} - actual:", f"{_fmt_num(act or 0)} {unidad}")]
-    tarifa = float(periodo.get(cfg["campo_tarifa"]) or 0)
-    consumo_entero = _consumo.consumo_total(periodo, servicio)
-    if abs(_consumo.calcular_monto(consumo_entero, tarifa) - float(periodo.get("monto_esperado") or 0)) < 0.005:
-        filas += [("Consumo total:" if len(pares) > 1 else "Consumo:", f"{consumo_entero} {unidad}"),
-                  ("Tarifa:", f"Bs {_fmt_tarifa(tarifa)} por {unidad}")]
-    return filas
-
-
-@lru_cache(maxsize=1)
-def _fuente_pdf_unicode():
-    """Nombre de una fuente incrustada que sí dibuja caracteres como '³' (la Helvetica estándar de los PDF no
-    lo dibuja de forma fiable: 'm³' se vería 'm'). Si no se puede cargar, se usa Helvetica."""
-    try:
-        from reportlab.pdfbase import pdfmetrics
-        from reportlab.pdfbase.ttfonts import TTFont
-        pdfmetrics.registerFont(TTFont("DejaVuSans-Recibo", os.path.join(_DIR, "assets", "fonts", "DejaVuSans.ttf")))
-        return "DejaVuSans-Recibo"
-    except Exception:
-        return "Helvetica"
-
-
-def construir_datos_recibo_servicio(servicio, pago, periodo, apartamento, total_pagado_periodo, recibido_por):
-    """Como construir_datos_recibo, para un abono de 'electricidad' o 'agua'. El número lleva prefijo propio
-    (REC-L / REC-A) porque cada servicio tiene su propia tabla de abonos y los ids se repetirían entre ellas."""
-    cfg = SERVICIOS[servicio]
-    datos = construir_datos_recibo(pago, periodo, apartamento, total_pagado_periodo, recibido_por)
-    datos["numero_recibo"] = f'{cfg["prefijo"]}-{int(pago["id"]):06d}'
-    datos["titulo"] = cfg["titulo"]
-    datos["detalle"] = _detalle_lecturas(cfg, periodo, servicio)
-    return datos
-
-
-# ============================================================
-# PDF — formato compacto, tipo comprobante
+# PDF
 # ============================================================
 
 def generar_recibo_pdf(datos: dict) -> bytes:
     buffer = io.BytesIO()
-    ancho, alto_pagina = A5
+    ancho, alto = A5
     c = pdfcanvas.Canvas(buffer, pagesize=A5)
 
-    margen = 11 * mm
-    y = alto_pagina - margen
+    margen = 12 * mm
+    y = alto - margen
 
-    # ---------- Encabezado: logo y título lado a lado (más compacto que apilados) ----------
-    logo_w = logo_h = 16 * mm
-    texto_x = margen
     if os.path.exists(LOGO_PATH):
         try:
-            c.drawImage(LOGO_PATH, margen, y - logo_h, width=logo_w, height=logo_h,
+            logo_w = logo_h = 22 * mm
+            c.drawImage(LOGO_PATH, (ancho - logo_w) / 2, y - logo_h, width=logo_w, height=logo_h,
                         preserveAspectRatio=True, mask="auto")
-            texto_x = margen + logo_w + 4 * mm
+            y -= logo_h + 4 * mm
         except Exception:
             pass
 
     c.setFont("Helvetica-Bold", 14)
-    c.drawString(texto_x, y - 6 * mm, NOMBRE_RESIDENCIAL)
-    c.setFont("Helvetica", 8.5)
-    c.setFillColor(colors.Color(0.33, 0.33, 0.33))
-    c.drawString(texto_x, y - 11.5 * mm, datos.get("titulo", "Recibo de Pago de Alquiler"))
-    c.setFillColor(colors.black)
-    y -= logo_h + 3 * mm
+    c.drawCentredString(ancho / 2, y, NOMBRE_RESIDENCIAL)
+    y -= 6 * mm
+    c.setFont("Helvetica", 9)
+    c.drawCentredString(ancho / 2, y, "Recibo de Pago de Alquiler")
+    y -= 8 * mm
 
     c.setLineWidth(0.6)
     c.line(margen, y, ancho - margen, y)
-    y -= 5.5 * mm
-
-    c.setFont("Helvetica", 8)
-    c.drawString(margen, y, f'Recibo N°: {datos["numero_recibo"]}')
-    c.drawRightString(ancho - margen, y, f'Emitido: {datos["fecha_emision"]}')
     y -= 7 * mm
 
-    def fila(etiqueta, valor, negrita_valor=False, tam=9.5, fuente_valor=None):
+    c.setFont("Helvetica", 9)
+    c.drawString(margen, y, f'Recibo N°: {datos["numero_recibo"]}')
+    c.drawRightString(ancho - margen, y, f'Emitido: {datos["fecha_emision"]}')
+    y -= 8 * mm
+
+    def fila(etiqueta, valor, negrita_valor=False, tam=9.5):
         nonlocal y
         c.setFont("Helvetica-Bold", tam)
         c.drawString(margen, y, etiqueta)
-        c.setFont(fuente_valor or ("Helvetica-Bold" if negrita_valor else "Helvetica"), tam)
+        c.setFont("Helvetica-Bold" if negrita_valor else "Helvetica", tam)
         c.drawRightString(ancho - margen, y, str(valor))
-        y -= 6 * mm
+        y -= 6.8 * mm
 
-    fila("Apartamento:", datos["apartamento_texto"])
+    fila("Apartamento:", f'{datos["apartamento_codigo"]} ({datos["apartamento_piso"]})')
     fila("Inquilino:", datos["inquilino_nombre"])
     fila("Periodo:", datos["periodo"])
     fila("Fecha de pago:", datos["fecha_pago"])
     fila("Método de pago:", datos["metodo_pago"])
+    for etiqueta, valor in datos.get("detalle", []):
+        fila(etiqueta, valor, tam=8.5)
 
-    y -= 1 * mm
+    y -= 2 * mm
     c.line(margen, y, ancho - margen, y)
-    y -= 6 * mm
-
-    if datos.get("detalle"):          # p. ej. lecturas del medidor en los recibos de luz y agua
-        necesita_unicode = any("³" in str(v) for _e, v in datos["detalle"])
-        for etiqueta, valor in datos["detalle"]:
-            fila(etiqueta, valor, fuente_valor=_fuente_pdf_unicode() if necesita_unicode else None)
-        y -= 1 * mm
-        c.line(margen, y, ancho - margen, y)
-        y -= 6 * mm
+    y -= 7 * mm
 
     fila("Monto esperado del mes:", _fmt_bs(datos["monto_esperado"]))
     fila("Total pagado a la fecha:", _fmt_bs(datos["total_pagado_periodo"]))
     saldo = datos["saldo_pendiente"]
     fila("Saldo pendiente:" if saldo > 0.009 else "Estado:",
          _fmt_bs(saldo) if saldo > 0.009 else "PAGADO COMPLETO", negrita_valor=True)
-    y -= 2 * mm
-
-    # ---------- Caja resaltada con el monto de este abono ----------
-    caja_alto = 13 * mm
-    y -= caja_alto
-    c.setFillColor(colors.HexColor(_COLOR_ACENTO_PDF))
-    c.roundRect(margen, y, ancho - 2 * margen, caja_alto, 2 * mm, fill=1, stroke=0)
-    c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(margen + 4 * mm, y + caja_alto / 2 - 1.5 * mm, "MONTO DE ESTE ABONO")
-    c.setFont("Helvetica-Bold", 15)
-    c.drawRightString(ancho - margen - 4 * mm, y + caja_alto / 2 - 2.2 * mm, _fmt_bs(datos["monto_pagado"]))
-    c.setFillColor(colors.black)
-    y -= 6 * mm
-
-    if datos.get("observacion"):
-        c.setFont("Helvetica-Oblique", 7.5)
-        c.drawString(margen, y, f'Observación: {datos["observacion"]}')
-        y -= 6 * mm
 
     y -= 3 * mm
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(margen, y, "Monto de este abono:")
+    c.drawRightString(ancho - margen, y, _fmt_bs(datos["monto_pagado"]))
+    y -= 10 * mm
+
+    if datos.get("observacion"):
+        c.setFont("Helvetica-Oblique", 8)
+        c.drawString(margen, y, f'Observación: {datos["observacion"]}')
+        y -= 8 * mm
+
+    y -= 6 * mm
     c.line(margen, y, ancho - margen, y)
-    y -= 4.5 * mm
-    c.setFont("Helvetica", 7.5)
+    y -= 5 * mm
+    c.setFont("Helvetica", 8)
     c.drawString(margen, y, f'Recibido por: {datos["recibido_por"]}')
 
     c.showPage()
@@ -290,51 +160,51 @@ def generar_recibo_pdf(datos: dict) -> bytes:
 
 
 # ============================================================
-# PNG — mismo diseño compacto, recortado a su contenido real
+# PNG
 # ============================================================
 
 def generar_recibo_png(datos: dict) -> bytes:
-    ancho, alto_max = 820, 1100
-    img = Image.new("RGB", (ancho, alto_max), "white")
+    ancho, alto = 900, 1200
+    img = Image.new("RGB", (ancho, alto), "white")
     draw = ImageDraw.Draw(img)
 
-    f_titulo = _fuente(26, negrita=True)
-    f_sub = _fuente(14)
-    f_label = _fuente(14, negrita=True)
-    f_valor = _fuente(14)
-    f_chico = _fuente(12)
-    f_chico_i = _fuente(12, cursiva=True)
-    f_caja_label = _fuente(14, negrita=True)
-    f_caja_monto = _fuente(24, negrita=True)
+    f_titulo = _fuente(30, negrita=True)
+    f_sub = _fuente(17)
+    f_label = _fuente(16, negrita=True)
+    f_valor = _fuente(16)
+    f_chico = _fuente(13)
+    f_chico_i = _fuente(13, cursiva=True)
 
-    margen = 48
-    y = 28
+    margen = 55
+    y = 30
 
-    # ---------- Encabezado: logo y título lado a lado ----------
-    texto_x = margen
-    logo_alto = 0
     if os.path.exists(LOGO_PATH):
         try:
             logo = Image.open(LOGO_PATH).convert("RGBA")
-            logo.thumbnail((92, 92))
-            img.paste(logo, (margen, y), logo)
-            texto_x = margen + logo.width + 18
-            logo_alto = logo.height
+            logo.thumbnail((150, 150))
+            img.paste(logo, ((ancho - logo.width) // 2, y), logo)
+            y += logo.height + 15
         except Exception:
             pass
 
-    draw.text((texto_x, y + 6), NOMBRE_RESIDENCIAL, font=f_titulo, fill="black")
-    draw.text((texto_x, y + 42), datos.get("titulo", "Recibo de Pago de Alquiler"), font=f_sub, fill="#555555")
-    y += max(logo_alto, 70) + 14
+    def centrado(texto, fuente, yy, color="black"):
+        bbox = draw.textbbox((0, 0), texto, font=fuente)
+        w = bbox[2] - bbox[0]
+        draw.text(((ancho - w) / 2, yy), texto, font=fuente, fill=color)
+
+    centrado(NOMBRE_RESIDENCIAL, f_titulo, y)
+    y += 42
+    centrado("Recibo de Pago de Alquiler", f_sub, y, color="#555555")
+    y += 38
 
     draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
-    y += 20
+    y += 24
 
     draw.text((margen, y), f'Recibo N°: {datos["numero_recibo"]}', font=f_chico, fill="black")
     texto_emitido = f'Emitido: {datos["fecha_emision"]}'
     bbox = draw.textbbox((0, 0), texto_emitido, font=f_chico)
     draw.text((ancho - margen - (bbox[2] - bbox[0]), y), texto_emitido, font=f_chico, fill="black")
-    y += 32
+    y += 38
 
     def fila(etiqueta, valor, yy, negrita_valor=False):
         draw.text((margen, yy), etiqueta, font=f_label, fill="black")
@@ -342,391 +212,184 @@ def generar_recibo_png(datos: dict) -> bytes:
         texto = str(valor)
         bbox = draw.textbbox((0, 0), texto, font=fuente_valor)
         draw.text((ancho - margen - (bbox[2] - bbox[0]), yy), texto, font=fuente_valor, fill="black")
-        return yy + 31
+        return yy + 36
 
-    y = fila("Apartamento:", datos["apartamento_texto"], y)
+    y = fila("Apartamento:", f'{datos["apartamento_codigo"]} ({datos["apartamento_piso"]})', y)
     y = fila("Inquilino:", datos["inquilino_nombre"], y)
     y = fila("Periodo:", datos["periodo"], y)
     y = fila("Fecha de pago:", datos["fecha_pago"], y)
     y = fila("Método de pago:", datos["metodo_pago"], y)
+    for etiqueta, valor in datos.get("detalle", []):
+        y = fila(etiqueta, valor, y)
 
-    y += 6
+    y += 8
     draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
-    y += 20
-
-    if datos.get("detalle"):          # p. ej. lecturas del medidor en los recibos de luz y agua
-        for etiqueta, valor in datos["detalle"]:
-            y = fila(etiqueta, valor, y)
-        y += 6
-        draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
-        y += 20
+    y += 24
 
     y = fila("Monto esperado del mes:", _fmt_bs(datos["monto_esperado"]), y)
     y = fila("Total pagado a la fecha:", _fmt_bs(datos["total_pagado_periodo"]), y)
     saldo = datos["saldo_pendiente"]
     y = fila("Saldo pendiente:" if saldo > 0.009 else "Estado:",
              _fmt_bs(saldo) if saldo > 0.009 else "PAGADO COMPLETO", y, negrita_valor=True)
-    y += 10
 
-    # ---------- Caja resaltada con el monto de este abono ----------
-    caja_alto = 64
-    draw.rounded_rectangle([(margen, y), (ancho - margen, y + caja_alto)], radius=10, fill=_COLOR_ACENTO)
-    draw.text((margen + 18, y + caja_alto / 2 - 10), "MONTO DE ESTE ABONO", font=f_caja_label, fill="white")
-    texto_monto = _fmt_bs(datos["monto_pagado"])
-    bbox = draw.textbbox((0, 0), texto_monto, font=f_caja_monto)
-    draw.text((ancho - margen - 18 - (bbox[2] - bbox[0]), y + caja_alto / 2 - 16), texto_monto,
-              font=f_caja_monto, fill="white")
-    y += caja_alto + 22
+    y += 14
+    y = fila("Monto de este abono:", _fmt_bs(datos["monto_pagado"]), y, negrita_valor=True)
+    y += 20
 
     if datos.get("observacion"):
         draw.text((margen, y), f'Observación: {datos["observacion"]}', font=f_chico_i, fill="#555555")
-        y += 30
+        y += 34
 
-    y += 10
+    y += 16
     draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
-    y += 18
+    y += 20
     draw.text((margen, y), f'Recibido por: {datos["recibido_por"]}', font=f_chico, fill="black")
-    y += 34
+    y += 40
 
     buffer = io.BytesIO()
-    img.crop((0, 0, ancho, min(y + 20, alto_max))).save(buffer, format="PNG")
+    img.crop((0, 0, ancho, min(y + 40, alto))).save(buffer, format="PNG")
     buffer.seek(0)
     return buffer.getvalue()
 
 
 # ============================================================
-# REPORTE DE DEUDA REAL PARA EL INQUILINO (PDF y PNG, mismo diseño que el recibo)
+# Funciones compartidas por la versión actual de app.py
 # ============================================================
-# El cálculo está en moras.deuda_real_inquilino(); aquí solo se maqueta.
 
-MAX_FILAS_REPORTE = 12   # filas por tabla; las deudas siempre se muestran completas
-
-
-@lru_cache(maxsize=1)
-def _logo_liviano_bytes():
-    """Logo reducido a 200 px (el original pesa ~190 KB y se incrustaría completo en cada PDF).
-    Se guardan los bytes y no un ImageReader: reportlab (Platypus) solo acepta ruta o archivo."""
-    logo = Image.open(LOGO_PATH).convert("RGBA")
-    logo.thumbnail((200, 200))
-    buf = io.BytesIO()
-    logo.save(buf, format="PNG")
-    return buf.getvalue()
-
-_COLOR_DEUDA = (183, 28, 28)          # rojo (RGB, PNG)
-_COLOR_DEUDA_PDF = "#B71C1C"
-_COLOR_ESTADO_REP = {
-    "Pagado": "#2E7D32", "Parcial": "#E65100", "Pendiente": "#B71C1C",
-    "Sin pago": "#B71C1C", "Por vencer": "#1565C0",
+SERVICIOS = {
+    "electricidad": {
+        "nombre": "Electricidad", "unidad": "Kwh", "lectura_anterior": "kwh_anterior",
+        "lectura_actual": "kwh_actual", "lectura_anterior_2": "kwh_anterior_2",
+        "lectura_actual_2": "kwh_actual_2", "tarifa": "tarifa_kwh",
+    },
+    "agua": {
+        "nombre": "Agua", "unidad": "m³", "lectura_anterior": "lectura_anterior",
+        "lectura_actual": "lectura_actual", "tarifa": "tarifa_agua",
+    },
 }
 
 
-def _fmt_bs2(monto):
-    """Dos decimales: en una deuda no se debe ocultar ningún centavo."""
-    try:
-        return f"Bs {float(monto):,.2f}"
-    except (TypeError, ValueError):
-        return "Bs 0.00"
+def hoy_bolivia():
+    """Fecha local de Bolivia, independiente de la zona del servidor."""
+    return datetime.now(_ZONA_BOLIVIA).date()
 
 
-def _fmt_fecha(f):
-    return f.strftime("%d/%m/%Y") if f else "—"
+def _detalle_lecturas(config, periodo, servicio=None):
+    """Devuelve las lecturas/tarifa imprimibles sin inventar consumos incoherentes."""
+    servicio = servicio or ("agua" if config is SERVICIOS["agua"] else "electricidad")
+    unidad = config["unidad"]
+    if servicio == "electricidad":
+        ant1, act1 = periodo.get("kwh_anterior"), periodo.get("kwh_actual")
+        ant2, act2 = periodo.get("kwh_anterior_2"), periodo.get("kwh_actual_2")
+        dos = ant2 is not None and act2 is not None
+        if dos:
+            filas = [("Medidor 1 - anterior:", f"{float(ant1 or 0):g} {unidad}"),
+                     ("Medidor 1 - actual:", f"{float(act1 or 0):g} {unidad}"),
+                     ("Medidor 2 - anterior:", f"{float(ant2):g} {unidad}"),
+                     ("Medidor 2 - actual:", f"{float(act2):g} {unidad}")]
+            consumo = max(float(act1 or 0)-float(ant1 or 0), 0) + max(float(act2)-float(ant2), 0)
+        else:
+            filas = [("Lectura anterior:", f"{float(ant1 or 0):g} {unidad}"),
+                     ("Lectura actual:", f"{float(act1 or 0):g} {unidad}")]
+            consumo = max(float(act1 or 0)-float(ant1 or 0), 0)
+        tarifa = float(periodo.get("tarifa_kwh") or 0)
+        esperado = float(periodo.get("monto_esperado") or 0)
+        if abs(consumo * tarifa - esperado) < 0.011 or abs(__import__("math").floor(consumo * tarifa + 0.5) - esperado) < 0.011:
+            filas.append(("Consumo total:" if dos else "Consumo:", f"{consumo:g} {unidad}"))
+            filas.append(("Tarifa:", f"Bs {tarifa:.2f} por {unidad}"))
+        return filas
+    anterior = float(periodo.get("lectura_anterior") or 0)
+    actual = float(periodo.get("lectura_actual") or 0)
+    consumo = max(actual-anterior, 0)
+    tarifa = float(periodo.get("tarifa_agua") or 0)
+    esperado = float(periodo.get("monto_esperado") or 0)
+    filas = [("Lectura anterior:", f"{anterior:g} {unidad}"), ("Lectura actual:", f"{actual:g} {unidad}")]
+    if abs(consumo * tarifa - esperado) < 0.011 or abs(__import__("math").floor(consumo * tarifa + 0.5) - esperado) < 0.011:
+        filas.extend([("Consumo:", f"{consumo:g} {unidad}"), ("Tarifa:", f"Bs {tarifa:.2f} por {unidad}")])
+    return filas
 
 
-def _recortar_filas(filas, maximo=MAX_FILAS_REPORTE):
-    """Siempre muestra TODAS las filas con saldo (el inquilino debe ver de dónde sale su deuda)
-    y completa con los meses pagados más recientes hasta 'maximo'. Devuelve (filas, omitidas)."""
-    con_saldo = [i for i, f in enumerate(filas) if f["saldo"] > 0.009]
-    pagadas = [i for i, f in enumerate(filas) if f["saldo"] <= 0.009]
-    cupo = max(0, maximo - len(con_saldo))
-    visibles = set(con_saldo) | set(pagadas[max(0, len(pagadas) - cupo):] if cupo else [])
-    return [f for i, f in enumerate(filas) if i in visibles], len(filas) - len(visibles)
-
-
-def _resumen_ultimo_pago(bloque):
-    up = bloque.get("ultimo_pago")
-    if not up:
-        return "Sin pagos registrados"
-    dias = bloque.get("dias_desde_ultimo_pago")
-    hace = "hoy" if dias == 0 else (f"hace {dias} día" + ("s" if dias != 1 else ""))
-    return f'{_fmt_fecha(up["fecha"])} ({hace}) - {_fmt_bs2(up["monto"])}'
+def construir_datos_recibo_servicio(servicio, pago, periodo, apartamento, total_pagado_periodo, recibido_por):
+    if servicio not in SERVICIOS:
+        raise ValueError(f"Servicio no válido: {servicio}")
+    datos = construir_datos_recibo(pago, periodo, apartamento, total_pagado_periodo, recibido_por)
+    config = SERVICIOS[servicio]
+    datos["titulo"] = f"Recibo de Pago de {config['nombre']}"
+    datos["servicio"] = servicio
+    datos["detalle"] = _detalle_lecturas(config, periodo, servicio)
+    return datos
 
 
 def construir_datos_reporte_inquilino(apartamento, deuda, emitido_por=None):
-    """'deuda' es el resultado de moras.deuda_real_inquilino() (con aplica=True)."""
-    alq, elec = deuda["alquiler"], deuda["electricidad"]
-    filas_alq, omit_alq = _recortar_filas(alq["filas"])
-    filas_elec, omit_elec = _recortar_filas(elec["filas"])
-    notas = []
-    if alq["desde_ingreso_sin_registros"]:
-        notas.append("No hay pagos de alquiler registrados: la deuda se calcula desde la fecha de ingreso.")
-    if alq["por_vencer"] > 0.009:
-        notas.append(f'Alquiler por vencer (aún no incluido en la deuda): {_fmt_bs2(alq["por_vencer"])}.')
-    if omit_alq or omit_elec:
-        notas.append("Se omiten meses anteriores ya pagados para abreviar el reporte.")
+    """Normaliza los datos para un estado de cuenta individual."""
     return {
-        "apartamento_texto": formatear_apartamento(apartamento),
-        "inquilino_nombre": (apartamento or {}).get("inquilino_nombre") or "—",
+        "apartamento": dict(apartamento or {}),
+        "deuda": dict(deuda or {}) if isinstance(deuda, dict) else deuda,
         "fecha_emision": datetime.now(_ZONA_BOLIVIA).strftime("%d/%m/%Y %H:%M"),
-        "fecha_corte": _fmt_fecha(deuda["fecha_corte"]),
-        "ultimo_pago_alquiler": _resumen_ultimo_pago(alq),
-        "ultimo_pago_electricidad": _resumen_ultimo_pago(elec),
-        "filas_alquiler": filas_alq, "filas_electricidad": filas_elec,
-        "meses_atrasados": alq["meses_atrasados"],
-        "deuda_alquiler": alq["deuda"], "deuda_electricidad": elec["deuda"],
-        "deuda_total": deuda["deuda_total"],
-        "notas": notas,
         "emitido_por": emitido_por or "—",
+        "numero_recibo": f"EC-{int((apartamento or {}).get('id') or 0):06d}",
+        "apartamento_codigo": (apartamento or {}).get("codigo") or "—",
+        "apartamento_piso": (apartamento or {}).get("piso") or "—",
+        "inquilino_nombre": (apartamento or {}).get("inquilino_nombre") or "—",
+        "monto_esperado": float((deuda or {}).get("monto_esperado") or 0) if isinstance(deuda, dict) else 0,
+        "total_pagado_periodo": float((deuda or {}).get("total_pagado") or 0) if isinstance(deuda, dict) else 0,
+        "saldo_pendiente": float((deuda or {}).get("deuda_total") or 0) if isinstance(deuda, dict) else 0,
     }
 
 
-def generar_reporte_inquilino_pdf(datos: dict) -> bytes:
-    from reportlab.platypus import HRFlowable, KeepTogether
-    from reportlab.lib.styles import ParagraphStyle
-
+def generar_reporte_inquilino_pdf(datos):
+    """Genera un estado de cuenta individual en PDF."""
+    from reportlab.lib.pagesizes import A4
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=14 * mm, bottomMargin=14 * mm,
-                             leftMargin=18 * mm, rightMargin=18 * mm,
-                             title=f'Estado de cuenta - {datos["apartamento_texto"]}')
-    ancho_util = letter[0] - 36 * mm
-    # Con muchas filas se compacta el espaciado para que el reporte siga cabiendo en una hoja
-    n_total = len(datos["filas_alquiler"]) + len(datos["filas_electricidad"])
-    pad_fila, tam_fila = (3, 8.5) if n_total <= 14 else ((1.8, 8) if n_total <= 19 else (1.0, 7.5))
-    base = getSampleStyleSheet()["Normal"]
-    st_titulo = ParagraphStyle("t", parent=base, fontName="Helvetica-Bold", fontSize=15, leading=18)
-    st_sub = ParagraphStyle("s", parent=base, fontSize=9, leading=12, textColor=colors.Color(.33, .33, .33))
-    st_chico = ParagraphStyle("c", parent=base, fontSize=8, leading=10)
-    st_nota = ParagraphStyle("n", parent=base, fontName="Helvetica-Oblique", fontSize=7.5, leading=10,
-                              textColor=colors.Color(.33, .33, .33))
-    st_seccion = ParagraphStyle("sec", parent=base, fontName="Helvetica-Bold", fontSize=11, leading=14,
-                                 spaceBefore=8 if n_total <= 19 else 3, spaceAfter=4 if n_total <= 19 else 2)
-    story = []
-
-    # ---------- Encabezado: logo y título lado a lado, como el recibo ----------
-    logo = ""
+    ancho, alto = A4
+    c = pdfcanvas.Canvas(buffer, pagesize=A4)
+    margen, y = 18 * mm, alto - 20 * mm
     if os.path.exists(LOGO_PATH):
         try:
-            logo = RLImage(io.BytesIO(_logo_liviano_bytes()), width=16 * mm, height=16 * mm)
-        except Exception:
-            logo = ""
-    cab = Table([[logo, [Paragraph(NOMBRE_RESIDENCIAL, st_titulo),
-                         Paragraph("Estado de Cuenta del Inquilino", st_sub)]]],
-                colWidths=[20 * mm, ancho_util - 20 * mm])
-    cab.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
-    story += [cab, Spacer(1, 3), HRFlowable(width="100%", thickness=0.6, color=colors.black), Spacer(1, 4)]
-
-    fechas = Table([[Paragraph(f'Fecha de corte: {datos["fecha_corte"]}', st_chico),
-                     Paragraph(f'<para align="right">Emitido: {datos["fecha_emision"]}</para>', st_chico)]],
-                   colWidths=[ancho_util / 2, ancho_util / 2])
-    fechas.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
-    story += [fechas, Spacer(1, 6)]
-
-    # ---------- Datos generales: etiqueta a la izquierda, valor a la derecha ----------
-    def tabla_datos(pares):
-        t = Table([[Paragraph(f"<b>{k}</b>", st_chico), Paragraph(f'<para align="right">{v}</para>', st_chico)]
-                   for k, v in pares], colWidths=[ancho_util * 0.38, ancho_util * 0.62])
-        t.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                               ("TOPPADDING", (0, 0), (-1, -1), 1.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5)]))
-        return t
-
-    story.append(tabla_datos([
-        ("Apartamento:", datos["apartamento_texto"]),
-        ("Inquilino:", datos["inquilino_nombre"]),
-        ("Último pago de alquiler:", datos["ultimo_pago_alquiler"]),
-        ("Último pago de electricidad:", datos["ultimo_pago_electricidad"]),
-    ]))
-    story += [Spacer(1, 4), HRFlowable(width="100%", thickness=0.6, color=colors.HexColor("#cccccc"))]
-
-    # ---------- Tablas por categoría ----------
-    def tabla_categoria(titulo, filas, subtotal_txt):
-        story.append(Paragraph(titulo, st_seccion))
-        if not filas:
-            story.append(Paragraph("Sin periodos registrados.", st_chico))
-            return
-        datos_t = [["Periodo", "Esperado", "Pagado", "Saldo", "Estado"]] + [
-            [f["periodo"], _fmt_bs2(f["esperado"]), _fmt_bs2(f["pagado"]), _fmt_bs2(f["saldo"]), f["estado"]]
-            for f in filas]
-        t = Table(datos_t, repeatRows=1, hAlign="LEFT",
-                  colWidths=[ancho_util * w for w in (0.27, 0.19, 0.19, 0.19, 0.16)])
-        estilo = [
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2E4057")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), tam_fila),
-            ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor("#cccccc")),
-            ("ALIGN", (1, 0), (3, -1), "RIGHT"),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, -1), pad_fila), ("BOTTOMPADDING", (0, 0), (-1, -1), pad_fila),
-        ]
-        for i, f in enumerate(filas, start=1):
-            estilo += [("TEXTCOLOR", (4, i), (4, i), colors.HexColor(_COLOR_ESTADO_REP.get(f["estado"], "#000000"))),
-                       ("FONTNAME", (4, i), (4, i), "Helvetica-Bold")]
-        t.setStyle(TableStyle(estilo))
-        story.append(t)
-        story.append(Paragraph(f'<para align="right"><b>{subtotal_txt}</b></para>', st_chico))
-
-    n = datos["meses_atrasados"]
-    tabla_categoria("Alquiler", datos["filas_alquiler"],
-                    f'{n} mes{"es" if n != 1 else ""} atrasado{"s" if n != 1 else ""}  |  '
-                    f'Deuda de alquiler: {_fmt_bs2(datos["deuda_alquiler"])}')
-    tabla_categoria("Electricidad", datos["filas_electricidad"],
-                    f'Deuda de electricidad: {_fmt_bs2(datos["deuda_electricidad"])}')
-    story.append(Spacer(1, 10))
-
-    # ---------- Caja resaltada con la deuda total (roja con deuda, verde si está al día) ----------
-    debe = datos["deuda_total"] > 0.009
-    caja = Table([["DEUDA TOTAL" if debe else "ESTADO: AL DÍA", _fmt_bs2(datos["deuda_total"])]],
-                 colWidths=[ancho_util * 0.6, ancho_util * 0.4], rowHeights=[13 * mm])
-    caja.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(_COLOR_DEUDA_PDF if debe else _COLOR_ACENTO_PDF)),
-        ("ROUNDEDCORNERS", [6, 6, 6, 6]),
-        ("TEXTCOLOR", (0, 0), (-1, -1), colors.white),
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (0, 0), 11), ("FONTSIZE", (1, 0), (1, 0), 16),
-        ("ALIGN", (1, 0), (1, 0), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 12), ("RIGHTPADDING", (0, 0), (-1, -1), 12),
-    ]))
-    pie = [Spacer(1, 6)]
-    for nota in datos["notas"]:
-        pie.append(Paragraph(nota, st_nota))
-    pie += [Spacer(1, 6), HRFlowable(width="100%", thickness=0.6, color=colors.HexColor("#cccccc")),
-            Spacer(1, 3), Paragraph(f'Emitido por: {datos["emitido_por"]}', st_chico)]
-    story.append(KeepTogether([caja] + pie))
-
-    doc.build(story)
-    buffer.seek(0)
-    return buffer.getvalue()
-
-
-def generar_reporte_inquilino_png(datos: dict) -> bytes:
-    ancho = 820
-    n_filas = len(datos["filas_alquiler"]) + len(datos["filas_electricidad"])
-    alto_max = 760 + n_filas * 34 + len(datos["notas"]) * 26
-    img = Image.new("RGB", (ancho, alto_max), "white")
-    draw = ImageDraw.Draw(img)
-
-    f_titulo = _fuente(26, negrita=True)
-    f_sub = _fuente(14)
-    f_label = _fuente(14, negrita=True)
-    f_valor = _fuente(14)
-    f_chico = _fuente(12)
-    f_chico_b = _fuente(12, negrita=True)
-    f_chico_i = _fuente(12, cursiva=True)
-    f_seccion = _fuente(16, negrita=True)
-    f_caja_label = _fuente(16, negrita=True)
-    f_caja_monto = _fuente(28, negrita=True)
-
-    margen = 48
-    y = 28
-
-    def ancho_texto(t, fuente):
-        b = draw.textbbox((0, 0), t, font=fuente)
-        return b[2] - b[0]
-
-    def derecha(texto, fuente, x_der, yy, color="black"):
-        draw.text((x_der - ancho_texto(texto, fuente), yy), texto, font=fuente, fill=color)
-
-    # ---------- Encabezado ----------
-    texto_x, logo_alto = margen, 0
-    if os.path.exists(LOGO_PATH):
-        try:
-            logo = Image.open(LOGO_PATH).convert("RGBA")
-            logo.thumbnail((92, 92))
-            img.paste(logo, (margen, y), logo)
-            texto_x, logo_alto = margen + logo.width + 18, logo.height
+            c.drawImage(LOGO_PATH, (ancho-25*mm)/2, y-25*mm, width=25*mm, height=25*mm, preserveAspectRatio=True, mask="auto")
+            y -= 30*mm
         except Exception:
             pass
-    draw.text((texto_x, y + 6), NOMBRE_RESIDENCIAL, font=f_titulo, fill="black")
-    draw.text((texto_x, y + 42), "Estado de Cuenta del Inquilino", font=f_sub, fill="#555555")
-    y += max(logo_alto, 70) + 14
-    draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
-    y += 20
-
-    draw.text((margen, y), f'Fecha de corte: {datos["fecha_corte"]}', font=f_chico, fill="black")
-    derecha(f'Emitido: {datos["fecha_emision"]}', f_chico, ancho - margen, y)
-    y += 32
-
-    def fila(etiqueta, valor, yy):
-        draw.text((margen, yy), etiqueta, font=f_label, fill="black")
-        derecha(str(valor), f_valor, ancho - margen, yy)
-        return yy + 31
-
-    y = fila("Apartamento:", datos["apartamento_texto"], y)
-    y = fila("Inquilino:", datos["inquilino_nombre"], y)
-    y = fila("Último pago de alquiler:", datos["ultimo_pago_alquiler"], y)
-    y = fila("Último pago de electricidad:", datos["ultimo_pago_electricidad"], y)
-    y += 6
-    draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
-    y += 20
-
-    # ---------- Tablas ----------
-    ancho_tabla = ancho - 2 * margen
-    xs = [margen + 10]                                    # Periodo (izquierda)
-    cols_der = [margen + 215, margen + 355, margen + 495]  # Esperado, Pagado, Saldo (alineados a la derecha)
-    x_estado = margen + 525
-    alto_fila = 32
-
-    def tabla(titulo, filas, subtotal):
-        nonlocal y
-        draw.text((margen, y), titulo, font=f_seccion, fill="black")
-        y += 30
-        if not filas:
-            draw.text((margen, y), "Sin periodos registrados.", font=f_chico_i, fill="#555555")
-            y += 34
-            return
-        draw.rectangle([(margen, y), (ancho - margen, y + alto_fila)], fill="#2E4057")
-        draw.text((xs[0], y + 8), "Periodo", font=f_chico_b, fill="white")
-        for x, t in zip(cols_der, ("Esperado", "Pagado", "Saldo")):
-            derecha(t, f_chico_b, x, y + 8, "white")
-        draw.text((x_estado, y + 8), "Estado", font=f_chico_b, fill="white")
-        y += alto_fila
-        for f in filas:
-            draw.text((xs[0], y + 8), f["periodo"], font=f_chico, fill="black")
-            derecha(_fmt_bs2(f["esperado"]), f_chico, cols_der[0], y + 8)
-            derecha(_fmt_bs2(f["pagado"]), f_chico, cols_der[1], y + 8)
-            derecha(_fmt_bs2(f["saldo"]), f_chico_b if f["saldo"] > 0.009 else f_chico, cols_der[2], y + 8)
-            draw.text((x_estado, y + 8), f["estado"], font=f_chico_b,
-                      fill=_COLOR_ESTADO_REP.get(f["estado"], "#000000"))
-            y += alto_fila
-            draw.line([(margen, y), (ancho - margen, y)], fill="#e0e0e0", width=1)
-        y += 8
-        derecha(subtotal, f_chico_b, ancho - margen, y)
-        y += 34
-
-    n = datos["meses_atrasados"]
-    tabla("Alquiler", datos["filas_alquiler"],
-          f'{n} mes{"es" if n != 1 else ""} atrasado{"s" if n != 1 else ""}   |   '
-          f'Deuda de alquiler: {_fmt_bs2(datos["deuda_alquiler"])}')
-    tabla("Electricidad", datos["filas_electricidad"],
-          f'Deuda de electricidad: {_fmt_bs2(datos["deuda_electricidad"])}')
-    y += 4
-
-    # ---------- Caja resaltada con la deuda total ----------
-    debe = datos["deuda_total"] > 0.009
-    caja_alto = 74
-    draw.rounded_rectangle([(margen, y), (ancho - margen, y + caja_alto)], radius=10,
-                           fill=_COLOR_DEUDA if debe else _COLOR_ACENTO)
-    draw.text((margen + 20, y + caja_alto / 2 - 11), "DEUDA TOTAL" if debe else "ESTADO: AL DÍA",
-              font=f_caja_label, fill="white")
-    derecha(_fmt_bs2(datos["deuda_total"]), f_caja_monto, ancho - margen - 20, y + caja_alto / 2 - 18, "white")
-    y += caja_alto + 22
-
-    for nota in datos["notas"]:
-        draw.text((margen, y), nota, font=f_chico_i, fill="#555555")
-        y += 26
-    y += 8
-    draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
-    y += 18
-    draw.text((margen, y), f'Emitido por: {datos["emitido_por"]}', font=f_chico, fill="black")
-    y += 34
-
-    buffer = io.BytesIO()
-    img.crop((0, 0, ancho, min(y + 10, alto_max))).save(buffer, format="PNG")
-    buffer.seek(0)
-    return buffer.getvalue()
+    c.setFont("Helvetica-Bold", 16); c.drawCentredString(ancho/2, y, NOMBRE_RESIDENCIAL); y -= 9*mm
+    c.setFont("Helvetica-Bold", 12); c.drawCentredString(ancho/2, y, "Estado de cuenta del inquilino"); y -= 12*mm
+    c.setFont("Helvetica", 10)
+    for label, key in [("Código de apartamento", "apartamento_codigo"), ("Piso", "apartamento_piso"), ("Inquilino", "inquilino_nombre"), ("Fecha de emisión", "fecha_emision"), ("Emitido por", "emitido_por")]:
+        c.drawString(margen, y, f"{label}: {datos.get(key, '—')}"); y -= 7*mm
+    y -= 3*mm; c.line(margen, y, ancho-margen, y); y -= 9*mm
+    deuda = datos.get("deuda") or {}
+    if isinstance(deuda, dict):
+        for key, value in deuda.items():
+            if isinstance(value, (str, int, float)) or value is None:
+                label = str(key).replace("_", " ").capitalize()
+                c.drawString(margen, y, f"{label}: {value if value is not None else '—'}"); y -= 7*mm
+                if y < 25*mm:
+                    c.showPage(); y = alto-20*mm; c.setFont("Helvetica", 10)
+    c.save(); buffer.seek(0); return buffer.getvalue()
 
 
-def hoy_bolivia():
-    """Fecha de hoy en Bolivia (UTC-4). En Streamlit Cloud el servidor suele estar en UTC, y entre
-    las 20:00 y las 24:00 de Bolivia date.today() ya marcaría el día siguiente, lo que adelantaría
-    un día los vencimientos de alquiler."""
-    return datetime.now(_ZONA_BOLIVIA).date()
+def generar_reporte_inquilino_png(datos):
+    """Genera una vista PNG sencilla del estado de cuenta individual."""
+    ancho, alto = 1000, 1200
+    img = Image.new("RGB", (ancho, alto), "white")
+    draw = ImageDraw.Draw(img)
+    f_t = _fuente(30, negrita=True); f_l = _fuente(20, negrita=True); f_v = _fuente(18)
+    y = 30
+    if os.path.exists(LOGO_PATH):
+        try:
+            logo = Image.open(LOGO_PATH).convert("RGBA"); logo.thumbnail((160, 160))
+            img.paste(logo, ((ancho-logo.width)//2, y), logo); y += logo.height + 20
+        except Exception:
+            pass
+    title = NOMBRE_RESIDENCIAL
+    draw.text(((ancho-draw.textbbox((0,0),title,font=f_t)[2])//2,y), title, fill="black", font=f_t); y += 55
+    draw.text((60,y), "Estado de cuenta del inquilino", fill="black", font=f_l); y += 45
+    for label,key in [("Apartamento", "apartamento_codigo"), ("Piso", "apartamento_piso"), ("Inquilino", "inquilino_nombre"), ("Fecha de emisión", "fecha_emision"), ("Emitido por", "emitido_por")]:
+        draw.text((60,y), f"{label}: {datos.get(key,'—')}", fill="black", font=f_v); y += 34
+    draw.line((60,y,940,y), fill="#999999", width=2); y += 20
+    deuda = datos.get("deuda") or {}
+    if isinstance(deuda, dict):
+        for key,value in deuda.items():
+            if isinstance(value,(str,int,float)) or value is None:
+                draw.text((60,y), f"{str(key).replace('_',' ').capitalize()}: {value if value is not None else '—'}", fill="black", font=f_v); y += 32
+                if y > alto-40: break
+    buf=io.BytesIO(); img.crop((0,0,ancho,min(y+30,alto))).save(buf,format="PNG"); buf.seek(0); return buf.getvalue()
