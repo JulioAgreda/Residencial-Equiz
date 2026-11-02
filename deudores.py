@@ -7,12 +7,8 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 CATEGORIAS_COBRO = (
-    "Prestamo a particular",
-    "Anticipo a empleado",
-    "Prestamo a propietario o socio",
-    "Venta a credito",
-    "Servicio a credito",
-    "Otra cuenta por cobrar",
+    "Prestamo a colaborador",
+    "Prestamo a persona externa",
 )
 
 

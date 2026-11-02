@@ -35,12 +35,12 @@ MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
 PISOS = ["Planta Baja", "Primer Piso", "Segundo Piso", "Tercer Piso"]
 ROLES = ["Administrador", "Cobrador"]
 
-CATEGORIAS_GASTO = ["Mantenimiento de ascensores", "Artículos de limpieza", "Seguridad",
-                    "Servicios públicos", "Mantenimiento general", "Otro"]
-CATEGORIAS_PAGO = ["Servicios (luz, agua, internet)", "Sueldos y honorarios", "Impuestos y tasas",
-                   "Pago a proveedor", "Otro"]
-CONCEPTOS_VENTA = ["Alquiler de área común", "Venta de activos fijos", "Emisión de tag/control de acceso",
-                   "Alquiler de parqueo de visitas", "Copias de llaves", "Otro"]
+CATEGORIAS_COMPRA = ["Artículos de limpieza", "Repuestos", "Herramientas", "Dispositivos", "Otros artículos"]
+CATEGORIAS_GASTO_OPERATIVO = ["Electricidad", "Agua", "Internet", "Honorarios", "Impuestos", "Otros servicios y gastos"]
+# Compatibilidad temporal con ramas históricas de la aplicación que se conservan para reversión.
+CATEGORIAS_GASTO = CATEGORIAS_COMPRA
+CATEGORIAS_PAGO = CATEGORIAS_GASTO_OPERATIVO
+CONCEPTOS_VENTA = ["Muebles", "Equipos", "Copias de llave", "Otros"]
 METODOS_PAGO_MOVIMIENTOS = ["Efectivo", "QR", "Transferencia Bancaria", "Tarjeta", "Otro"]
 
 PRIORIDADES_PENDIENTE = ["Urgente", "Alta", "Media", "Baja"]
@@ -956,7 +956,7 @@ else:
     opciones_principal = ["📊 Dashboard", "🏠 Inquilinos", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua",
                           "🤝 Compromisos de pago", "🚪 Ex inquilinos"]
 
-opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
+opciones_movimientos = ["(ninguno)", "💸 Egresos", "💸 Ventas"]
 opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "📦 Inventario", "🗒️ Reuniones"]
 opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería", "🏦 Conciliación bancaria"]
 
@@ -998,8 +998,8 @@ def _al_elegir_reportes():
 pagina_principal = st.sidebar.radio("Gestión del Residencial", opciones_principal, key="nav_principal",
                                      on_change=_al_elegir_principal)
 st.sidebar.divider()
-st.sidebar.caption("📒 Módulo de Movimientos")
-pagina_movimientos = st.sidebar.radio("Compras y Ventas", opciones_movimientos, key="nav_movimientos",
+st.sidebar.caption("📒 Operaciones financieras")
+pagina_movimientos = st.sidebar.radio("Ingresos y egresos", opciones_movimientos, key="nav_movimientos",
                                        label_visibility="collapsed", on_change=_al_elegir_movimientos)
 st.sidebar.divider()
 st.sidebar.caption("🗂️ Módulo Administración")
@@ -1032,14 +1032,14 @@ if st.sidebar.button("🚪 Cerrar sesión"):
 # PÁGINA: FINANZAS - CUENTAS POR PAGAR Y POR COBRAR
 # ==================================================================
 elif pagina == "💰 Finanzas":
-    st.title("💰 Finanzas")
-    st.caption("Control de obligaciones, deudores y saldos pendientes. Solo administrador.")
+    st.title("🤝 Préstamos")
+    st.caption("Registro de préstamos recibidos y préstamos realizados, sin intereses. Solo administrador.")
     if not es_admin:
         st.error("No tienes permiso para acceder a este módulo.")
         st.stop()
 
     tab_resumen, tab_pagar, tab_cobrar = st.tabs(
-        ["📊 Estado financiero", "📤 Cuentas por pagar", "📥 Cuentas por cobrar"]
+        ["📊 Resumen de préstamos", "📥 Préstamos recibidos", "📤 Préstamos realizados"]
     )
 
     try:
@@ -1048,7 +1048,7 @@ elif pagina == "💰 Finanzas":
         cuentas_cobrar = db.listar_cuentas_por_cobrar()
         movimientos_cxc = db.listar_movimientos_cuentas_cobrar()
     except Exception as e:
-        st.error("No se pudieron cargar las tablas financieras. Verifica que la migración V12 esté aplicada.")
+        st.error("No se pudieron cargar las tablas financieras. Verifica que la migración financiera V13 esté aplicada.")
         st.exception(e)
         st.stop()
 
@@ -1066,18 +1066,18 @@ elif pagina == "💰 Finanzas":
 
     with tab_resumen:
         c1, c2, c3 = st.columns(3)
-        c1.metric("Cuentas por pagar", fmt_money(total_pagar))
-        c2.metric("Cuentas por cobrar", fmt_money(total_cobrar))
+        c1.metric("Préstamos recibidos pendientes", fmt_money(total_pagar))
+        c2.metric("Préstamos realizados pendientes", fmt_money(total_cobrar))
         c3.metric("Saldo neto de estas cuentas", fmt_money(total_cobrar-total_pagar))
-        st.info("Este panel muestra únicamente las cuentas por pagar y cobrar registradas aquí. No equivale todavía al estado financiero completo ni al saldo de caja y bancos.")
-        st.subheader("Obligaciones pendientes")
+        st.info("Este panel muestra los saldos de capital de préstamos recibidos y realizados. No incluye intereses ni equivale al saldo de caja y bancos.")
+        st.subheader("Préstamos recibidos pendientes")
         if resumen_obl["obligaciones"]:
             st.dataframe(pd.DataFrame(resumen_obl["obligaciones"])[
                 ["codigo","categoria","acreedor","fecha_origen","fecha_vencimiento","saldo_pendiente","estado_calculado"]
             ], use_container_width=True, hide_index=True)
         else:
             st.info("Todavía no hay obligaciones registradas.")
-        st.subheader("Cuentas por cobrar pendientes")
+        st.subheader("Préstamos realizados pendientes")
         if resumen_cxc["cuentas"]:
             st.dataframe(pd.DataFrame(resumen_cxc["cuentas"])[
                 ["codigo","categoria","deudor","fecha_origen","fecha_vencimiento","saldo_por_cobrar","estado_calculado"]
@@ -1086,7 +1086,7 @@ elif pagina == "💰 Finanzas":
             st.info("Todavía no hay cuentas por cobrar registradas.")
 
     with tab_pagar:
-        st.subheader("Registrar una obligación")
+        st.subheader("Registrar préstamo recibido")
         with st.form("v12_nueva_obligacion", clear_on_submit=True):
             a,b=st.columns(2)
             codigo=a.text_input("Código único", placeholder="OBL-2026-001")
@@ -1121,9 +1121,9 @@ elif pagina == "💰 Finanzas":
                 except Exception as e: st.error(f"No se pudo guardar: {e}")
 
         st.divider()
-        st.subheader("Registrar pago de capital")
+        st.subheader("Registrar devolución de capital")
         if obligaciones:
-            mapa={f'{o["codigo"]} · {o["acreedor"]} · saldo Bs {float(o.get("saldo_apertura") or 0):.2f}':o for o in obligaciones}
+            mapa={f'{o["codigo"]} · {o["acreedor"]} · saldo Bs {float(deudas.calcular_saldo(o, mov_obl_por_id.get(o["id"], []))):.2f}':o for o in obligaciones if float(deudas.calcular_saldo(o, mov_obl_por_id.get(o["id"], []))) > 0}
             with st.form("v12_pago_obligacion", clear_on_submit=True):
                 elegido=st.selectbox("Obligación",list(mapa))
                 fecha=st.date_input("Fecha del pago",key="v12_fecha_pago")
@@ -1151,7 +1151,7 @@ elif pagina == "💰 Finanzas":
             st.dataframe(pd.DataFrame(resumen_obl["obligaciones"]),use_container_width=True,hide_index=True)
 
     with tab_cobrar:
-        st.subheader("Registrar una cuenta por cobrar")
+        st.subheader("Registrar préstamo realizado")
         with st.form("v12_nueva_cxc", clear_on_submit=True):
             a,b=st.columns(2)
             codigo_c=a.text_input("Código único",placeholder="CXC-2026-001")
@@ -1186,9 +1186,9 @@ elif pagina == "💰 Finanzas":
                 except Exception as e: st.error(f"No se pudo guardar: {e}")
 
         st.divider()
-        st.subheader("Registrar cobro")
+        st.subheader("Registrar devolución recibida")
         if cuentas_cobrar:
-            mapa_c={f'{x["codigo"]} · {x["deudor"]} · saldo Bs {float(x.get("saldo_apertura") or 0):.2f}':x for x in cuentas_cobrar}
+            mapa_c={f'{x["codigo"]} · {x["deudor"]} · saldo Bs {float(deudores.calcular_saldo(x, mov_cxc_por_id.get(x["id"], []))):.2f}':x for x in cuentas_cobrar if float(deudores.calcular_saldo(x, mov_cxc_por_id.get(x["id"], []))) > 0}
             with st.form("v12_cobro_cxc", clear_on_submit=True):
                 elegido_c=st.selectbox("Cuenta por cobrar",list(mapa_c))
                 fecha_c=st.date_input("Fecha del cobro",key="v12_fecha_cobro")
@@ -4206,6 +4206,71 @@ elif pagina == "👥 Usuarios":
 
 
 # ==================================================================
+# PÁGINA: EGRESOS UNIFICADOS (compras + gastos/pagos)
+# ==================================================================
+elif pagina == "💸 Egresos":
+    st.title("💸 Egresos")
+    st.caption("Un solo formulario para compras de bienes y pagos de servicios u obligaciones operativas.")
+    if not es_admin:
+        st.error("No tienes permiso para registrar egresos.")
+        st.stop()
+    nombre_encargado = usuario_actual.get("nombre") or usuario_actual.get("username")
+    tab_reg, tab_hist = st.tabs(["➕ Registrar egreso", "📜 Historial consolidado"])
+    with tab_reg:
+        with st.form("v13_form_egreso_unico", clear_on_submit=True):
+            tipo = st.radio("Tipo de egreso", ["Compra", "Gasto / pago"], horizontal=True)
+            categorias = CATEGORIAS_COMPRA if tipo == "Compra" else CATEGORIAS_GASTO_OPERATIVO
+            categoria = st.selectbox("Categoría", categorias)
+            fecha = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
+            monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0, format="%.2f")
+            col1, col2 = st.columns(2)
+            with col1:
+                beneficiario = st.text_input("Proveedor / beneficiario")
+                metodo = st.selectbox("Medio de pago", METODOS_PAGO_MOVIMIENTOS)
+            with col2:
+                comprobante = st.text_input("N.º de factura / recibo / comprobante")
+                descripcion = st.text_area("Descripción / detalle")
+            st.caption(f"Registrado por: **{nombre_encargado}**")
+            guardar = st.form_submit_button("💾 Registrar egreso", use_container_width=True)
+            if guardar:
+                if monto <= 0:
+                    st.error("El monto debe ser mayor a cero.")
+                else:
+                    try:
+                        if tipo == "Compra":
+                            db.crear_compra({"fecha_compra":str(fecha),"categoria":categoria,
+                                "descripcion":descripcion or None,"monto_total":monto,"metodo_pago":metodo,
+                                "proveedor":beneficiario or None,"numero_comprobante":comprobante or None,
+                                "encargado":nombre_encargado})
+                        else:
+                            db.crear_pago_general({"fecha_pago":str(fecha),"categoria":categoria,
+                                "descripcion":descripcion or None,"monto":monto,"metodo_pago":metodo,
+                                "beneficiario":beneficiario or None,"encargado":nombre_encargado})
+                        st.success("Egreso registrado correctamente.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"No se pudo registrar el egreso: {e}")
+    with tab_hist:
+        desde = st.date_input("Desde", value=date.today().replace(day=1), format="DD/MM/YYYY", key="v13_eg_desde")
+        hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY", key="v13_eg_hasta")
+        compras = db.listar_compras(fecha_desde=str(desde), fecha_hasta=str(hasta))
+        pagos = db.listar_pagos_generales(fecha_desde=str(desde), fecha_hasta=str(hasta))
+        filas = ([{"Fecha":x.get("fecha_compra"),"Tipo":"Compra","Categoría":x.get("categoria"),
+                   "Detalle":x.get("descripcion") or "","Beneficiario":x.get("proveedor") or "",
+                   "Monto (Bs)":float(x.get("monto_total") or 0),"Medio":x.get("metodo_pago") or "",
+                   "Comprobante":x.get("numero_comprobante") or "","Responsable":x.get("encargado") or ""} for x in compras] +
+                 [{"Fecha":x.get("fecha_pago"),"Tipo":"Gasto / pago","Categoría":x.get("categoria"),
+                   "Detalle":x.get("descripcion") or "","Beneficiario":x.get("beneficiario") or "",
+                   "Monto (Bs)":float(x.get("monto") or 0),"Medio":x.get("metodo_pago") or "",
+                   "Comprobante":"","Responsable":x.get("encargado") or ""} for x in pagos])
+        if filas:
+            df = pd.DataFrame(filas).sort_values("Fecha", ascending=False)
+            st.metric("Total de egresos registrados", fmt_money(df["Monto (Bs)"].sum()))
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No hay egresos registrados en el periodo seleccionado.")
+
+# ==================================================================
 # PÁGINA: COMPRAS (Gastos / Egresos)
 # ==================================================================
 elif pagina == "🧾 Compras":
@@ -4560,8 +4625,8 @@ elif pagina == "💳 Pagos":
 # PÁGINA: VENTAS (Ingresos extraordinarios)
 # ==================================================================
 elif pagina == "💸 Ventas":
-    st.title("💸 Ventas (Ingresos extraordinarios)")
-    st.caption("Venta de activos, cobro por uso de áreas comunes, parqueos de visita, copias de llaves, etc.")
+    st.title("💸 Ingresos por ventas")
+    st.caption("Registro de ventas de muebles, equipos, copias de llave y otros ingresos autorizados.")
     ventas_con_estado = estado_disponible("ventas", "estado_entrega")
     if not ventas_con_estado:
         st.warning(AVISO_MIGRACION_ESTADOS)

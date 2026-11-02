@@ -7,12 +7,8 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 CATEGORIAS_DEUDA = (
-    "Prestamo bancario",
-    "Prestamo particular",
-    "Proveedor",
-    "Propietario o socio",
-    "Servicio pendiente",
-    "Otra obligacion",
+    "Prestamo de colaborador",
+    "Prestamo de persona externa",
 )
 ESTADOS = ("Vigente", "Vencida", "Cancelada", "Reestructurada")
 
