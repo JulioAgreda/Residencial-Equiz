@@ -15,6 +15,7 @@ import conciliacion_reportes
 import cuadre
 import consumo as calc_consumo
 import estados
+import finanzas_consolidadas
 import exinquilinos
 import extracto
 import inventario
@@ -956,7 +957,10 @@ else:
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
 opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "📦 Inventario", "🗒️ Reuniones"]
-opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería", "🏦 Conciliación bancaria"]
+opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería"]
+if es_admin:
+    opciones_reportes.append("📊 Rendición financiera consolidada")
+opciones_reportes.append("🏦 Conciliación bancaria")
 
 # Los radios de abajo son independientes en el estado interno de Streamlit:
 # si eliges algo en uno, los demás no se "enteran" y siguen marcando su
@@ -2106,6 +2110,147 @@ elif pagina == "📊 Actividad por usuario":
 # ==================================================================
 # PÁGINA: CUADRE DE TESORERÍA (libro de movimientos y cuadre de fin de mes)
 # ==================================================================
+elif pagina == "📊 Rendición financiera consolidada":
+    if not finanzas_consolidadas.puede_ver_rendicion_financiera(usuario_actual):
+        st.error("No tienes permisos para consultar la rendición financiera consolidada.")
+        st.stop()
+    st.title("📊 Rendición financiera consolidada")
+    st.caption(
+        "Reúne en un solo libro los ingresos por alquiler, electricidad, agua y ventas; "
+        "y los egresos por compras y pagos generales. Solo considera dinero efectivamente registrado como cobrado o pagado."
+    )
+    hoy_fc = recibo.hoy_bolivia()
+    fc1, fc2 = st.columns(2)
+    with fc1:
+        fc_desde = st.date_input("Desde", value=hoy_fc.replace(day=1), format="DD/MM/YYYY", key="fc_desde")
+    with fc2:
+        fc_hasta = st.date_input("Hasta", value=hoy_fc, format="DD/MM/YYYY", key="fc_hasta")
+    if not fc_desde or not fc_hasta:
+        st.warning("Selecciona ambas fechas.")
+        st.stop()
+    if fc_desde > fc_hasta:
+        st.error("La fecha «Desde» no puede ser posterior a «Hasta».")
+        st.stop()
+
+    # Cobros de alquiler y servicios: incluye inquilinos actuales y exinquilinos.
+    periodos_fc = {t: cargar_periodos_abiertos(t) for t in ("alquiler", "electricidad", "agua")}
+    try:
+        historial_fc = cargar_historial()
+        cerrados_fc = {t: cargar_periodos_cerrados(t) for t in ("alquiler", "electricidad", "agua")}
+    except Exception as e:
+        historial_fc, cerrados_fc = [], {}
+        st.warning(texto_error_historial(
+            "No se pudo leer el historial de ex inquilinos; sus cobros no aparecerán en este consolidado", e
+        ))
+
+    rend_fc = rendicion.construir_rendicion(
+        cargar_apartamentos(),
+        periodos_fc["alquiler"],
+        periodos_fc["electricidad"],
+        periodos_fc["agua"],
+        fc_desde,
+        fc_hasta,
+        hoy_fc,
+        cerrados=cerrados_fc,
+        historial=historial_fc,
+    )
+    actividad_fc = cargar_actividad(str(fc_desde), str(fc_hasta))
+    movimientos_base_fc = cuadre.construir_movimientos(
+        actividad_fc["pagos_generales"], actividad_fc["compras"], actividad_fc["ventas"]
+    )
+    movimientos_fc = finanzas_consolidadas.construir_movimientos_consolidados(
+        movimientos_base_fc, rend_fc["movimientos"]
+    )
+    resumen_fc = finanzas_consolidadas.construir_resumen(
+        movimientos_fc, fc_desde, fc_hasta
+    )
+
+    fck1, fck2, fck3, fck4 = st.columns(4)
+    fck1.metric("Movimientos", resumen_fc["cantidad_movimientos"])
+    fck2.metric("Ingresos recibidos", fmt_money(resumen_fc["ingresos"]))
+    fck3.metric("Egresos registrados", fmt_money(resumen_fc["egresos"]))
+    fck4.metric("Resultado del periodo", fmt_money(resumen_fc["resultado_periodo"]))
+
+    st.caption(
+        f"Periodo: {fc_desde:%d/%m/%Y} al {fc_hasta:%d/%m/%Y}. "
+        f"Saldo teórico final (sin saldo inicial): {fmt_money(resumen_fc['saldo_final_teorico'])}."
+    )
+    st.info(
+        "Este reporte no suma deudas pendientes ni montos por cobrar. "
+        "El saldo mostrado es un resultado teórico de los movimientos registrados; no sustituye la conciliación bancaria ni el conteo físico de caja."
+    )
+
+    tab_fc_libro, tab_fc_origen, tab_fc_metodo, tab_fc_dia = st.tabs([
+        "📒 Libro consolidado", "🗂️ Por origen", "💳 Por método de pago", "📅 Por día"
+    ])
+    with tab_fc_libro:
+        if resumen_fc["libro"]:
+            filas_fc = [{
+                "Fecha": m["fecha"].strftime("%d/%m/%Y"),
+                "Tipo": m["tipo"],
+                "Origen": m["origen"],
+                "Concepto": m["concepto"],
+                "Detalle": m["detalle"],
+                "Persona / Inquilino": m["persona"],
+                "Apartamento": m["apartamento"],
+                "Método": m["metodo"],
+                "Estado": m.get("estado", ""),
+                "Devuelto a": m.get("devolucion_a", ""),
+                "ID origen": m.get("id_origen"),
+                "ID periodo": m.get("id_periodo"),
+                "Monto (Bs)": m["monto"],
+                "Saldo al cierre del día (Bs)": m["saldo_acumulado"],
+            } for m in resumen_fc["libro"]]
+            st.dataframe(
+                pd.DataFrame(filas_fc), use_container_width=True, hide_index=True,
+                column_config={
+                    "Monto (Bs)": st.column_config.NumberColumn(format="Bs %.2f"),
+                    "Saldo al cierre del día (Bs)": st.column_config.NumberColumn(format="Bs %.2f"),
+                }
+            )
+            df_fc = pd.DataFrame(filas_fc)
+            st.download_button(
+                "⬇️ Descargar libro consolidado (CSV)",
+                data=df_fc.to_csv(index=False).encode("utf-8-sig"),
+                file_name=f"rendicion_financiera_{fc_desde:%Y%m%d}_{fc_hasta:%Y%m%d}.csv",
+                mime="text/csv", key="fc_csv"
+            )
+            st.download_button(
+                "⬇️ Descargar rendición financiera (Excel)",
+                data=finanzas_consolidadas.exportar_excel(resumen_fc),
+                file_name=f"rendicion_financiera_{fc_desde:%Y%m%d}_{fc_hasta:%Y%m%d}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="fc_xlsx"
+            )
+        else:
+            st.info("No existen movimientos registrados en el periodo seleccionado.")
+
+    with tab_fc_origen:
+        st.dataframe(pd.DataFrame([{
+            "Origen": x["origen"], "Movimientos": x["cantidad"],
+            "Ingresos (Bs)": x["ingresos"], "Egresos (Bs)": x["egresos"], "Neto (Bs)": x["neto"]
+        } for x in resumen_fc["por_origen"]]), use_container_width=True, hide_index=True,
+            column_config={c: st.column_config.NumberColumn(format="Bs %.2f") for c in
+                           ("Ingresos (Bs)", "Egresos (Bs)", "Neto (Bs)")})
+
+    with tab_fc_metodo:
+        st.dataframe(pd.DataFrame([{
+            "Método": x["metodo"], "Movimientos": x["cantidad"],
+            "Ingresos (Bs)": x["ingresos"], "Egresos (Bs)": x["egresos"], "Neto (Bs)": x["neto"]
+        } for x in resumen_fc["por_metodo"]]), use_container_width=True, hide_index=True,
+            column_config={c: st.column_config.NumberColumn(format="Bs %.2f") for c in
+                           ("Ingresos (Bs)", "Egresos (Bs)", "Neto (Bs)")})
+
+    with tab_fc_dia:
+        st.dataframe(pd.DataFrame([{
+            "Fecha": x["fecha"].strftime("%d/%m/%Y"),
+            "Ingresos (Bs)": x["ingresos"], "Egresos (Bs)": x["egresos"], "Neto (Bs)": x["neto"]
+        } for x in resumen_fc["por_dia"]]), use_container_width=True, hide_index=True,
+            column_config={c: st.column_config.NumberColumn(format="Bs %.2f") for c in
+                           ("Ingresos (Bs)", "Egresos (Bs)", "Neto (Bs)")})
+
+
+
 elif pagina == "💰 Cuadre de tesorería":
     st.title("💰 Cuadre de tesorería")
     st.caption(
