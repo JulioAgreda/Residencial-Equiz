@@ -1453,6 +1453,13 @@ elif pagina == "🏠 Apartamentos":
             idx = st.selectbox("Selecciona un apartamento para ver o editar", range(len(apartamentos)),
                                 format_func=lambda i: codigos[i])
             apt = apartamentos[idx]
+            _tipos_contrato_edit = ["", "Alquiler", "Anticrético"]
+            tipo_contrato = st.selectbox(
+                "Tipo de contrato",
+                _tipos_contrato_edit,
+                index=_tipos_contrato_edit.index(apt["tipo_contrato"]) if apt.get("tipo_contrato") in _tipos_contrato_edit else 0,
+                key=f"tipo_contrato_edit_{apt['id']}"
+            )
 
             with st.form("editar_apartamento"):
                 col1, col2 = st.columns(2)
@@ -1465,8 +1472,12 @@ elif pagina == "🏠 Apartamentos":
                     celular = st.text_input("Celular", value=apt.get("celular") or "")
                     cedula_identidad = st.text_input("Cédula de identidad", value=apt.get("cedula_identidad") or "")
                     nacionalidad = st.text_input("Nacionalidad", value=apt.get("nacionalidad") or "")
-                    monto_alquiler = st.number_input("Monto de alquiler mensual (Bs)", min_value=0.0,
-                                                      value=float(apt.get("monto_alquiler") or 0), step=50.0)
+                    if tipo_contrato == "Alquiler":
+                        monto_alquiler = st.number_input("Monto de alquiler mensual (Bs)", min_value=0.0,
+                                                          value=float(apt.get("monto_alquiler") or 0), step=50.0)
+                    else:
+                        monto_alquiler = float(apt.get("monto_alquiler") or 0)
+                        st.caption("El monto mensual de alquiler no aplica a este contrato; se conserva el dato histórico.")
                 with col2:
                     referencia_nombre = st.text_input("Referencia - nombre", value=apt.get("referencia_nombre") or "")
                     referencia_celular = st.text_input("Referencia - celular", value=apt.get("referencia_celular") or "")
@@ -1490,21 +1501,18 @@ elif pagina == "🏠 Apartamentos":
                                 index=aire_acondicionado.indice_propiedad(apt.get("aire_acondicionado_propiedad")),
                                 format_func=aire_acondicionado.etiqueta_propiedad,
                                 key=f'aire_prop_edit_{apt["id"]}')
-                    _opciones_dia_pago = ["(sin definir)"] + [str(d) for d in range(1, 32)]
-                    _dia_pago_actual = apt.get("dia_pago")
-                    _idx_dia_pago = _opciones_dia_pago.index(str(_dia_pago_actual)) if _dia_pago_actual else 0
-                    dia_pago_sel = st.selectbox("Día de Pago (día fijo del mes)", _opciones_dia_pago,
-                                                 index=_idx_dia_pago)
+                    if tipo_contrato == "Alquiler":
+                        _opciones_dia_pago = ["(sin definir)"] + [str(d) for d in range(1, 32)]
+                        _dia_pago_actual = apt.get("dia_pago")
+                        _idx_dia_pago = _opciones_dia_pago.index(str(_dia_pago_actual)) if _dia_pago_actual else 0
+                        dia_pago_sel = st.selectbox("Día de Pago (día fijo del mes)", _opciones_dia_pago,
+                                                     index=_idx_dia_pago)
+                    else:
+                        dia_pago_sel = str(apt.get("dia_pago")) if apt.get("dia_pago") else "(sin definir)"
 
                 st.divider()
                 st.markdown("**📄 Datos del contrato**")
-                colc1, colc2 = st.columns(2)
-                with colc1:
-                    _tipos_contrato = ["", "Alquiler", "Anticrético"]
-                    tipo_contrato = st.selectbox(
-                        "Tipo de contrato", _tipos_contrato,
-                        index=_tipos_contrato.index(apt["tipo_contrato"]) if apt.get("tipo_contrato") in _tipos_contrato else 0
-                    )
+                colc2 = st.container()
                 with colc2:
                     _estados_contrato = ["Sin Contrato", "Vigente", "Caducado"]
                     estado_contrato = st.selectbox(
@@ -1530,6 +1538,42 @@ elif pagina == "🏠 Apartamentos":
                                                         key="cf_edit")
                 contrato_observaciones = st.text_area("Observaciones del contrato",
                                                        value=apt.get("contrato_observaciones") or "")
+
+                if tipo_contrato == "Anticrético":
+                    st.markdown("**💰 Datos específicos del anticrético**")
+                    st.caption("Registra el capital entregado y la fecha en que corresponde devolverlo según el contrato.")
+                    ca1, ca2 = st.columns(2)
+                    with ca1:
+                        monto_anticretico = st.number_input(
+                            "Monto anticrético entregado", min_value=0.0, step=500.0,
+                            value=float(apt.get("monto_anticretico") or 0), key=f"antic_monto_edit_{apt['id']}")
+                        _monedas_antic = ["BOB (Bs)", "USD ($)"]
+                        _moneda_actual = apt.get("anticretico_moneda") or "BOB"
+                        moneda_anticretico = st.selectbox(
+                            "Moneda del anticrético", _monedas_antic,
+                            index=1 if _moneda_actual == "USD" else 0, key=f"antic_moneda_edit_{apt['id']}")
+                    with ca2:
+                        _raw_entrega = apt.get("anticretico_fecha_entrega")
+                        try:
+                            _entrega_val = date.fromisoformat(str(_raw_entrega)[:10]) if _raw_entrega else None
+                        except ValueError:
+                            _entrega_val = None
+                        anticretico_fecha_entrega = st.date_input(
+                            "Fecha de entrega del dinero", value=_entrega_val, format="DD/MM/YYYY",
+                            key=f"antic_entrega_edit_{apt['id']}")
+                        _raw_devol = apt.get("anticretico_fecha_devolucion")
+                        try:
+                            _devol_val = date.fromisoformat(str(_raw_devol)[:10]) if _raw_devol else None
+                        except ValueError:
+                            _devol_val = None
+                        anticretico_fecha_devolucion = st.date_input(
+                            "Fecha pactada para devolver el capital", value=_devol_val, format="DD/MM/YYYY",
+                            key=f"antic_devol_edit_{apt['id']}")
+                    anticretico_condiciones = st.text_area(
+                        "Condiciones de devolución según contrato",
+                        value=apt.get("anticretico_condiciones") or "",
+                        key=f"antic_cond_edit_{apt['id']}",
+                        help="Transcribir o resumir el plazo, aviso previo, forma y demás condiciones pactadas; prevalece el contrato firmado.")
 
                 col_a, col_b = st.columns([1, 1])
                 guardar = col_a.form_submit_button("💾 Guardar cambios", use_container_width=True)
@@ -1557,7 +1601,19 @@ elif pagina == "🏠 Apartamentos":
                         "contrato_fecha_inicio": str(contrato_fecha_inicio) if contrato_fecha_inicio else None,
                         "contrato_fecha_fin": str(contrato_fecha_fin) if contrato_fecha_fin else None,
                         "contrato_observaciones": contrato_observaciones or None,
+                        "monto_anticretico": monto_anticretico if tipo_contrato == "Anticrético" else 0,
+                        "anticretico_moneda": "USD" if moneda_anticretico == "USD ($)" else "BOB",
+                        "anticretico_fecha_entrega": str(anticretico_fecha_entrega) if tipo_contrato == "Anticrético" and anticretico_fecha_entrega else None,
+                        "anticretico_fecha_devolucion": str(anticretico_fecha_devolucion) if tipo_contrato == "Anticrético" and anticretico_fecha_devolucion else None,
+                        "anticretico_condiciones": anticretico_condiciones or None if tipo_contrato == "Anticrético" else None,
                     }
+                    if tipo_contrato == "Anticrético":
+                        if monto_anticretico <= 0:
+                            st.error("Para un contrato de anticrético debes registrar el monto entregado.")
+                            st.stop()
+                        if anticretico_fecha_entrega and anticretico_fecha_devolucion and anticretico_fecha_devolucion < anticretico_fecha_entrega:
+                            st.error("La fecha pactada de devolución no puede ser anterior a la entrega del dinero.")
+                            st.stop()
                     if apt_con_aire:
                         payload["aire_acondicionado"] = bool(tiene_aire)
                     if apt_con_propiedad:
@@ -1585,6 +1641,82 @@ elif pagina == "🏠 Apartamentos":
 
             if apt.get("estado") == "Ocupado" and (apt.get("inquilino_nombre") or "").strip():
                 st.info("🚪 ¿Este inquilino se fue? Regístralo en la pestaña **«🚪 Salida de inquilino»** (arriba, junto a «Lista y edición»).")
+
+
+
+            # Control de devolución del capital anticrético (no se mezcla con alquileres).
+            if apt.get("tipo_contrato") == "Anticrético":
+                st.divider()
+                st.subheader("↩️ Devolución del capital anticrético")
+                moneda = apt.get("anticretico_moneda") or "BOB"
+                simbolo = "USD" if moneda == "USD" else "Bs"
+                capital = float(apt.get("monto_anticretico") or 0)
+                try:
+                    devoluciones = db.listar_devoluciones_anticretico(apt["id"])
+                except Exception as exc:
+                    devoluciones = []
+                    st.error(f"No se pudo consultar el historial de devoluciones. Verifica la migración anticrético: {exc}")
+                devuelto = sum(float(x.get("monto") or 0) for x in devoluciones)
+                saldo = max(0.0, capital - devuelto)
+                k1, k2, k3 = st.columns(3)
+                k1.metric("Capital anticrético", f"{simbolo} {capital:,.2f}")
+                k2.metric("Capital devuelto", f"{simbolo} {devuelto:,.2f}")
+                k3.metric("Saldo por devolver", f"{simbolo} {saldo:,.2f}")
+                fecha_pactada = apt.get("anticretico_fecha_devolucion")
+                if fecha_pactada:
+                    fpd = parse_fecha(fecha_pactada)
+                    if fpd and saldo > 0:
+                        if date.today() > fpd:
+                            st.error(f"El plazo pactado de devolución venció el {fpd.strftime('%d/%m/%Y')}. Saldo pendiente: {simbolo} {saldo:,.2f}.")
+                        elif (fpd - date.today()).days <= 30:
+                            st.warning(f"La devolución está prevista para el {fpd.strftime('%d/%m/%Y')}; faltan {(fpd-date.today()).days} días.")
+                        else:
+                            st.info(f"Fecha pactada de devolución: {fpd.strftime('%d/%m/%Y')}.")
+                if apt.get("anticretico_condiciones"):
+                    st.caption("Condiciones pactadas: " + str(apt.get("anticretico_condiciones")))
+                if devoluciones:
+                    st.dataframe(pd.DataFrame([{
+                        "Fecha": parse_fecha(x.get("fecha")),
+                        "Monto devuelto": float(x.get("monto") or 0),
+                        "Medio": x.get("medio_devolucion") or "—",
+                        "Comprobante": x.get("comprobante") or "—",
+                        "Registrado por": x.get("registrado_por") or "—",
+                        "Observación": x.get("observacion") or "—",
+                    } for x in devoluciones]), use_container_width=True, hide_index=True)
+                if saldo > 0:
+                    with st.form(f"form_devolucion_anticretico_{apt['id']}"):
+                        st.markdown("**Registrar devolución de capital**")
+                        rd1, rd2 = st.columns(2)
+                        with rd1:
+                            fecha_dev = st.date_input("Fecha de devolución", value=date.today(), format="DD/MM/YYYY")
+                            monto_dev = st.number_input("Monto devuelto", min_value=0.01, max_value=float(saldo),
+                                                        value=min(float(saldo), 100.0), step=100.0)
+                        with rd2:
+                            medio_dev = st.selectbox("Medio de devolución", ["Efectivo", "Transferencia bancaria", "QR", "Cheque", "Otro"])
+                            comprobante_dev = st.text_input("N.º de recibo o comprobante")
+                        observacion_dev = st.text_area("Observación")
+                        registrar_dev = st.form_submit_button("Registrar devolución")
+                        if registrar_dev:
+                            if monto_dev > saldo + 0.001:
+                                st.error("El monto supera el saldo pendiente de devolución.")
+                            else:
+                                try:
+                                    db.registrar_devolucion_anticretico({
+                                        "apartamento_id": apt["id"],
+                                        "fecha": str(fecha_dev),
+                                        "monto": round(float(monto_dev), 2),
+                                        "medio_devolucion": medio_dev,
+                                        "comprobante": comprobante_dev.strip() or None,
+                                        "observacion": observacion_dev.strip() or None,
+                                        "registrado_por": usuario_actual.get("nombre") or usuario_actual.get("username"),
+                                    })
+                                    limpiar_cache()
+                                    st.success("Devolución registrada.")
+                                    st.rerun()
+                                except Exception as exc:
+                                    st.error(f"No se pudo registrar la devolución: {exc}")
+                else:
+                    st.success("El capital anticrético está totalmente devuelto.")
 
     with tab_salida:
         st.markdown("**Registrar que un inquilino se fue**")
@@ -1643,6 +1775,7 @@ elif pagina == "🏠 Apartamentos":
                         st.error(texto_error_historial("No se pudo registrar la salida", e))
 
     with tab_nuevo:
+        tipo_contrato = st.selectbox("Tipo de contrato", ["", "Alquiler", "Anticrético"], key="tipo_nuevo_selector")
         with st.form("nuevo_apartamento", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
@@ -1651,15 +1784,22 @@ elif pagina == "🏠 Apartamentos":
                 estado = st.selectbox("Estado", ["Ocupado", "Desocupado"])
                 inquilino_nombre = st.text_input("Nombre del inquilino")
                 celular = st.text_input("Celular")
-                monto_alquiler = st.number_input("Monto de alquiler mensual (Bs)", min_value=0.0, step=50.0)
+                if tipo_contrato == "Alquiler":
+                    monto_alquiler = st.number_input("Monto de alquiler mensual (Bs)", min_value=0.0, step=50.0)
+                else:
+                    monto_alquiler = 0.0
+                    st.caption("El monto mensual de alquiler no aplica a este contrato.")
             with col2:
                 cedula_identidad = st.text_input("Cédula de identidad")
                 nacionalidad = st.text_input("Nacionalidad")
                 fecha_ingreso = st.date_input("Fecha de ingreso", value=None, format="DD/MM/YYYY")
                 garantia = st.text_input("Garantía")
                 detalle = st.text_input("Detalle (ej. incluye agua/internet)")
-                dia_pago_sel = st.selectbox("Día de Pago (día fijo del mes)",
-                                             ["(sin definir)"] + [str(d) for d in range(1, 32)])
+                if tipo_contrato == "Alquiler":
+                    dia_pago_sel = st.selectbox("Día de Pago (día fijo del mes)",
+                                                 ["(sin definir)"] + [str(d) for d in range(1, 32)])
+                else:
+                    dia_pago_sel = "(sin definir)"
                 if apt_con_aire:
                     tiene_aire_nuevo = st.checkbox("❄️ Cuenta con aire acondicionado", key="aire_nuevo")
                     if apt_con_propiedad:
@@ -1669,18 +1809,35 @@ elif pagina == "🏠 Apartamentos":
 
             st.divider()
             st.markdown("**📄 Datos del contrato**")
-            colc1, colc2 = st.columns(2)
-            with colc1:
-                tipo_contrato = st.selectbox("Tipo de contrato", ["", "Alquiler", "Anticrético"], key="tipo_nuevo")
-            with colc2:
-                estado_contrato = st.selectbox("Estado de contrato", ["Sin Contrato", "Vigente", "Caducado"],
-                                                key="estado_c_nuevo")
+            estado_contrato = st.selectbox("Estado de contrato", ["Sin Contrato", "Vigente", "Caducado"],
+                                            key="estado_c_nuevo")
             colc3, colc4 = st.columns(2)
             with colc3:
                 contrato_fecha_inicio = st.date_input("Fecha inicio", value=None, format="DD/MM/YYYY", key="ci_nuevo")
             with colc4:
                 contrato_fecha_fin = st.date_input("Fecha fin", value=None, format="DD/MM/YYYY", key="cf_nuevo")
             contrato_observaciones = st.text_area("Observaciones del contrato", key="obs_c_nuevo")
+
+            if tipo_contrato == "Anticrético":
+                st.markdown("**💰 Datos específicos del anticrético**")
+                st.caption("Si seleccionas Anticrético, registra el capital recibido y la fecha en que corresponde devolverlo según el contrato.")
+                nac1, nac2 = st.columns(2)
+                with nac1:
+                    monto_anticretico_nuevo = st.number_input("Monto anticrético entregado (Bs o USD)", min_value=0.0, step=500.0, key="antic_monto_nuevo")
+                    moneda_anticretico_nuevo = st.selectbox("Moneda del anticrético", ["BOB (Bs)", "USD ($)"], key="antic_moneda_nuevo")
+                with nac2:
+                    anticretico_fecha_entrega_nuevo = st.date_input("Fecha de entrega del dinero", value=None, format="DD/MM/YYYY", key="antic_entrega_nuevo")
+                    anticretico_fecha_devolucion_nuevo = st.date_input("Fecha pactada para devolver el capital", value=None, format="DD/MM/YYYY", key="antic_devol_nuevo")
+                anticretico_condiciones_nuevo = st.text_area(
+                    "Condiciones de devolución según contrato", key="antic_cond_nuevo",
+                    help="Plazo, aviso previo, forma y demás condiciones pactadas en el contrato firmado.")
+    
+            if tipo_contrato != "Anticrético":
+                monto_anticretico_nuevo = 0.0
+                moneda_anticretico_nuevo = "BOB (Bs)"
+                anticretico_fecha_entrega_nuevo = None
+                anticretico_fecha_devolucion_nuevo = None
+                anticretico_condiciones_nuevo = ""
 
             crear = st.form_submit_button("➕ Crear apartamento")
             if crear:
@@ -1705,7 +1862,19 @@ elif pagina == "🏠 Apartamentos":
                         "contrato_fecha_inicio": str(contrato_fecha_inicio) if contrato_fecha_inicio else None,
                         "contrato_fecha_fin": str(contrato_fecha_fin) if contrato_fecha_fin else None,
                         "contrato_observaciones": contrato_observaciones or None,
+                        "monto_anticretico": monto_anticretico_nuevo if tipo_contrato == "Anticrético" else 0,
+                        "anticretico_moneda": "USD" if moneda_anticretico_nuevo == "USD ($)" else "BOB",
+                        "anticretico_fecha_entrega": str(anticretico_fecha_entrega_nuevo) if tipo_contrato == "Anticrético" and anticretico_fecha_entrega_nuevo else None,
+                        "anticretico_fecha_devolucion": str(anticretico_fecha_devolucion_nuevo) if tipo_contrato == "Anticrético" and anticretico_fecha_devolucion_nuevo else None,
+                        "anticretico_condiciones": anticretico_condiciones_nuevo or None if tipo_contrato == "Anticrético" else None,
                     }
+                    if tipo_contrato == "Anticrético":
+                        if monto_anticretico_nuevo <= 0:
+                            st.error("Para un contrato de anticrético debes registrar el monto entregado.")
+                            st.stop()
+                        if anticretico_fecha_entrega_nuevo and anticretico_fecha_devolucion_nuevo and anticretico_fecha_devolucion_nuevo < anticretico_fecha_entrega_nuevo:
+                            st.error("La fecha pactada de devolución no puede ser anterior a la entrega del dinero.")
+                            st.stop()
                     if apt_con_aire:
                         payload["aire_acondicionado"] = bool(tiene_aire_nuevo)
                     if apt_con_propiedad:
@@ -3322,15 +3491,28 @@ elif pagina == "🏠 Inquilinos":
                         ("Celular", _md(apt.get("referencia_celular")))])
         with ci2:
             with st.container(border=True):
-                st.markdown("**🏠 Ocupación y alquiler**")
-                _ficha([("Estado", _md(apt.get("estado"))), ("Fecha de ingreso", _f(apt.get("fecha_ingreso"))),
+                st.markdown("**🏠 Ocupación**")
+                datos_ocupacion = [("Estado", _md(apt.get("estado"))), ("Fecha de ingreso", _f(apt.get("fecha_ingreso")))]
+                if apt.get("tipo_contrato") == "Anticrético":
+                    moneda_ac = "USD" if apt.get("anticretico_moneda") == "USD" else "Bs"
+                    datos_ocupacion.extend([
+                        ("Capital anticrético", f"{moneda_ac} {float(apt.get('monto_anticretico') or 0):,.2f}"),
+                        ("Fecha de entrega", _f(apt.get("anticretico_fecha_entrega"))),
+                        ("Fecha pactada de devolución", _f(apt.get("anticretico_fecha_devolucion"))),
+                        ("Condiciones de devolución", _md(apt.get("anticretico_condiciones"))),
+                    ])
+                else:
+                    datos_ocupacion.extend([
                         ("Día de pago", _md(apt.get("dia_pago"))),
                         ("Alquiler mensual", fmt_money(apt.get("monto_alquiler") or 0)),
-                        ("Aire acondicionado", aire_acondicionado.descripcion(
-                            apt.get("aire_acondicionado"), apt.get("aire_acondicionado_propiedad"),
-                            con_propiedad="aire_acondicionado_propiedad" in apt)),
-                        ("Garantía", _md(apt.get("garantia"))), ("Amoblado", _md(apt.get("amoblado"))),
-                        ("Detalle", _md(apt.get("detalle")))])
+                    ])
+                datos_ocupacion.extend([
+                    ("Aire acondicionado", aire_acondicionado.descripcion(
+                        apt.get("aire_acondicionado"), apt.get("aire_acondicionado_propiedad"),
+                        con_propiedad="aire_acondicionado_propiedad" in apt)),
+                    ("Garantía", _md(apt.get("garantia"))), ("Amoblado", _md(apt.get("amoblado"))),
+                    ("Detalle", _md(apt.get("detalle")))])
+                _ficha(datos_ocupacion)
             with st.container(border=True):
                 st.markdown("**📄 Contrato**")
                 _ficha([("Tipo", _md(apt.get("tipo_contrato"))), ("Estado", _md(apt.get("estado_contrato"))),

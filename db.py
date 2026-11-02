@@ -66,6 +66,27 @@ def eliminar_apartamento(apartamento_id):
     return sb.table("apartamentos").delete().eq("id", apartamento_id).execute()
 
 
+
+
+# ---------- Anticrético: control de capital y devoluciones ----------
+
+def listar_devoluciones_anticretico(apartamento_id):
+    """Lista devoluciones de capital anticrético de un apartamento, sin modificar el contrato."""
+    sb = get_client()
+    res = (sb.table("devoluciones_anticretico")
+           .select("*")
+           .eq("apartamento_id", apartamento_id)
+           .order("fecha", desc=True)
+           .execute())
+    return res.data or []
+
+
+def registrar_devolucion_anticretico(payload: dict):
+    """Registra una devolución parcial o total de capital anticrético."""
+    sb = get_client()
+    return sb.table("devoluciones_anticretico").insert(payload).execute()
+
+
 # ---------- Historial de inquilinos (salida de un inquilino / ingreso de otro) ----------
 
 def deuda_activa_apartamento(apartamento_id):
