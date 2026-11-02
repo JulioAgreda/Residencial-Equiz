@@ -1442,7 +1442,7 @@ elif pagina == "🏠 Apartamentos":
     elif not apt_con_propiedad:
         st.warning(AVISO_MIGRACION_AIRE_PROPIEDAD)
 
-    tab_lista, tab_salida, tab_nuevo, tab_importar = st.tabs(["📋 Lista y edición", "🚪 Salida de inquilino", "➕ Nuevo apartamento", "📥 Importar CSV"])
+    tab_lista, tab_salida, tab_garantias, tab_nuevo, tab_importar = st.tabs(["📋 Lista y edición", "🚪 Salida de inquilino", "🛡️ Garantías", "➕ Nuevo apartamento", "📥 Importar CSV"])
 
     with tab_lista:
         apartamentos = cargar_apartamentos()
@@ -1765,6 +1765,14 @@ elif pagina == "🏠 Apartamentos":
                         if registrar_meses:
                             for m in resumen_s["meses_sin_registro"]:
                                 db.obtener_o_crear_periodo(apt["id"], m["mes"], m["anio"], m["monto"], apt.get("inquilino_nombre"))
+                        # Al registrar la salida, la garantía vigente pasa a liquidación.
+                        garantias_activas_salida = db.listar_garantias_alquiler(apartamento_id=apt["id"], estado="Vigente")
+                        for garantia_activa in garantias_activas_salida:
+                            db.actualizar_garantia_alquiler(garantia_activa["id"], {
+                                "estado": "Pendiente de liquidación",
+                                "fecha_salida": str(fecha_salida),
+                                "observacion_salida": obs_salida or None,
+                            })
                         db.registrar_salida_inquilino(
                             apt["id"], fecha_salida, obs_salida, usuario_actual.get("nombre") or usuario_actual.get("username"))
                         limpiar_cache()
@@ -1773,6 +1781,161 @@ elif pagina == "🏠 Apartamentos":
                         st.rerun()
                     except Exception as e:
                         st.error(texto_error_historial("No se pudo registrar la salida", e))
+
+    with tab_garantias:
+        st.subheader("🛡️ Control de garantías de alquiler")
+        st.caption("La garantía es un depósito reembolsable: no es ingreso por alquiler. Cada garantía queda vinculada al inquilino y a su periodo de ocupación.")
+        ocupados_g = [a for a in cargar_apartamentos()
+                      if a.get("estado") == "Ocupado" and a.get("tipo_contrato") == "Alquiler"
+                      and (a.get("inquilino_nombre") or "").strip()]
+        tg1, tg2 = st.tabs(["➕ Registrar garantía recibida", "📋 Garantías y liquidaciones"])
+        with tg1:
+            if not ocupados_g:
+                st.info("No hay apartamentos ocupados con contrato de alquiler.")
+            else:
+                apt_g_idx = st.selectbox("Apartamento e inquilino", range(len(ocupados_g)),
+                    format_func=lambda i: f'{ocupados_g[i]["codigo"]} — {ocupados_g[i]["inquilino_nombre"]}',
+                    key="garantia_apto_reg")
+                apt_g = ocupados_g[apt_g_idx]
+                monto_sugerido = float(apt_g.get("monto_alquiler") or 0)
+                with st.form("form_registrar_garantia_alquiler", clear_on_submit=True):
+                    g1, g2 = st.columns(2)
+                    with g1:
+                        monto_g = st.number_input("Monto de garantía recibido (Bs)", min_value=0.01,
+                            value=max(monto_sugerido, 0.01), step=50.0)
+                        fecha_g = st.date_input("Fecha de recepción", value=date.today(), format="DD/MM/YYYY")
+                    with g2:
+                        medio_g = st.selectbox("Medio de recepción", ["Efectivo", "Transferencia bancaria", "QR", "Depósito", "Otro"])
+                        recibo_g = st.text_input("N.º de recibo o comprobante")
+                    obs_g = st.text_area("Observaciones")
+                    guardar_g = st.form_submit_button("Registrar garantía")
+                    if guardar_g:
+                        try:
+                            existentes = db.listar_garantias_alquiler(apartamento_id=apt_g["id"], estado="Vigente")
+                            if existentes:
+                                st.error("Este apartamento ya tiene una garantía vigente. Revisa el historial antes de registrar otra.")
+                            else:
+                                db.crear_garantia_alquiler({
+                                    "apartamento_id": apt_g["id"],
+                                    "inquilino_nombre": apt_g.get("inquilino_nombre"),
+                                    "fecha_recepcion": str(fecha_g),
+                                    "monto_recibido": round(float(monto_g), 2),
+                                    "moneda": "BOB",
+                                    "monto_alquiler_referencia": round(monto_sugerido, 2),
+                                    "medio_recepcion": medio_g,
+                                    "comprobante_recepcion": recibo_g.strip() or None,
+                                    "observacion": obs_g.strip() or None,
+                                    "estado": "Vigente",
+                                    "registrado_por": usuario_actual.get("nombre") or usuario_actual.get("username"),
+                                })
+                                limpiar_cache()
+                                st.success("Garantía registrada y vinculada al inquilino.")
+                                st.rerun()
+                        except Exception as exc:
+                            st.error(f"No se pudo registrar la garantía: {exc}")
+        with tg2:
+            try:
+                garantias = db.listar_garantias_alquiler()
+            except Exception as exc:
+                garantias = []
+                st.error(f"No se pudieron cargar las garantías. Verifica la migración V15: {exc}")
+            if garantias:
+                for g in garantias:
+                    danos_g = db.listar_danos_garantia(g["id"])
+                    devoluciones_g = db.listar_devoluciones_garantia(g["id"])
+                    total_danos = sum(float(d.get("monto_aprobado") or 0) for d in danos_g)
+                    total_devuelto = sum(float(d.get("monto") or 0) for d in devoluciones_g)
+                    saldo = max(0.0, float(g.get("monto_recibido") or 0) - total_danos - total_devuelto)
+                    with st.expander(f'{g.get("inquilino_nombre") or "Inquilino"} — {g.get("estado")} — Bs {saldo:,.2f} por devolver'):
+                        x1, x2, x3 = st.columns(3)
+                        x1.metric("Garantía recibida", f'Bs {float(g.get("monto_recibido") or 0):,.2f}')
+                        x2.metric("Descuentos aprobados", f'Bs {total_danos:,.2f}')
+                        x3.metric("Devoluciones realizadas", f'Bs {total_devuelto:,.2f}')
+                        st.caption(f'Recepción: {g.get("fecha_recepcion")} · Comprobante: {g.get("comprobante_recepcion") or "—"} · Apartamento ID: {g.get("apartamento_id")}')
+                        if danos_g:
+                            st.markdown("**Daños y cotizaciones**")
+                            st.dataframe(pd.DataFrame([{
+                                "Fecha": d.get("fecha"), "Daño": d.get("descripcion"),
+                                "Cotización": d.get("proveedor_cotizacion") or "—",
+                                "Monto cotizado": float(d.get("monto_cotizado") or 0),
+                                "Monto aprobado": float(d.get("monto_aprobado") or 0),
+                                "Comprobante": d.get("comprobante") or "—",
+                            } for d in danos_g]), use_container_width=True, hide_index=True)
+                        if devoluciones_g:
+                            st.markdown("**Devoluciones registradas**")
+                            st.dataframe(pd.DataFrame([{
+                                "Fecha": d.get("fecha"), "Monto": float(d.get("monto") or 0),
+                                "Medio": d.get("medio") or "—", "Comprobante": d.get("comprobante") or "—",
+                            } for d in devoluciones_g]), use_container_width=True, hide_index=True)
+                        if g.get("estado") in ("Vigente", "Pendiente de liquidación", "Devolución parcial"):
+                            with st.form(f"form_dano_garantia_{g['id']}"):
+                                st.markdown("**Registrar desperfecto o daño**")
+                                dg1, dg2 = st.columns(2)
+                                with dg1:
+                                    fecha_dano = st.date_input("Fecha de inspección/cotización", value=date.today(), format="DD/MM/YYYY", key=f"fd_{g['id']}")
+                                    descripcion_dano = st.text_input("Descripción del daño", key=f"dd_{g['id']}")
+                                    proveedor_dano = st.text_input("Proveedor o responsable de cotización", key=f"pd_{g['id']}")
+                                with dg2:
+                                    cotizado_dano = st.number_input("Monto cotizado (Bs)", min_value=0.0, step=10.0, key=f"cd_{g['id']}")
+                                    aprobado_dano = st.number_input("Monto aprobado para descuento (Bs)", min_value=0.0, step=10.0, key=f"ad_{g['id']}")
+                                    comprobante_dano = st.text_input("Referencia de cotización/factura", key=f"refd_{g['id']}")
+                                obs_dano = st.text_area("Observaciones del daño", key=f"od_{g['id']}")
+                                guardar_dano = st.form_submit_button("Guardar daño y cotización")
+                                if guardar_dano:
+                                    if not descripcion_dano.strip():
+                                        st.error("Describe el daño.")
+                                    elif aprobado_dano > cotizado_dano:
+                                        st.error("El monto aprobado no puede superar la cotización.")
+                                    elif total_danos + aprobado_dano + total_devuelto > float(g.get("monto_recibido") or 0):
+                                        st.error("El descuento supera el saldo disponible de la garantía.")
+                                    else:
+                                        db.crear_dano_garantia({
+                                            "garantia_id": g["id"], "fecha": str(fecha_dano),
+                                            "descripcion": descripcion_dano.strip(),
+                                            "proveedor_cotizacion": proveedor_dano.strip() or None,
+                                            "monto_cotizado": round(float(cotizado_dano),2),
+                                            "monto_aprobado": round(float(aprobado_dano),2),
+                                            "comprobante": comprobante_dano.strip() or None,
+                                            "observacion": obs_dano.strip() or None,
+                                            "registrado_por": usuario_actual.get("nombre") or usuario_actual.get("username"),
+                                        })
+                                        st.success("Daño registrado.")
+                                        st.rerun()
+                            if g.get("estado") == "Vigente":
+                                if st.button("Marcar inquilino retirado e iniciar liquidación", key=f"retirar_g_{g['id']}"):
+                                    db.actualizar_garantia_alquiler(g["id"], {"estado":"Pendiente de liquidación", "fecha_salida":str(date.today())})
+                                    st.rerun()
+                        if g.get("estado") in ("Pendiente de liquidación", "Devolución parcial") and saldo > 0:
+                            with st.form(f"form_devolver_garantia_{g['id']}"):
+                                st.markdown("**Registrar devolución de garantía**")
+                                dv1, dv2 = st.columns(2)
+                                with dv1:
+                                    fecha_devol_g = st.date_input("Fecha de devolución", value=date.today(), format="DD/MM/YYYY", key=f"fdevg_{g['id']}")
+                                    monto_devol_g = st.number_input("Monto a devolver (Bs)", min_value=0.01, max_value=float(saldo),
+                                        value=float(saldo), step=50.0, key=f"mdevg_{g['id']}")
+                                with dv2:
+                                    medio_devol_g = st.selectbox("Medio de devolución", ["Efectivo", "Transferencia bancaria", "QR", "Cheque", "Otro"], key=f"meddevg_{g['id']}")
+                                    comprobante_devol_g = st.text_input("N.º de comprobante de devolución", key=f"compdevg_{g['id']}")
+                                obs_devol_g = st.text_area("Observación de devolución", key=f"obsdevg_{g['id']}")
+                                confirmar_devol_g = st.form_submit_button("Registrar devolución")
+                                if confirmar_devol_g:
+                                    if monto_devol_g > saldo + 0.001:
+                                        st.error("La devolución supera el saldo de la garantía.")
+                                    else:
+                                        db.registrar_devolucion_garantia({
+                                            "garantia_id": g["id"], "fecha":str(fecha_devol_g),
+                                            "monto":round(float(monto_devol_g),2), "medio":medio_devol_g,
+                                            "comprobante":comprobante_devol_g.strip() or None,
+                                            "observacion":obs_devol_g.strip() or None,
+                                            "registrado_por":usuario_actual.get("nombre") or usuario_actual.get("username"),
+                                        })
+                                        nuevo_devuelto = total_devuelto + float(monto_devol_g)
+                                        estado_nuevo = "Devuelta" if nuevo_devuelto + total_danos >= float(g.get("monto_recibido") or 0) - 0.001 else "Devolución parcial"
+                                        db.actualizar_garantia_alquiler(g["id"], {"estado":estado_nuevo})
+                                        st.success("Devolución registrada.")
+                                        st.rerun()
+            else:
+                st.info("Todavía no hay garantías registradas.")
 
     with tab_nuevo:
         tipo_contrato = st.selectbox("Tipo de contrato", ["", "Alquiler", "Anticrético"], key="tipo_nuevo_selector")
