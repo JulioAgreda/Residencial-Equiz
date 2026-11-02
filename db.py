@@ -804,3 +804,42 @@ def guardar_acceso_apartamentos(usuario_id, acceso_todos, apartamento_ids=()):
             sb.table("usuarios_apartamentos").delete().eq("usuario_id", usuario_id).in_(
                 "apartamento_id", sorted(actuales - nuevos)).execute()
     sb.table("usuarios").update({"acceso_todos_apartamentos": bool(acceso_todos)}).eq("id", usuario_id).execute()
+
+# ---------- Finanzas V12: obligaciones y cuentas por cobrar ----------
+
+def listar_obligaciones_financieras():
+    sb = get_client()
+    res = sb.table("obligaciones_financieras").select("*").order("fecha_origen", desc=True).execute()
+    return res.data or []
+
+def crear_obligacion_financiera(payload):
+    sb = get_client()
+    return sb.table("obligaciones_financieras").insert(payload).execute()
+
+def listar_movimientos_obligaciones():
+    sb = get_client()
+    res = sb.table("movimientos_obligaciones").select("*").order("fecha", desc=True).execute()
+    return res.data or []
+
+def crear_movimiento_obligacion(payload):
+    sb = get_client()
+    return sb.table("movimientos_obligaciones").insert(payload).execute()
+
+def listar_cuentas_por_cobrar():
+    sb = get_client()
+    res = sb.table("cuentas_por_cobrar").select("*").order("fecha_origen", desc=True).execute()
+    return res.data or []
+
+def crear_cuenta_por_cobrar(payload):
+    sb = get_client()
+    return sb.table("cuentas_por_cobrar").insert(payload).execute()
+
+def listar_movimientos_cuentas_cobrar():
+    sb = get_client()
+    res = sb.table("movimientos_cuentas_cobrar").select("*").order("fecha", desc=True).execute()
+    return res.data or []
+
+def crear_movimiento_cuenta_cobrar(payload):
+    sb = get_client()
+    return sb.table("movimientos_cuentas_cobrar").insert(payload).execute()
+

@@ -15,7 +15,6 @@ import conciliacion_reportes
 import cuadre
 import consumo as calc_consumo
 import estados
-import finanzas_consolidadas
 import exinquilinos
 import extracto
 import inventario
@@ -25,6 +24,8 @@ import servicios_basicos
 import recibo
 import rendicion
 import reportes
+import deudas
+import deudores
 
 st.set_page_config(page_title="Residencial EQUIZ", page_icon="🏢", layout="wide")
 
@@ -949,7 +950,7 @@ if _permitidos_barra is not None:
 
 if es_admin:
     opciones_principal = ["📊 Dashboard", "🏠 Apartamentos", "💵 Pagos de Alquiler", "⚡ Electricidad",
-                          "💧 Agua", "🤝 Compromisos de pago", "🚪 Ex inquilinos", "👥 Usuarios"]
+                          "💧 Agua", "🤝 Compromisos de pago", "🚪 Ex inquilinos", "👥 Usuarios", "💰 Finanzas"]
 else:
     # "🏠 Inquilinos" es la consulta de solo lectura de los datos de cada apartamento
     opciones_principal = ["📊 Dashboard", "🏠 Inquilinos", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua",
@@ -957,10 +958,7 @@ else:
 
 opciones_movimientos = ["(ninguno)", "🧾 Compras", "💳 Pagos", "💸 Ventas"]
 opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "📦 Inventario", "🗒️ Reuniones"]
-opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería"]
-if es_admin:
-    opciones_reportes.append("📊 Rendición financiera consolidada")
-opciones_reportes.append("🏦 Conciliación bancaria")
+opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería", "🏦 Conciliación bancaria"]
 
 # Los radios de abajo son independientes en el estado interno de Streamlit:
 # si eliges algo en uno, los demás no se "enteran" y siguen marcando su
@@ -1027,6 +1025,194 @@ if st.sidebar.button("🔄 Actualizar datos"):
 if st.sidebar.button("🚪 Cerrar sesión"):
     del st.session_state["usuario"]
     st.rerun()
+
+
+
+# ==================================================================
+# PÁGINA: FINANZAS - CUENTAS POR PAGAR Y POR COBRAR
+# ==================================================================
+elif pagina == "💰 Finanzas":
+    st.title("💰 Finanzas")
+    st.caption("Control de obligaciones, deudores y saldos pendientes. Solo administrador.")
+    if not es_admin:
+        st.error("No tienes permiso para acceder a este módulo.")
+        st.stop()
+
+    tab_resumen, tab_pagar, tab_cobrar = st.tabs(
+        ["📊 Estado financiero", "📤 Cuentas por pagar", "📥 Cuentas por cobrar"]
+    )
+
+    try:
+        obligaciones = db.listar_obligaciones_financieras()
+        movimientos_obl = db.listar_movimientos_obligaciones()
+        cuentas_cobrar = db.listar_cuentas_por_cobrar()
+        movimientos_cxc = db.listar_movimientos_cuentas_cobrar()
+    except Exception as e:
+        st.error("No se pudieron cargar las tablas financieras. Verifica que la migración V12 esté aplicada.")
+        st.exception(e)
+        st.stop()
+
+    mov_obl_por_id = {}
+    for m in movimientos_obl:
+        mov_obl_por_id.setdefault(m.get("obligacion_id"), []).append(m)
+    mov_cxc_por_id = {}
+    for m in movimientos_cxc:
+        mov_cxc_por_id.setdefault(m.get("cuenta_id"), []).append(m)
+
+    resumen_obl = deudas.resumir_obligaciones(obligaciones, mov_obl_por_id)
+    resumen_cxc = deudores.resumir_cuentas(cuentas_cobrar, mov_cxc_por_id)
+    total_pagar = float(resumen_obl["total_pendiente"])
+    total_cobrar = float(resumen_cxc["total_por_cobrar"])
+
+    with tab_resumen:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Cuentas por pagar", fmt_money(total_pagar))
+        c2.metric("Cuentas por cobrar", fmt_money(total_cobrar))
+        c3.metric("Saldo neto de estas cuentas", fmt_money(total_cobrar-total_pagar))
+        st.info("Este panel muestra únicamente las cuentas por pagar y cobrar registradas aquí. No equivale todavía al estado financiero completo ni al saldo de caja y bancos.")
+        st.subheader("Obligaciones pendientes")
+        if resumen_obl["obligaciones"]:
+            st.dataframe(pd.DataFrame(resumen_obl["obligaciones"])[
+                ["codigo","categoria","acreedor","fecha_origen","fecha_vencimiento","saldo_pendiente","estado_calculado"]
+            ], use_container_width=True, hide_index=True)
+        else:
+            st.info("Todavía no hay obligaciones registradas.")
+        st.subheader("Cuentas por cobrar pendientes")
+        if resumen_cxc["cuentas"]:
+            st.dataframe(pd.DataFrame(resumen_cxc["cuentas"])[
+                ["codigo","categoria","deudor","fecha_origen","fecha_vencimiento","saldo_por_cobrar","estado_calculado"]
+            ], use_container_width=True, hide_index=True)
+        else:
+            st.info("Todavía no hay cuentas por cobrar registradas.")
+
+    with tab_pagar:
+        st.subheader("Registrar una obligación")
+        with st.form("v12_nueva_obligacion", clear_on_submit=True):
+            a,b=st.columns(2)
+            codigo=a.text_input("Código único", placeholder="OBL-2026-001")
+            categoria=a.selectbox("Tipo de obligación", list(deudas.CATEGORIAS_DEUDA))
+            acreedor=b.text_input("Acreedor")
+            identificacion=b.text_input("CI/NIT del acreedor (opcional)")
+            descripcion=st.text_input("Descripción")
+            c,d,e=st.columns(3)
+            fecha_origen=c.date_input("Fecha de origen")
+            fecha_corte=d.date_input("Fecha de corte / saldo inicial")
+            vencimiento=e.date_input("Vencimiento", value=None)
+            f,g=st.columns(2)
+            monto=f.number_input("Monto original (Bs)", min_value=0.01, step=10.0, format="%.2f")
+            saldo=g.number_input("Saldo pendiente a la fecha de corte (Bs)", min_value=0.0, step=10.0, format="%.2f")
+            documento=st.text_input("Contrato, factura o documento de respaldo")
+            obs=st.text_area("Observaciones")
+            guardar=st.form_submit_button("Guardar obligación")
+            if guardar:
+                try:
+                    payload={"codigo":codigo.strip(),"categoria":categoria,"acreedor":acreedor.strip(),
+                        "identificacion_acreedor":identificacion.strip() or None,"descripcion":descripcion or None,
+                        "fecha_origen":str(fecha_origen),"fecha_corte":str(fecha_corte),
+                        "monto_original":monto,"saldo_apertura":saldo,
+                        "fecha_vencimiento":str(vencimiento) if vencimiento else None,
+                        "documento_referencia":documento or None,"observaciones":obs or None,
+                        "estado":"Vigente","creado_por":usuario_actual.get("username")}
+                    deudas.validar_obligacion({**payload,"monto_original":monto})
+                    if saldo > monto: raise ValueError("El saldo inicial no puede superar el monto original.")
+                    db.crear_obligacion_financiera(payload)
+                    st.success("Obligación registrada.")
+                    st.rerun()
+                except Exception as e: st.error(f"No se pudo guardar: {e}")
+
+        st.divider()
+        st.subheader("Registrar pago de capital")
+        if obligaciones:
+            mapa={f'{o["codigo"]} · {o["acreedor"]} · saldo Bs {float(o.get("saldo_apertura") or 0):.2f}':o for o in obligaciones}
+            with st.form("v12_pago_obligacion", clear_on_submit=True):
+                elegido=st.selectbox("Obligación",list(mapa))
+                fecha=st.date_input("Fecha del pago",key="v12_fecha_pago")
+                monto_pago=st.number_input("Capital pagado (Bs)",min_value=0.01,step=10.0,key="v12_monto_pago")
+                metodo=st.selectbox("Medio de pago",["Efectivo","QR","Transferencia Bancaria","Otro"],key="v12_metodo_pago")
+                referencia=st.text_input("N.º de comprobante / referencia",key="v12_ref_pago")
+                obs_pago=st.text_input("Observación",key="v12_obs_pago")
+                ok=st.form_submit_button("Registrar pago")
+                if ok:
+                    try:
+                        o=mapa[elegido]
+                        saldo_actual=deudas.calcular_saldo(o,mov_obl_por_id.get(o["id"],[]))
+                        if monto_pago > float(saldo_actual): raise ValueError("El pago supera el saldo pendiente.")
+                        db.crear_movimiento_obligacion({"obligacion_id":o["id"],"fecha":str(fecha),
+                            "tipo":"pago_capital","monto":monto_pago,"metodo":metodo,
+                            "referencia":referencia or None,"observacion":obs_pago or None,
+                            "registrado_por":usuario_actual.get("username")})
+                        st.success("Pago registrado en el auxiliar de deuda. Aún no genera movimiento automático en caja/bancos.")
+                        st.rerun()
+                    except Exception as e: st.error(f"No se pudo registrar el pago: {e}")
+        else: st.info("Registra primero una obligación.")
+
+        st.subheader("Detalle de obligaciones")
+        if resumen_obl["obligaciones"]:
+            st.dataframe(pd.DataFrame(resumen_obl["obligaciones"]),use_container_width=True,hide_index=True)
+
+    with tab_cobrar:
+        st.subheader("Registrar una cuenta por cobrar")
+        with st.form("v12_nueva_cxc", clear_on_submit=True):
+            a,b=st.columns(2)
+            codigo_c=a.text_input("Código único",placeholder="CXC-2026-001")
+            categoria_c=a.selectbox("Tipo de cuenta",list(deudores.CATEGORIAS_COBRO))
+            deudor=b.text_input("Deudor")
+            identificacion_c=b.text_input("CI/NIT del deudor (opcional)")
+            descripcion_c=st.text_input("Descripción",key="v12_desc_cxc")
+            c,d,e=st.columns(3)
+            fecha_origen_c=c.date_input("Fecha de origen",key="v12_origen_cxc")
+            fecha_corte_c=d.date_input("Fecha de corte / saldo inicial",key="v12_corte_cxc")
+            vencimiento_c=e.date_input("Vencimiento",value=None,key="v12_venc_cxc")
+            f,g=st.columns(2)
+            monto_c=f.number_input("Monto original (Bs)",min_value=0.01,step=10.0,key="v12_monto_cxc")
+            saldo_c=g.number_input("Saldo por cobrar a la fecha de corte (Bs)",min_value=0.0,step=10.0,key="v12_saldo_cxc")
+            documento_c=st.text_input("Contrato, recibo o respaldo",key="v12_doc_cxc")
+            obs_c=st.text_area("Observaciones",key="v12_obs_cxc")
+            guardar_c=st.form_submit_button("Guardar cuenta por cobrar")
+            if guardar_c:
+                try:
+                    payload={"codigo":codigo_c.strip(),"categoria":categoria_c,"deudor":deudor.strip(),
+                        "identificacion_deudor":identificacion_c.strip() or None,"descripcion":descripcion_c or None,
+                        "fecha_origen":str(fecha_origen_c),"fecha_corte":str(fecha_corte_c),
+                        "monto_original":monto_c,"saldo_apertura":saldo_c,
+                        "fecha_vencimiento":str(vencimiento_c) if vencimiento_c else None,
+                        "documento_referencia":documento_c or None,"observaciones":obs_c or None,
+                        "estado":"Vigente","creado_por":usuario_actual.get("username")}
+                    deudores.validar_cuenta({**payload,"monto_original":monto_c})
+                    if saldo_c > monto_c: raise ValueError("El saldo inicial no puede superar el monto original.")
+                    db.crear_cuenta_por_cobrar(payload)
+                    st.success("Cuenta por cobrar registrada.")
+                    st.rerun()
+                except Exception as e: st.error(f"No se pudo guardar: {e}")
+
+        st.divider()
+        st.subheader("Registrar cobro")
+        if cuentas_cobrar:
+            mapa_c={f'{x["codigo"]} · {x["deudor"]} · saldo Bs {float(x.get("saldo_apertura") or 0):.2f}':x for x in cuentas_cobrar}
+            with st.form("v12_cobro_cxc", clear_on_submit=True):
+                elegido_c=st.selectbox("Cuenta por cobrar",list(mapa_c))
+                fecha_c=st.date_input("Fecha del cobro",key="v12_fecha_cobro")
+                monto_cobro=st.number_input("Monto cobrado (Bs)",min_value=0.01,step=10.0,key="v12_monto_cobro")
+                metodo_cobro=st.selectbox("Medio de cobro",["Efectivo","QR","Transferencia Bancaria","Otro"],key="v12_metodo_cobro")
+                referencia_cobro=st.text_input("N.º de comprobante / referencia",key="v12_ref_cobro")
+                obs_cobro=st.text_input("Observación",key="v12_obs_cobro")
+                ok_c=st.form_submit_button("Registrar cobro")
+                if ok_c:
+                    try:
+                        x=mapa_c[elegido_c]
+                        saldo_actual=deudores.calcular_saldo(x,mov_cxc_por_id.get(x["id"],[]))
+                        if monto_cobro > float(saldo_actual): raise ValueError("El cobro supera el saldo por cobrar.")
+                        db.crear_movimiento_cuenta_cobrar({"cuenta_id":x["id"],"fecha":str(fecha_c),
+                            "tipo":"cobro","monto":monto_cobro,"metodo":metodo_cobro,
+                            "referencia":referencia_cobro or None,"observacion":obs_cobro or None,
+                            "registrado_por":usuario_actual.get("username")})
+                        st.success("Cobro registrado en el auxiliar de cuentas por cobrar. Aún no genera movimiento automático en caja/bancos.")
+                        st.rerun()
+                    except Exception as e: st.error(f"No se pudo registrar el cobro: {e}")
+        else: st.info("Registra primero una cuenta por cobrar.")
+        st.subheader("Detalle de cuentas por cobrar")
+        if resumen_cxc["cuentas"]:
+            st.dataframe(pd.DataFrame(resumen_cxc["cuentas"]),use_container_width=True,hide_index=True)
 
 
 # ==================================================================
@@ -2110,147 +2296,6 @@ elif pagina == "📊 Actividad por usuario":
 # ==================================================================
 # PÁGINA: CUADRE DE TESORERÍA (libro de movimientos y cuadre de fin de mes)
 # ==================================================================
-elif pagina == "📊 Rendición financiera consolidada":
-    if not finanzas_consolidadas.puede_ver_rendicion_financiera(usuario_actual):
-        st.error("No tienes permisos para consultar la rendición financiera consolidada.")
-        st.stop()
-    st.title("📊 Rendición financiera consolidada")
-    st.caption(
-        "Reúne en un solo libro los ingresos por alquiler, electricidad, agua y ventas; "
-        "y los egresos por compras y pagos generales. Solo considera dinero efectivamente registrado como cobrado o pagado."
-    )
-    hoy_fc = recibo.hoy_bolivia()
-    fc1, fc2 = st.columns(2)
-    with fc1:
-        fc_desde = st.date_input("Desde", value=hoy_fc.replace(day=1), format="DD/MM/YYYY", key="fc_desde")
-    with fc2:
-        fc_hasta = st.date_input("Hasta", value=hoy_fc, format="DD/MM/YYYY", key="fc_hasta")
-    if not fc_desde or not fc_hasta:
-        st.warning("Selecciona ambas fechas.")
-        st.stop()
-    if fc_desde > fc_hasta:
-        st.error("La fecha «Desde» no puede ser posterior a «Hasta».")
-        st.stop()
-
-    # Cobros de alquiler y servicios: incluye inquilinos actuales y exinquilinos.
-    periodos_fc = {t: cargar_periodos_abiertos(t) for t in ("alquiler", "electricidad", "agua")}
-    try:
-        historial_fc = cargar_historial()
-        cerrados_fc = {t: cargar_periodos_cerrados(t) for t in ("alquiler", "electricidad", "agua")}
-    except Exception as e:
-        historial_fc, cerrados_fc = [], {}
-        st.warning(texto_error_historial(
-            "No se pudo leer el historial de ex inquilinos; sus cobros no aparecerán en este consolidado", e
-        ))
-
-    rend_fc = rendicion.construir_rendicion(
-        cargar_apartamentos(),
-        periodos_fc["alquiler"],
-        periodos_fc["electricidad"],
-        periodos_fc["agua"],
-        fc_desde,
-        fc_hasta,
-        hoy_fc,
-        cerrados=cerrados_fc,
-        historial=historial_fc,
-    )
-    actividad_fc = cargar_actividad(str(fc_desde), str(fc_hasta))
-    movimientos_base_fc = cuadre.construir_movimientos(
-        actividad_fc["pagos_generales"], actividad_fc["compras"], actividad_fc["ventas"]
-    )
-    movimientos_fc = finanzas_consolidadas.construir_movimientos_consolidados(
-        movimientos_base_fc, rend_fc["movimientos"]
-    )
-    resumen_fc = finanzas_consolidadas.construir_resumen(
-        movimientos_fc, fc_desde, fc_hasta
-    )
-
-    fck1, fck2, fck3, fck4 = st.columns(4)
-    fck1.metric("Movimientos", resumen_fc["cantidad_movimientos"])
-    fck2.metric("Ingresos recibidos", fmt_money(resumen_fc["ingresos"]))
-    fck3.metric("Egresos registrados", fmt_money(resumen_fc["egresos"]))
-    fck4.metric("Resultado del periodo", fmt_money(resumen_fc["resultado_periodo"]))
-
-    st.caption(
-        f"Periodo: {fc_desde:%d/%m/%Y} al {fc_hasta:%d/%m/%Y}. "
-        f"Saldo teórico final (sin saldo inicial): {fmt_money(resumen_fc['saldo_final_teorico'])}."
-    )
-    st.info(
-        "Este reporte no suma deudas pendientes ni montos por cobrar. "
-        "El saldo mostrado es un resultado teórico de los movimientos registrados; no sustituye la conciliación bancaria ni el conteo físico de caja."
-    )
-
-    tab_fc_libro, tab_fc_origen, tab_fc_metodo, tab_fc_dia = st.tabs([
-        "📒 Libro consolidado", "🗂️ Por origen", "💳 Por método de pago", "📅 Por día"
-    ])
-    with tab_fc_libro:
-        if resumen_fc["libro"]:
-            filas_fc = [{
-                "Fecha": m["fecha"].strftime("%d/%m/%Y"),
-                "Tipo": m["tipo"],
-                "Origen": m["origen"],
-                "Concepto": m["concepto"],
-                "Detalle": m["detalle"],
-                "Persona / Inquilino": m["persona"],
-                "Apartamento": m["apartamento"],
-                "Método": m["metodo"],
-                "Estado": m.get("estado", ""),
-                "Devuelto a": m.get("devolucion_a", ""),
-                "ID origen": m.get("id_origen"),
-                "ID periodo": m.get("id_periodo"),
-                "Monto (Bs)": m["monto"],
-                "Saldo al cierre del día (Bs)": m["saldo_acumulado"],
-            } for m in resumen_fc["libro"]]
-            st.dataframe(
-                pd.DataFrame(filas_fc), use_container_width=True, hide_index=True,
-                column_config={
-                    "Monto (Bs)": st.column_config.NumberColumn(format="Bs %.2f"),
-                    "Saldo al cierre del día (Bs)": st.column_config.NumberColumn(format="Bs %.2f"),
-                }
-            )
-            df_fc = pd.DataFrame(filas_fc)
-            st.download_button(
-                "⬇️ Descargar libro consolidado (CSV)",
-                data=df_fc.to_csv(index=False).encode("utf-8-sig"),
-                file_name=f"rendicion_financiera_{fc_desde:%Y%m%d}_{fc_hasta:%Y%m%d}.csv",
-                mime="text/csv", key="fc_csv"
-            )
-            st.download_button(
-                "⬇️ Descargar rendición financiera (Excel)",
-                data=finanzas_consolidadas.exportar_excel(resumen_fc),
-                file_name=f"rendicion_financiera_{fc_desde:%Y%m%d}_{fc_hasta:%Y%m%d}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="fc_xlsx"
-            )
-        else:
-            st.info("No existen movimientos registrados en el periodo seleccionado.")
-
-    with tab_fc_origen:
-        st.dataframe(pd.DataFrame([{
-            "Origen": x["origen"], "Movimientos": x["cantidad"],
-            "Ingresos (Bs)": x["ingresos"], "Egresos (Bs)": x["egresos"], "Neto (Bs)": x["neto"]
-        } for x in resumen_fc["por_origen"]]), use_container_width=True, hide_index=True,
-            column_config={c: st.column_config.NumberColumn(format="Bs %.2f") for c in
-                           ("Ingresos (Bs)", "Egresos (Bs)", "Neto (Bs)")})
-
-    with tab_fc_metodo:
-        st.dataframe(pd.DataFrame([{
-            "Método": x["metodo"], "Movimientos": x["cantidad"],
-            "Ingresos (Bs)": x["ingresos"], "Egresos (Bs)": x["egresos"], "Neto (Bs)": x["neto"]
-        } for x in resumen_fc["por_metodo"]]), use_container_width=True, hide_index=True,
-            column_config={c: st.column_config.NumberColumn(format="Bs %.2f") for c in
-                           ("Ingresos (Bs)", "Egresos (Bs)", "Neto (Bs)")})
-
-    with tab_fc_dia:
-        st.dataframe(pd.DataFrame([{
-            "Fecha": x["fecha"].strftime("%d/%m/%Y"),
-            "Ingresos (Bs)": x["ingresos"], "Egresos (Bs)": x["egresos"], "Neto (Bs)": x["neto"]
-        } for x in resumen_fc["por_dia"]]), use_container_width=True, hide_index=True,
-            column_config={c: st.column_config.NumberColumn(format="Bs %.2f") for c in
-                           ("Ingresos (Bs)", "Egresos (Bs)", "Neto (Bs)")})
-
-
-
 elif pagina == "💰 Cuadre de tesorería":
     st.title("💰 Cuadre de tesorería")
     st.caption(
