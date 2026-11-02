@@ -956,51 +956,34 @@ else:
     opciones_principal = ["📊 Dashboard", "🏠 Inquilinos", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua",
                           "🤝 Compromisos de pago", "🚪 Ex inquilinos"]
 
-opciones_movimientos = ["(ninguno)", "💸 Egresos", "💸 Ventas"]
 opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "📦 Inventario", "🗒️ Reuniones"]
 opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería", "🏦 Conciliación bancaria"]
 
-# Los radios de abajo son independientes en el estado interno de Streamlit:
-# si eliges algo en uno, los demás no se "enteran" y siguen marcando su
-# propia opción. Eso es lo que hacía que a veces no se pudiera cambiar de
-# sección (había que volver manualmente a "(ninguno)" primero). Estos
-# callbacks resetean los demás radios apenas se elige uno, para que el
-# cambio de sección sea siempre inmediato.
-_MODULOS_NAV = ["nav_movimientos", "nav_administracion", "nav_reportes"]
+# La navegación financiera queda integrada dentro de Finanzas; ya no existe
+# un segundo bloque lateral de Egresos/Ventas.
+_MODULOS_NAV = ["nav_administracion", "nav_reportes"]
 
 
-def _reiniciar_modulos(excepto=None):
-    """Deja en '(ninguno)' todos los módulos del menú salvo 'excepto'."""
+def _reiniciar_modulos():
     for clave in _MODULOS_NAV:
-        if clave != excepto:
-            st.session_state[clave] = "(ninguno)"
+        st.session_state[clave] = "(ninguno)"
 
 
 def _al_elegir_principal():
     _reiniciar_modulos()
 
 
-def _al_elegir_movimientos():
-    if st.session_state["nav_movimientos"] != "(ninguno)":
-        _reiniciar_modulos("nav_movimientos")
-
-
 def _al_elegir_administracion():
     if st.session_state["nav_administracion"] != "(ninguno)":
-        _reiniciar_modulos("nav_administracion")
+        st.session_state["nav_reportes"] = "(ninguno)"
 
 
 def _al_elegir_reportes():
     if st.session_state["nav_reportes"] != "(ninguno)":
-        _reiniciar_modulos("nav_reportes")
-
+        st.session_state["nav_administracion"] = "(ninguno)"
 
 pagina_principal = st.sidebar.radio("Gestión del Residencial", opciones_principal, key="nav_principal",
                                      on_change=_al_elegir_principal)
-st.sidebar.divider()
-st.sidebar.caption("📒 Operaciones financieras")
-pagina_movimientos = st.sidebar.radio("Ingresos y egresos", opciones_movimientos, key="nav_movimientos",
-                                       label_visibility="collapsed", on_change=_al_elegir_movimientos)
 st.sidebar.divider()
 st.sidebar.caption("🗂️ Módulo Administración")
 pagina_administracion = st.sidebar.radio("Administración", opciones_administracion, key="nav_administracion",
@@ -1010,14 +993,28 @@ st.sidebar.caption("📑 Módulo de Reportes")
 pagina_reportes = st.sidebar.radio("Reportes", opciones_reportes, key="nav_reportes",
                                     label_visibility="collapsed", on_change=_al_elegir_reportes)
 
-if pagina_movimientos != "(ninguno)":
-    pagina = pagina_movimientos
-elif pagina_administracion != "(ninguno)":
+if pagina_administracion != "(ninguno)":
     pagina = pagina_administracion
 elif pagina_reportes != "(ninguno)":
     pagina = pagina_reportes
 else:
     pagina = pagina_principal
+
+# Selector interno de Finanzas: Préstamos, Egresos e Ingresos.
+if es_admin and pagina_principal == "💰 Finanzas" and pagina == "💰 Finanzas":
+    seccion_finanzas = st.radio(
+        "Operaciones financieras",
+        ["🤝 Préstamos", "💸 Egresos", "💰 Ingresos"],
+        horizontal=True,
+        key="v13_seccion_finanzas",
+        label_visibility="collapsed",
+    )
+    pagina = {
+        "🤝 Préstamos": "💰 Finanzas",
+        "💸 Egresos": "💸 Egresos",
+        "💰 Ingresos": "💸 Ventas",
+    }[seccion_finanzas]
+
 st.sidebar.divider()
 if st.sidebar.button("🔄 Actualizar datos"):
     limpiar_cache()
