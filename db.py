@@ -84,8 +84,9 @@ def listar_garantias_alquiler(apartamento_id=None, estado=None):
 
 
 def crear_garantia_alquiler(payload: dict):
+    """Registra garantía y entrada de tesorería en una sola transacción SQL."""
     sb = get_client()
-    return sb.table("garantias_alquiler").insert(payload).execute()
+    return sb.rpc("registrar_garantia_y_movimiento", {"p_payload": payload}).execute()
 
 
 def obtener_garantia_alquiler(garantia_id):
@@ -112,8 +113,9 @@ def actualizar_garantia_alquiler(garantia_id, payload: dict):
 
 
 def registrar_devolucion_garantia(payload: dict):
+    """Registra devolución y salida de tesorería en una sola transacción SQL."""
     sb = get_client()
-    return sb.table("devoluciones_garantia_alquiler").insert(payload).execute()
+    return sb.rpc("registrar_devolucion_garantia_y_movimiento", {"p_payload": payload}).execute()
 
 
 def listar_devoluciones_garantia(garantia_id):
@@ -919,3 +921,10 @@ def crear_movimiento_cuenta_cobrar(payload):
     sb = get_client()
     return sb.table("movimientos_cuentas_cobrar").insert(payload).execute()
 
+
+
+def listar_movimientos_garantias_tesoreria():
+    """Consulta únicamente entradas y salidas originadas por garantías de alquiler."""
+    sb = get_client()
+    res = sb.rpc("listar_movimientos_garantias_tesoreria").execute()
+    return res.data or []

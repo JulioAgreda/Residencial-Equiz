@@ -1765,7 +1765,9 @@ elif pagina == "🏠 Apartamentos":
                         if registrar_meses:
                             for m in resumen_s["meses_sin_registro"]:
                                 db.obtener_o_crear_periodo(apt["id"], m["mes"], m["anio"], m["monto"], apt.get("inquilino_nombre"))
-                        # Al registrar la salida, la garantía vigente pasa a liquidación.
+                        db.registrar_salida_inquilino(
+                            apt["id"], fecha_salida, obs_salida, usuario_actual.get("nombre") or usuario_actual.get("username"))
+                        # Solo después de guardar la salida, pasar la garantía a liquidación.
                         garantias_activas_salida = db.listar_garantias_alquiler(apartamento_id=apt["id"], estado="Vigente")
                         for garantia_activa in garantias_activas_salida:
                             db.actualizar_garantia_alquiler(garantia_activa["id"], {
@@ -1773,8 +1775,6 @@ elif pagina == "🏠 Apartamentos":
                                 "fecha_salida": str(fecha_salida),
                                 "observacion_salida": obs_salida or None,
                             })
-                        db.registrar_salida_inquilino(
-                            apt["id"], fecha_salida, obs_salida, usuario_actual.get("nombre") or usuario_actual.get("username"))
                         limpiar_cache()
                         st.success("Salida registrada. El inquilino quedó en el historial con su deuda. Si paga después, "
                                    "regístralo en «🚪 Ex inquilinos».")
@@ -1834,6 +1834,25 @@ elif pagina == "🏠 Apartamentos":
                         except Exception as exc:
                             st.error(f"No se pudo registrar la garantía: {exc}")
         with tg2:
+            st.markdown("**Movimientos de tesorería vinculados a garantías**")
+            try:
+                movs_garantia = db.listar_movimientos_garantias_tesoreria()
+                if movs_garantia:
+                    st.dataframe(pd.DataFrame([{
+                        "Fecha": m.get("fecha"),
+                        "Movimiento": "Entrada" if m.get("direccion") == "ENTRADA" else "Salida",
+                        "Concepto": m.get("concepto"),
+                        "Monto": float(m.get("monto") or 0),
+                        "Medio": m.get("medio") or "—",
+                        "Apartamento": m.get("apartamento_id"),
+                        "Persona": m.get("persona") or "—",
+                        "Comprobante": m.get("comprobante") or "—",
+                    } for m in movs_garantia]), use_container_width=True, hide_index=True)
+                else:
+                    st.info("Todavía no hay movimientos de tesorería por garantías.")
+            except Exception as exc:
+                st.error(f"No se pudieron cargar los movimientos de tesorería: {exc}")
+            st.divider()
             try:
                 garantias = db.listar_garantias_alquiler()
             except Exception as exc:
@@ -1905,6 +1924,11 @@ elif pagina == "🏠 Apartamentos":
                                 if st.button("Marcar inquilino retirado e iniciar liquidación", key=f"retirar_g_{g['id']}"):
                                     db.actualizar_garantia_alquiler(g["id"], {"estado":"Pendiente de liquidación", "fecha_salida":str(date.today())})
                                     st.rerun()
+                        if g.get("estado") == "Pendiente de liquidación" and saldo <= 0.001 and total_devuelto <= 0.001:
+                            if st.button("Cerrar liquidación: garantía retenida por daños documentados", key=f"cerrar_garantia_danos_{g['id']}"):
+                                db.actualizar_garantia_alquiler(g["id"], {"estado": "Liquidada sin devolución"})
+                                st.success("Liquidación cerrada.")
+                                st.rerun()
                         if g.get("estado") in ("Pendiente de liquidación", "Devolución parcial") and saldo > 0:
                             with st.form(f"form_devolver_garantia_{g['id']}"):
                                 st.markdown("**Registrar devolución de garantía**")
@@ -1930,7 +1954,7 @@ elif pagina == "🏠 Apartamentos":
                                             "registrado_por":usuario_actual.get("nombre") or usuario_actual.get("username"),
                                         })
                                         nuevo_devuelto = total_devuelto + float(monto_devol_g)
-                                        estado_nuevo = "Devuelta" if nuevo_devuelto + total_danos >= float(g.get("monto_recibido") or 0) - 0.001 else "Devolución parcial"
+                                        estado_nuevo = "Liquidada" if nuevo_devuelto + total_danos >= float(g.get("monto_recibido") or 0) - 0.001 else "Devolución parcial"
                                         db.actualizar_garantia_alquiler(g["id"], {"estado":estado_nuevo})
                                         st.success("Devolución registrada.")
                                         st.rerun()
