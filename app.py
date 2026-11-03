@@ -1487,7 +1487,10 @@ elif pagina == "🏠 Apartamentos":
                     except ValueError:
                         _fecha_val = None
                     fecha_ingreso = st.date_input("Fecha de ingreso", value=_fecha_val, format="DD/MM/YYYY")
-                    garantia = st.text_input("Garantía", value=apt.get("garantia") or "")
+                    if tipo_contrato == "Alquiler":
+                        garantia = st.text_input("Garantía", value=apt.get("garantia") or "")
+                    else:
+                        garantia = None
                     amoblado = st.text_area("Amoblado", value=apt.get("amoblado") or "", height=70)
                     detalle = st.text_area("Detalle (ej. incluye agua/internet)", value=apt.get("detalle") or "",
                                             height=70)
@@ -1591,7 +1594,7 @@ elif pagina == "🏠 Apartamentos":
                         "referencia_nombre": referencia_nombre or None,
                         "referencia_celular": referencia_celular or None,
                         "fecha_ingreso": str(fecha_ingreso) if fecha_ingreso else None,
-                        "garantia": garantia or None,
+                        "garantia": (garantia or None) if tipo_contrato == "Alquiler" else None,
                         "amoblado": amoblado or None,
                         "detalle": detalle or None,
                         "monto_alquiler": monto_alquiler,
@@ -1980,7 +1983,10 @@ elif pagina == "🏠 Apartamentos":
                 cedula_identidad = st.text_input("Cédula de identidad")
                 nacionalidad = st.text_input("Nacionalidad")
                 fecha_ingreso = st.date_input("Fecha de ingreso", value=None, format="DD/MM/YYYY")
-                garantia = st.text_input("Garantía")
+                if tipo_contrato == "Alquiler":
+                    garantia = st.text_input("Garantía")
+                else:
+                    garantia = None
                 detalle = st.text_input("Detalle (ej. incluye agua/internet)")
                 if tipo_contrato == "Alquiler":
                     dia_pago_sel = st.selectbox("Día de Pago (día fijo del mes)",
@@ -2040,7 +2046,7 @@ elif pagina == "🏠 Apartamentos":
                         "cedula_identidad": cedula_identidad or None,
                         "nacionalidad": nacionalidad or None,
                         "fecha_ingreso": str(fecha_ingreso) if fecha_ingreso else None,
-                        "garantia": garantia or None,
+                        "garantia": (garantia or None) if tipo_contrato == "Alquiler" else None,
                         "detalle": detalle or None,
                         "monto_alquiler": monto_alquiler,
                         "dia_pago": int(dia_pago_sel) if dia_pago_sel != "(sin definir)" else None,
