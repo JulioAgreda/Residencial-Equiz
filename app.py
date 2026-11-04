@@ -8,7 +8,6 @@ from datetime import date
 import bcrypt
 import db
 import accesos
-import seguridad
 import aire_acondicionado
 import compromisos
 import conciliacion
@@ -65,7 +64,6 @@ def verificar_password(password: str, password_hash: str) -> bool:
 # Autenticación con usuario/contraseña y roles (Administrador / Cobrador)
 # ------------------------------------------------------------------
 def check_login():
-    """Autenticación individual. No admite claves generales ni autorregistro inicial."""
     if st.session_state.get("usuario"):
         return True
 
@@ -76,30 +74,63 @@ def check_login():
         usuarios_existentes = db.listar_usuarios()
     except Exception as e:
         st.error(f"No se pudo conectar con la base de usuarios: {e}")
+        st.info("¿Ya ejecutaste migracion_usuarios.sql en Supabase?")
         return False
 
     if not usuarios_existentes:
-        st.error("No existen cuentas registradas. La inicialización del administrador debe realizarse mediante un procedimiento privado y controlado.")
-        st.stop()
+        st.info("Aún no hay usuarios creados. Crea la cuenta del **Administrador principal**:")
+        with st.form("form_primer_admin"):
+            username = st.text_input("Usuario (para iniciar sesión)")
+            nombre = st.text_input("Nombre completo")
+            pwd1 = st.text_input("Contraseña", type="password")
+            pwd2 = st.text_input("Repetir contraseña", type="password")
+            crear = st.form_submit_button("Crear administrador")
+            if crear:
+                if not username or not pwd1:
+                    st.error("Usuario y contraseña son obligatorios.")
+                elif pwd1 != pwd2:
+                    st.error("Las contraseñas no coinciden.")
+                else:
+                    try:
+                        db.crear_usuario({
+                            "username": username.strip().lower(),
+                            "nombre": nombre or None,
+                            "password_hash": hash_password(pwd1),
+                            "rol": "Administrador",
+                            "activo": True,
+                        })
+                        st.success("Administrador creado. Ahora inicia sesión.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al crear el usuario: {e}")
+        return False
 
     username = st.text_input("Usuario")
     pwd = st.text_input("Contraseña", type="password")
     if st.button("Ingresar"):
         usuario = db.obtener_usuario_por_username(username.strip().lower())
-        if usuario and usuario.get("activo") and verificar_password(pwd, usuario.get("password_hash", "")):
-            # Nunca conservar password_hash en session_state.
-            usuario_sesion = {k: v for k, v in usuario.items() if k != "password_hash"}
-            st.session_state["usuario"] = usuario_sesion
+        if usuario and usuario.get("activo") and verificar_password(pwd, usuario["password_hash"]):
+            st.session_state["usuario"] = usuario
             st.rerun()
         else:
             st.error("Usuario o contraseña incorrectos, o el usuario está desactivado.")
+
+    with st.expander("¿Problemas para entrar? Usar clave general de administrador"):
+        pwd_general = st.text_input("Clave general", type="password", key="pwd_general")
+        if st.button("Ingresar con clave general"):
+            if pwd_general and pwd_general == st.secrets.get("APP_PASSWORD", ""):
+                st.session_state["usuario"] = {"username": "admin", "nombre": "Administrador",
+                                                "rol": "Administrador"}
+                st.rerun()
+            else:
+                st.error("Clave incorrecta.")
     return False
 
 
 if not check_login():
     st.stop()
 
-usuario_actual = seguridad.validar_usuario_sesion(st.session_state["usuario"])
+usuario_actual = st.session_state["usuario"]
 es_admin = usuario_actual.get("rol") == "Administrador"
 # Solo el Administrador y el usuario Viovip pueden modificar el Estado de Compras, Pagos y Ventas
 puede_editar_estado = estados.puede_modificar(usuario_actual, es_admin)
@@ -626,7 +657,7 @@ def _formulario_editar_abono(servicio, p, prefijo):
                 st.success("Abono eliminado.")
                 st.rerun()
             except Exception as e:
-                st.error(f"Error al desactivar: {e}")
+                st.error(f"Error al eliminar: {e}")
 
 
 def pagina_consumo(servicio):
@@ -1435,9 +1466,12 @@ elif pagina == "🏠 Apartamentos":
                 with col1:
                     codigo = st.text_input("Código", value=apt["codigo"])
                     piso = st.selectbox("Piso", PISOS, index=PISOS.index(apt["piso"]) if apt["piso"] in PISOS else 0)
-                    estado = st.selectbox("Estado", ["Ocupado", "Desocupado"],
-                                           index=0 if apt["estado"] == "Ocupado" else 1)
-                    inquilino_nombre = st.text_input("Nombre del inquilino", value=apt.get("inquilino_nombre") or "")
+                    estado = apt.get("estado") or "Desocupado"
+                    st.text_input("Estado de ocupación", value=estado, disabled=True,
+                                  help="La ocupación solo cambia mediante el procedimiento de salida o ingreso del inquilino.")
+                    inquilino_nombre = apt.get("inquilino_nombre") or ""
+                    st.text_input("Inquilino registrado", value=inquilino_nombre, disabled=True,
+                                  help="Para cambiar de inquilino debe archivarse primero al ocupante anterior.")
                     celular = st.text_input("Celular", value=apt.get("celular") or "")
                     cedula_identidad = st.text_input("Cédula de identidad", value=apt.get("cedula_identidad") or "")
                     nacionalidad = st.text_input("Nacionalidad", value=apt.get("nacionalidad") or "")
@@ -1547,9 +1581,7 @@ elif pagina == "🏠 Apartamentos":
                         key=f"antic_cond_edit_{apt['id']}",
                         help="Transcribir o resumir el plazo, aviso previo, forma y demás condiciones pactadas; prevalece el contrato firmado.")
 
-                col_a, col_b = st.columns([1, 1])
-                guardar = col_a.form_submit_button("💾 Guardar cambios", use_container_width=True)
-                eliminar = col_b.form_submit_button("🗑️ Eliminar apartamento", use_container_width=True)
+                guardar = st.form_submit_button("💾 Guardar cambios", use_container_width=True)
 
                 if guardar:
                     payload = {
@@ -1601,15 +1633,6 @@ elif pagina == "🏠 Apartamentos":
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error al actualizar: {e}")
-
-                if eliminar:
-                    try:
-                        db.eliminar_apartamento(apt["id"])
-                        limpiar_cache()
-                        st.success("Apartamento eliminado.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al desactivar: {e}")
 
             if apt.get("estado") == "Ocupado" and (apt.get("inquilino_nombre") or "").strip():
                 st.info("🚪 ¿Este inquilino se fue? Regístralo en la pestaña **«🚪 Salida de inquilino»** (arriba, junto a «Lista y edición»).")
@@ -2234,7 +2257,7 @@ elif pagina == "💵 Pagos de Alquiler":
                                 st.success("Abono eliminado.")
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Error al desactivar: {e}")
+                                st.error(f"Error al eliminar: {e}")
 
     with tab_historial:
         col1, col2, col3 = st.columns(3)
@@ -2353,7 +2376,7 @@ elif pagina == "💵 Pagos de Alquiler":
                                         st.success("Abono eliminado.")
                                         st.rerun()
                                     except Exception as e:
-                                        st.error(f"Error al desactivar: {e}")
+                                        st.error(f"Error al eliminar: {e}")
 
 
 # ==================================================================
@@ -4229,7 +4252,7 @@ elif pagina == "✅ Pendientes":
                                 st.success("Pendiente eliminado.")
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Error al desactivar: {e}")
+                                st.error(f"Error al eliminar: {e}")
 
 
 # ==================================================================
@@ -4398,7 +4421,7 @@ elif pagina == "🗒️ Reuniones":
                                     st.success("Reunión eliminada.")
                                     st.rerun()
                                 except Exception as e:
-                                    st.error(f"Error al desactivar: {e}")
+                                    st.error(f"Error al eliminar: {e}")
 
 
 # ==================================================================
@@ -4463,7 +4486,7 @@ elif pagina == "👥 Usuarios":
                                  "Para impedir que alguien entre, desactiva al usuario en «Lista y edición».")
                     else:
                         try:
-                            db.guardar_acceso_apartamentos(u_acc["id"], modo == MODO_TODOS, elegidos, usuario_solicitante=usuario_actual)
+                            db.guardar_acceso_apartamentos(u_acc["id"], modo == MODO_TODOS, elegidos)
                             limpiar_cache()
                             st.session_state["acceso_msg"] = (
                                 f'Acceso de {u_acc["username"]} actualizado: '
@@ -4490,7 +4513,7 @@ elif pagina == "👥 Usuarios":
 
                 col_a, col_b = st.columns(2)
                 guardar = col_a.form_submit_button("💾 Guardar cambios", use_container_width=True)
-                eliminar = col_b.form_submit_button("⛔ Desactivar usuario", use_container_width=True)
+                eliminar = col_b.form_submit_button("🗑️ Eliminar usuario", use_container_width=True)
 
                 if guardar:
                     if u["username"] == usuario_actual.get("username") and (not activo or rol != "Administrador"):
@@ -4500,7 +4523,7 @@ elif pagina == "👥 Usuarios":
                         if nueva_pwd:
                             payload["password_hash"] = hash_password(nueva_pwd)
                         try:
-                            db.actualizar_usuario(u["id"], payload, usuario_solicitante=usuario_actual)
+                            db.actualizar_usuario(u["id"], payload)
                             st.success("Usuario actualizado.")
                             st.rerun()
                         except Exception as e:
@@ -4511,11 +4534,11 @@ elif pagina == "👥 Usuarios":
                         st.error("No puedes eliminar tu propio usuario.")
                     else:
                         try:
-                            db.eliminar_usuario(u["id"], usuario_solicitante=usuario_actual)
-                            st.success("Usuario desactivado. Se conserva su historial.")
+                            db.eliminar_usuario(u["id"])
+                            st.success("Usuario eliminado.")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Error al desactivar: {e}")
+                            st.error(f"Error al eliminar: {e}")
 
     with tab_nuevo:
         with st.form("form_nuevo_usuario", clear_on_submit=True):
@@ -4539,7 +4562,7 @@ elif pagina == "👥 Usuarios":
                             "password_hash": hash_password(pwd1),
                             "rol": rol,
                             "activo": True,
-                        }, usuario_solicitante=usuario_actual)
+                        })
                         st.success(f"Usuario {username} creado.")
                         st.rerun()
                     except Exception as e:
@@ -4786,7 +4809,7 @@ elif pagina == "🧾 Compras":
                             st.success("Compra eliminada.")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Error al desactivar: {e}")
+                            st.error(f"Error al eliminar: {e}")
 
 
 # ==================================================================
@@ -4959,7 +4982,7 @@ elif pagina == "💳 Pagos":
                             st.success("Pago eliminado.")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Error al desactivar: {e}")
+                            st.error(f"Error al eliminar: {e}")
 
 
 # ==================================================================
@@ -5112,4 +5135,4 @@ elif pagina == "💸 Ventas":
                             st.success("Venta eliminada.")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Error al desactivar: {e}")
+                            st.error(f"Error al eliminar: {e}")

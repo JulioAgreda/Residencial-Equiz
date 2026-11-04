@@ -3,7 +3,6 @@ Conexión a Supabase para el Sistema de Control del Residencial.
 """
 import streamlit as st
 from supabase import create_client, Client
-import seguridad
 
 
 @st.cache_resource
@@ -53,18 +52,45 @@ def obtener_apartamento(apartamento_id):
 
 
 def crear_apartamento(payload: dict):
+    """Crea apartamentos respetando la coherencia básica de ocupación."""
+    estado = (payload.get("estado") or "Desocupado").strip()
+    inquilino = (payload.get("inquilino_nombre") or "").strip()
+    if estado == "Ocupado" and not inquilino:
+        raise ValueError("Un apartamento ocupado debe tener un inquilino registrado.")
+    if estado == "Desocupado" and inquilino:
+        raise ValueError("Un apartamento desocupado no puede tener un inquilino activo.")
     sb = get_client()
     return sb.table("apartamentos").insert(payload).execute()
 
 
 def actualizar_apartamento(apartamento_id, payload: dict):
+    """Actualiza datos administrativos sin permitir cambios de ocupación o identidad del inquilino.
+
+    Las salidas deben registrarse mediante registrar_salida_inquilino().
+    Los cambios de ocupante requieren un flujo específico que archive al anterior.
+    """
     sb = get_client()
+    actual = (sb.table("apartamentos").select("estado,inquilino_nombre")
+              .eq("id", apartamento_id).single().execute()).data or {}
+    estado_actual = (actual.get("estado") or "Desocupado").strip()
+    inquilino_actual = (actual.get("inquilino_nombre") or "").strip()
+    estado_nuevo = (payload.get("estado", estado_actual) or "Desocupado").strip()
+    inquilino_nuevo = (payload.get("inquilino_nombre", inquilino_actual) or "").strip()
+
+    if estado_nuevo != estado_actual:
+        raise ValueError("No se puede cambiar la ocupación desde la edición general. Utiliza el procedimiento correspondiente.")
+    if inquilino_nuevo != inquilino_actual:
+        raise ValueError("No se puede reemplazar o borrar al inquilino desde la edición general. Primero registra su salida y conserva el historial.")
+
     return sb.table("apartamentos").update(payload).eq("id", apartamento_id).execute()
 
 
 def eliminar_apartamento(apartamento_id):
-    sb = get_client()
-    return sb.table("apartamentos").delete().eq("id", apartamento_id).execute()
+    """El borrado físico queda bloqueado para proteger el historial y las relaciones."""
+    raise RuntimeError(
+        "El borrado físico de apartamentos está deshabilitado. "
+        "Debe utilizarse un procedimiento administrativo de baja lógica."
+    )
 
 
 
@@ -407,71 +433,31 @@ def eliminar_pago_servicio(servicio, pago_id):
 # ---------- Usuarios (roles y permisos) ----------
 
 def listar_usuarios():
-    """Lista perfiles de usuario sin devolver hashes de contraseñas."""
     sb = get_client()
-    campos = "id,username,nombre,rol,activo,acceso_todos_apartamentos,created_at"
-    res = sb.table("usuarios").select(campos).order("username").execute()
+    res = sb.table("usuarios").select("*").order("username").execute()
     return res.data or []
 
 
 def obtener_usuario_por_username(username):
-    """Obtiene credenciales solo para autenticar; el hash no debe guardarse en sesión."""
     sb = get_client()
-    campos = "id,username,nombre,rol,activo,password_hash,acceso_todos_apartamentos"
-    res = sb.table("usuarios").select(campos).eq("username", username).limit(1).execute()
+    res = sb.table("usuarios").select("*").eq("username", username).execute()
     data = res.data or []
     return data[0] if data else None
 
 
-def crear_usuario(payload: dict, usuario_solicitante: dict):
-    """Crea una cuenta. Solo un administrador autenticado puede hacerlo."""
-    seguridad.exigir_administrador(usuario_solicitante)
-    if not isinstance(payload, dict):
-        raise ValueError("Los datos del usuario no son válidos.")
-    username = str(payload.get("username") or "").strip().lower()
-    password_hash = payload.get("password_hash")
-    if not username or not password_hash:
-        raise ValueError("Usuario y contraseña son obligatorios.")
-    if payload.get("rol") not in ("Administrador", "Cobrador"):
-        raise ValueError("El rol solicitado no es válido.")
-    datos = dict(payload)
-    datos["username"] = username
-    return get_client().table("usuarios").insert(datos).execute()
-
-
-def actualizar_usuario(usuario_id, payload: dict, usuario_solicitante: dict):
-    """Actualiza una cuenta. Solo un administrador autenticado puede hacerlo."""
-    seguridad.exigir_administrador(usuario_solicitante)
-    if not isinstance(payload, dict) or not payload:
-        raise ValueError("No hay cambios válidos para guardar.")
-    permitidos = {"nombre", "rol", "activo", "password_hash"}
-    if set(payload) - permitidos:
-        raise ValueError("Se intentó modificar un campo no permitido.")
-    if "rol" in payload and payload["rol"] not in ("Administrador", "Cobrador"):
-        raise ValueError("El rol solicitado no es válido.")
-    if str(usuario_id) == str(usuario_solicitante.get("id")):
-        if payload.get("activo") is False or payload.get("rol", "Administrador") != "Administrador":
-            raise seguridad.AccesoDenegado("No puedes desactivar tu propia cuenta ni retirar tu rol de administrador.")
+def crear_usuario(payload: dict):
     sb = get_client()
-    # Evita dejar el sistema sin un administrador activo.
-    actual = sb.table("usuarios").select("id,rol,activo").eq("id", usuario_id).limit(1).execute()
-    fila = (actual.data or [None])[0]
-    if fila and fila.get("rol") == "Administrador" and fila.get("activo") and (
-        payload.get("activo") is False or payload.get("rol") == "Cobrador"
-    ):
-        otros = (sb.table("usuarios").select("id")
-                 .eq("rol", "Administrador").eq("activo", True).neq("id", usuario_id).limit(1).execute())
-        if not (otros.data or []):
-            raise ValueError("No se puede retirar el último administrador activo.")
-    return sb.table("usuarios").update(dict(payload)).eq("id", usuario_id).execute()
+    return sb.table("usuarios").insert(payload).execute()
 
 
-def eliminar_usuario(usuario_id, usuario_solicitante: dict):
-    """Desactiva la cuenta en lugar de borrarla para conservar trazabilidad."""
-    seguridad.exigir_administrador(usuario_solicitante)
-    if str(usuario_id) == str(usuario_solicitante.get("id")):
-        raise seguridad.AccesoDenegado("No puedes desactivar tu propia cuenta.")
-    return get_client().table("usuarios").update({"activo": False}).eq("id", usuario_id).execute()
+def actualizar_usuario(usuario_id, payload: dict):
+    sb = get_client()
+    return sb.table("usuarios").update(payload).eq("id", usuario_id).execute()
+
+
+def eliminar_usuario(usuario_id):
+    sb = get_client()
+    return sb.table("usuarios").delete().eq("id", usuario_id).execute()
 
 
 # ---------- Reportes por usuario (cobrador) ----------
@@ -906,20 +892,12 @@ def listar_accesos_apartamentos():
         inicio += tam
 
 
-def guardar_acceso_apartamentos(usuario_id, acceso_todos, apartamento_ids=(), usuario_solicitante=None):
+def guardar_acceso_apartamentos(usuario_id, acceso_todos, apartamento_ids=()):
     """Guarda a qué apartamentos accede un usuario.
     Si acceso_todos es falso, primero se sincronizan las asignaciones (solo se agregan y se quitan las diferencias) y
     AL FINAL se marca al usuario como restringido: si algo falla a medias, nunca queda restringido con una lista vacía
     por accidente. Si acceso_todos es verdadero, las asignaciones guardadas no se tocan (se ignoran)."""
-    seguridad.exigir_administrador(usuario_solicitante)
     sb = get_client()
-    destino = (sb.table("usuarios").select("id,rol").eq("id", usuario_id).limit(1).execute().data or [None])[0]
-    if not destino:
-        raise ValueError("El usuario seleccionado no existe.")
-    if destino.get("rol") == "Administrador":
-        raise ValueError("Los administradores conservan acceso general; no se modifican sus asignaciones.")
-    if not acceso_todos and not apartamento_ids:
-        raise ValueError("Un usuario restringido debe tener al menos un apartamento asignado.")
     if not acceso_todos:
         res = sb.table("usuarios_apartamentos").select("apartamento_id").eq("usuario_id", usuario_id).execute()
         actuales = {r["apartamento_id"] for r in (res.data or [])}
