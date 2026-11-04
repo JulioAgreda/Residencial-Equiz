@@ -8,6 +8,7 @@ from datetime import date
 import bcrypt
 import db
 import accesos
+import seguridad
 import aire_acondicionado
 import compromisos
 import conciliacion
@@ -64,6 +65,7 @@ def verificar_password(password: str, password_hash: str) -> bool:
 # Autenticación con usuario/contraseña y roles (Administrador / Cobrador)
 # ------------------------------------------------------------------
 def check_login():
+    """Autenticación individual. No admite claves generales ni autorregistro inicial."""
     if st.session_state.get("usuario"):
         return True
 
@@ -74,63 +76,30 @@ def check_login():
         usuarios_existentes = db.listar_usuarios()
     except Exception as e:
         st.error(f"No se pudo conectar con la base de usuarios: {e}")
-        st.info("¿Ya ejecutaste migracion_usuarios.sql en Supabase?")
         return False
 
     if not usuarios_existentes:
-        st.info("Aún no hay usuarios creados. Crea la cuenta del **Administrador principal**:")
-        with st.form("form_primer_admin"):
-            username = st.text_input("Usuario (para iniciar sesión)")
-            nombre = st.text_input("Nombre completo")
-            pwd1 = st.text_input("Contraseña", type="password")
-            pwd2 = st.text_input("Repetir contraseña", type="password")
-            crear = st.form_submit_button("Crear administrador")
-            if crear:
-                if not username or not pwd1:
-                    st.error("Usuario y contraseña son obligatorios.")
-                elif pwd1 != pwd2:
-                    st.error("Las contraseñas no coinciden.")
-                else:
-                    try:
-                        db.crear_usuario({
-                            "username": username.strip().lower(),
-                            "nombre": nombre or None,
-                            "password_hash": hash_password(pwd1),
-                            "rol": "Administrador",
-                            "activo": True,
-                        })
-                        st.success("Administrador creado. Ahora inicia sesión.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al crear el usuario: {e}")
-        return False
+        st.error("No existen cuentas registradas. La inicialización del administrador debe realizarse mediante un procedimiento privado y controlado.")
+        st.stop()
 
     username = st.text_input("Usuario")
     pwd = st.text_input("Contraseña", type="password")
     if st.button("Ingresar"):
         usuario = db.obtener_usuario_por_username(username.strip().lower())
-        if usuario and usuario.get("activo") and verificar_password(pwd, usuario["password_hash"]):
-            st.session_state["usuario"] = usuario
+        if usuario and usuario.get("activo") and verificar_password(pwd, usuario.get("password_hash", "")):
+            # Nunca conservar password_hash en session_state.
+            usuario_sesion = {k: v for k, v in usuario.items() if k != "password_hash"}
+            st.session_state["usuario"] = usuario_sesion
             st.rerun()
         else:
             st.error("Usuario o contraseña incorrectos, o el usuario está desactivado.")
-
-    with st.expander("¿Problemas para entrar? Usar clave general de administrador"):
-        pwd_general = st.text_input("Clave general", type="password", key="pwd_general")
-        if st.button("Ingresar con clave general"):
-            if pwd_general and pwd_general == st.secrets.get("APP_PASSWORD", ""):
-                st.session_state["usuario"] = {"username": "admin", "nombre": "Administrador",
-                                                "rol": "Administrador"}
-                st.rerun()
-            else:
-                st.error("Clave incorrecta.")
     return False
 
 
 if not check_login():
     st.stop()
 
-usuario_actual = st.session_state["usuario"]
+usuario_actual = seguridad.validar_usuario_sesion(st.session_state["usuario"])
 es_admin = usuario_actual.get("rol") == "Administrador"
 # Solo el Administrador y el usuario Viovip pueden modificar el Estado de Compras, Pagos y Ventas
 puede_editar_estado = estados.puede_modificar(usuario_actual, es_admin)

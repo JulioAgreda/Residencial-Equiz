@@ -406,14 +406,18 @@ def eliminar_pago_servicio(servicio, pago_id):
 # ---------- Usuarios (roles y permisos) ----------
 
 def listar_usuarios():
+    """Lista perfiles de usuario sin devolver hashes de contraseñas."""
     sb = get_client()
-    res = sb.table("usuarios").select("*").order("username").execute()
+    campos = "id,username,nombre,rol,activo,acceso_todos_apartamentos,created_at"
+    res = sb.table("usuarios").select(campos).order("username").execute()
     return res.data or []
 
 
 def obtener_usuario_por_username(username):
+    """Obtiene credenciales solo para autenticar; el hash no debe guardarse en sesión."""
     sb = get_client()
-    res = sb.table("usuarios").select("*").eq("username", username).execute()
+    campos = "id,username,nombre,rol,activo,password_hash,acceso_todos_apartamentos"
+    res = sb.table("usuarios").select(campos).eq("username", username).limit(1).execute()
     data = res.data or []
     return data[0] if data else None
 
