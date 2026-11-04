@@ -3,6 +3,7 @@ Conexión a Supabase para el Sistema de Control del Residencial.
 """
 import streamlit as st
 from supabase import create_client, Client
+import seguridad
 
 
 @st.cache_resource
@@ -422,19 +423,55 @@ def obtener_usuario_por_username(username):
     return data[0] if data else None
 
 
-def crear_usuario(payload: dict):
+def crear_usuario(payload: dict, usuario_solicitante: dict):
+    """Crea una cuenta. Solo un administrador autenticado puede hacerlo."""
+    seguridad.exigir_administrador(usuario_solicitante)
+    if not isinstance(payload, dict):
+        raise ValueError("Los datos del usuario no son válidos.")
+    username = str(payload.get("username") or "").strip().lower()
+    password_hash = payload.get("password_hash")
+    if not username or not password_hash:
+        raise ValueError("Usuario y contraseña son obligatorios.")
+    if payload.get("rol") not in ("Administrador", "Cobrador"):
+        raise ValueError("El rol solicitado no es válido.")
+    datos = dict(payload)
+    datos["username"] = username
+    return get_client().table("usuarios").insert(datos).execute()
+
+
+def actualizar_usuario(usuario_id, payload: dict, usuario_solicitante: dict):
+    """Actualiza una cuenta. Solo un administrador autenticado puede hacerlo."""
+    seguridad.exigir_administrador(usuario_solicitante)
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError("No hay cambios válidos para guardar.")
+    permitidos = {"nombre", "rol", "activo", "password_hash"}
+    if set(payload) - permitidos:
+        raise ValueError("Se intentó modificar un campo no permitido.")
+    if "rol" in payload and payload["rol"] not in ("Administrador", "Cobrador"):
+        raise ValueError("El rol solicitado no es válido.")
+    if str(usuario_id) == str(usuario_solicitante.get("id")):
+        if payload.get("activo") is False or payload.get("rol", "Administrador") != "Administrador":
+            raise seguridad.AccesoDenegado("No puedes desactivar tu propia cuenta ni retirar tu rol de administrador.")
     sb = get_client()
-    return sb.table("usuarios").insert(payload).execute()
+    # Evita dejar el sistema sin un administrador activo.
+    actual = sb.table("usuarios").select("id,rol,activo").eq("id", usuario_id).limit(1).execute()
+    fila = (actual.data or [None])[0]
+    if fila and fila.get("rol") == "Administrador" and fila.get("activo") and (
+        payload.get("activo") is False or payload.get("rol") == "Cobrador"
+    ):
+        otros = (sb.table("usuarios").select("id")
+                 .eq("rol", "Administrador").eq("activo", True).neq("id", usuario_id).limit(1).execute())
+        if not (otros.data or []):
+            raise ValueError("No se puede retirar el último administrador activo.")
+    return sb.table("usuarios").update(dict(payload)).eq("id", usuario_id).execute()
 
 
-def actualizar_usuario(usuario_id, payload: dict):
-    sb = get_client()
-    return sb.table("usuarios").update(payload).eq("id", usuario_id).execute()
-
-
-def eliminar_usuario(usuario_id):
-    sb = get_client()
-    return sb.table("usuarios").delete().eq("id", usuario_id).execute()
+def eliminar_usuario(usuario_id, usuario_solicitante: dict):
+    """Desactiva la cuenta en lugar de borrarla para conservar trazabilidad."""
+    seguridad.exigir_administrador(usuario_solicitante)
+    if str(usuario_id) == str(usuario_solicitante.get("id")):
+        raise seguridad.AccesoDenegado("No puedes desactivar tu propia cuenta.")
+    return get_client().table("usuarios").update({"activo": False}).eq("id", usuario_id).execute()
 
 
 # ---------- Reportes por usuario (cobrador) ----------
@@ -869,12 +906,20 @@ def listar_accesos_apartamentos():
         inicio += tam
 
 
-def guardar_acceso_apartamentos(usuario_id, acceso_todos, apartamento_ids=()):
+def guardar_acceso_apartamentos(usuario_id, acceso_todos, apartamento_ids=(), usuario_solicitante=None):
     """Guarda a qué apartamentos accede un usuario.
     Si acceso_todos es falso, primero se sincronizan las asignaciones (solo se agregan y se quitan las diferencias) y
     AL FINAL se marca al usuario como restringido: si algo falla a medias, nunca queda restringido con una lista vacía
     por accidente. Si acceso_todos es verdadero, las asignaciones guardadas no se tocan (se ignoran)."""
+    seguridad.exigir_administrador(usuario_solicitante)
     sb = get_client()
+    destino = (sb.table("usuarios").select("id,rol").eq("id", usuario_id).limit(1).execute().data or [None])[0]
+    if not destino:
+        raise ValueError("El usuario seleccionado no existe.")
+    if destino.get("rol") == "Administrador":
+        raise ValueError("Los administradores conservan acceso general; no se modifican sus asignaciones.")
+    if not acceso_todos and not apartamento_ids:
+        raise ValueError("Un usuario restringido debe tener al menos un apartamento asignado.")
     if not acceso_todos:
         res = sb.table("usuarios_apartamentos").select("apartamento_id").eq("usuario_id", usuario_id).execute()
         actuales = {r["apartamento_id"] for r in (res.data or [])}
