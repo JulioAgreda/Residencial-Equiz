@@ -1,0 +1,23 @@
+ACTUALIZACIÓN EQUISE – RECIBOS COMPACTOS
+
+Archivos incluidos:
+- app.py: conserva la integración de recibos de garantía.
+- recibo.py: diseño compacto y corregido para recibos PDF/PNG.
+- assets/logo_equise_horizontal.png: logotipo horizontal original.
+
+CAMBIOS:
+- Logo limitado al área blanca; no invade el encabezado azul.
+- Encabezado con zonas independientes y diagonal dorada.
+- Reducción de espacios verticales y tarjetas más compactas.
+- Datos de identificación alineados en filas.
+- Bloque de monto y resumen más bajos.
+- Altura del documento ajustada al contenido.
+- Se mantienen los datos y cálculos recibidos por el módulo.
+
+INSTALACIÓN:
+1. Realizar una copia de seguridad del proyecto.
+2. Reemplazar app.py y recibo.py por los incluidos.
+3. Copiar assets/logo_equise_horizontal.png a la carpeta assets/ del proyecto.
+4. Reiniciar la aplicación Streamlit.
+
+No requiere migraciones SQL ni cambios en Supabase.

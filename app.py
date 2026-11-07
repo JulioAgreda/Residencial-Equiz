@@ -440,7 +440,7 @@ def _cuadre_pdf_cache(q, emitido_por):
 
 # Incrementar esta versión cuando cambie el diseño del Estado de Cuenta.
 # Forma parte de la clave de caché para evitar que se reutilicen documentos antiguos.
-REPORTE_DISENO_VERSION = "equise-estado-cuenta-2026-10-29-v2"
+REPORTE_DISENO_VERSION = "equise-estado-cuenta-2026-11-07-v3"
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -465,10 +465,9 @@ def total_pagado(periodo):
 def mostrar_botones_recibo_garantia(garantia, apartamento, key_sufijo):
     """Descargas PDF y PNG del comprobante de recepción de garantía."""
     try:
-        datos = recibo.construir_datos_recibo_garantia(
-            garantia, apartamento,
-            recibido_por=usuario_actual.get("nombre") or usuario_actual.get("username"),
-        )
+        # El recibo debe identificar al usuario que registró originalmente la garantía,
+        # no a quien está consultando o descargando el documento actualmente.
+        datos = recibo.construir_datos_recibo_garantia(garantia, apartamento)
         c_pdf, c_png = st.columns(2)
         with c_pdf:
             st.download_button(
