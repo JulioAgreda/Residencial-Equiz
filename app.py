@@ -979,9 +979,10 @@ if es_admin:
     opciones_principal = ["📊 Dashboard", "🏠 Apartamentos", "💵 Pagos de Alquiler", "⚡ Electricidad",
                           "💧 Agua", "🤝 Compromisos de pago", "🚪 Ex inquilinos", "👥 Usuarios", "💰 Finanzas"]
 else:
-    # "🏠 Inquilinos" es la consulta de solo lectura de los datos de cada apartamento
+    # El Cobrador también puede entrar a Finanzas, pero verá únicamente
+    # el registro de cobros y el historial en modo de consulta.
     opciones_principal = ["📊 Dashboard", "🏠 Inquilinos", "💵 Pagos de Alquiler", "⚡ Electricidad", "💧 Agua",
-                          "🤝 Compromisos de pago", "🚪 Ex inquilinos"]
+                          "🤝 Compromisos de pago", "🚪 Ex inquilinos", "💰 Finanzas"]
 
 opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "📦 Inventario", "🗒️ Reuniones"]
 opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería", "🏦 Conciliación bancaria"]
@@ -1055,6 +1056,111 @@ if st.sidebar.button("🚪 Cerrar sesión"):
 # ==================================================================
 # PÁGINA: FINANZAS - CUENTAS POR PAGAR Y POR COBRAR
 # ==================================================================
+elif pagina == "💰 Finanzas" and not es_admin:
+    # Vista limitada para Cobrador: registrar cobros y consultar el historial.
+    # No se muestran préstamos recibidos, creación de cuentas, egresos,
+    # ingresos, saldos de obligaciones ni controles administrativos.
+    st.title("💰 Finanzas")
+    st.caption("Registro de cobros y consulta del historial. Las cuentas y sus condiciones son administradas por el Administrador.")
+
+    try:
+        cuentas_cobrador = db.listar_cuentas_por_cobrar()
+        movimientos_cobrador = db.listar_movimientos_cuentas_cobrar()
+    except Exception as e:
+        st.error("No se pudo cargar la información de cobros.")
+        st.caption(f"Detalle: {e}")
+        st.stop()
+
+    movimientos_por_cuenta_cobrador = {}
+    for mov in movimientos_cobrador:
+        movimientos_por_cuenta_cobrador.setdefault(mov.get("cuenta_id"), []).append(mov)
+
+    cuentas_disponibles = []
+    for cuenta in cuentas_cobrador:
+        saldo_actual = deudores.calcular_saldo(
+            cuenta, movimientos_por_cuenta_cobrador.get(cuenta.get("id"), [])
+        )
+        if float(saldo_actual) > 0:
+            cuentas_disponibles.append((cuenta, saldo_actual))
+
+    st.subheader("Registrar cobro")
+    if cuentas_disponibles:
+        mapa_cobrador = {
+            f'{c.get("codigo", "—")} · {c.get("deudor", "Sin deudor")} · saldo Bs {float(s):,.2f}': (c, s)
+            for c, s in cuentas_disponibles
+        }
+        with st.form("cobrador_registrar_cobro_cxc", clear_on_submit=True):
+            etiqueta_cuenta = st.selectbox("Cuenta por cobrar", list(mapa_cobrador))
+            cuenta_sel, saldo_sel = mapa_cobrador[etiqueta_cuenta]
+            st.caption(f'Deudor: {cuenta_sel.get("deudor", "—")} · Saldo pendiente: {fmt_money(saldo_sel)}')
+            fecha_cobro_cobrador = st.date_input("Fecha del cobro", key="cobrador_fecha_cobro_cxc")
+            monto_cobrado_cobrador = st.number_input(
+                "Monto cobrado (Bs)", min_value=0.01, max_value=float(saldo_sel),
+                step=10.0, format="%.2f", key="cobrador_monto_cobro_cxc"
+            )
+            metodo_cobro_cobrador = st.selectbox(
+                "Medio de cobro", ["Efectivo", "QR", "Transferencia Bancaria", "Otro"],
+                key="cobrador_metodo_cobro_cxc"
+            )
+            referencia_cobrador = st.text_input(
+                "N.º de comprobante / referencia", key="cobrador_ref_cobro_cxc"
+            )
+            observacion_cobrador = st.text_input("Observación", key="cobrador_obs_cobro_cxc")
+            confirmar_cobro_cobrador = st.form_submit_button("Registrar cobro")
+            if confirmar_cobro_cobrador:
+                try:
+                    saldo_verificado = deudores.calcular_saldo(
+                        cuenta_sel, movimientos_por_cuenta_cobrador.get(cuenta_sel.get("id"), [])
+                    )
+                    if float(monto_cobrado_cobrador) > float(saldo_verificado):
+                        raise ValueError("El cobro supera el saldo pendiente de la cuenta.")
+                    db.crear_movimiento_cuenta_cobrar({
+                        "cuenta_id": cuenta_sel["id"],
+                        "fecha": str(fecha_cobro_cobrador),
+                        "tipo": "cobro",
+                        "monto": float(monto_cobrado_cobrador),
+                        "metodo": metodo_cobro_cobrador,
+                        "referencia": referencia_cobrador.strip() or None,
+                        "observacion": observacion_cobrador.strip() or None,
+                        "registrado_por": usuario_actual.get("username"),
+                    })
+                    st.success("Cobro registrado correctamente.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"No se pudo registrar el cobro: {e}")
+    else:
+        st.info("No hay cuentas por cobrar con saldo pendiente para registrar cobros.")
+
+    st.divider()
+    st.subheader("Historial de cobros")
+    cuentas_por_id_cobrador = {c.get("id"): c for c in cuentas_cobrador}
+    historial_cobrador = []
+    for mov in movimientos_cobrador:
+        if mov.get("tipo") != "cobro":
+            continue
+        cuenta = cuentas_por_id_cobrador.get(mov.get("cuenta_id"), {})
+        historial_cobrador.append({
+            "Fecha": mov.get("fecha") or "—",
+            "Código": cuenta.get("codigo") or "—",
+            "Deudor": cuenta.get("deudor") or "—",
+            "Monto cobrado": float(mov.get("monto") or 0),
+            "Medio": mov.get("metodo") or "—",
+            "Referencia": mov.get("referencia") or "—",
+            "Registrado por": mov.get("registrado_por") or "—",
+            "Observación": mov.get("observacion") or "—",
+        })
+    if historial_cobrador:
+        import pandas as pd
+        df_historial_cobrador = pd.DataFrame(historial_cobrador)
+        st.dataframe(
+            df_historial_cobrador.sort_values("Fecha", ascending=False),
+            use_container_width=True, hide_index=True,
+            column_config={"Monto cobrado": st.column_config.NumberColumn("Monto cobrado", format="Bs %.2f")}
+        )
+        st.caption(f"Registros históricos: {len(historial_cobrador)}. Esta vista es de solo lectura.")
+    else:
+        st.info("Todavía no hay cobros registrados.")
+
 elif pagina == "💰 Finanzas":
     st.title("🤝 Préstamos")
     st.caption("Registro de préstamos recibidos y préstamos realizados, sin intereses. Solo administrador.")

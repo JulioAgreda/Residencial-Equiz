@@ -1,0 +1,23 @@
+ACTUALIZACIÓN EQUISE - ACCESO LIMITADO A FINANZAS PARA COBRADORES
+
+Archivo incluido:
+- app.py
+
+Instalación:
+1. Haz una copia de respaldo del app.py actual.
+2. Reemplaza el app.py de tu proyecto por el incluido en este ZIP.
+3. Reinicia la aplicación Streamlit.
+
+Permisos del rol Cobrador dentro de Finanzas:
+- Puede ingresar al módulo Finanzas.
+- Puede registrar cobros de cuentas por cobrar con saldo pendiente.
+- Puede consultar el historial de cobros en modo de solo lectura.
+- No ve el resumen administrativo de préstamos.
+- No puede registrar préstamos recibidos ni crear cuentas por cobrar.
+- No tiene acceso desde esta pantalla a egresos, ingresos, edición o eliminación de movimientos.
+
+El historial muestra los cobros de todas las cuentas por cobrar, con fecha, cuenta, deudor,
+monto, medio, referencia y usuario que registró el movimiento.
+
+No se modifican db.py, tablas, migraciones ni registros de Supabase.
+La restricción implementada corresponde a la interfaz de la aplicación Streamlit.
