@@ -1,4 +1,0 @@
-V13 incluye schema_finanzas_v13.sql.
-Antes de ejecutarlo, verificar si existen las tablas: obligaciones_financieras, movimientos_obligaciones, cuentas_por_cobrar, movimientos_cuentas_cobrar.
-Si las tablas ya existen, revisar primero sus datos y restricciones. La migración ajusta restricciones de categoria y no debe ejecutarse a ciegas.
-No eliminar tablas antiguas ni ejecutar DROP TABLE.
