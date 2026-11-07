@@ -199,7 +199,6 @@ def construir_datos_recibo_garantia(garantia, apartamento, recibido_por=None):
         "detalle": [
             ("Concepto:", "Depósito de garantía reembolsable"),
             ("Estado de garantía:", garantia.get("estado") or "Vigente"),
-            ("Comprobante de respaldo:", garantia.get("comprobante_recepcion") or "—"),
         ],
         "monto_esperado": monto,
         "total_pagado_periodo": monto,
