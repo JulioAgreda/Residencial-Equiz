@@ -1,0 +1,28 @@
+EQUISE - Corrección de cuentas por cobrar y selector de cobros
+
+ARCHIVOS INCLUIDOS
+- app.py
+- db.py
+
+QUÉ CAMBIA
+1. Al crear una cuenta por cobrar, si se indica que el monto completo sigue pendiente, el sistema asigna automáticamente el monto original al saldo inicial.
+2. Si ya hubo pagos antes de la fecha de corte, permite introducir manualmente el saldo pendiente a esa fecha.
+3. En Finanzas > Préstamos > Préstamos realizados, muestra una herramienta para corregir cuentas que quedaron con saldo inicial Bs 0,00 y no tienen movimientos.
+4. La corrección exige confirmación y vuelve a comprobar que la cuenta no tenga movimientos. Si ya tiene movimientos, no permite modificarla.
+5. Una vez corregido el saldo inicial, la cuenta aparece en el selector de "Registrar devolución recibida" y en la vista de cobros del Cobrador.
+6. El selector no se muestra vacío: cuando no hay cuentas disponibles, se presenta un mensaje explicativo.
+
+INSTALACIÓN
+1. Realiza una copia de seguridad de los archivos actuales app.py y db.py.
+2. Reemplaza ambos archivos por los incluidos en este ZIP.
+3. Reinicia Streamlit (detén la aplicación y vuelve a iniciarla).
+4. Entra como Administrador > Finanzas > Préstamos > Préstamos realizados.
+5. En "Revisar cuenta registrada sin saldo inicial", selecciona la cuenta cuya deuda sigue totalmente pendiente, confirma y pulsa "Corregir saldo inicial".
+6. Verifica que aparezca en "Registrar devolución recibida". Luego registra el cobro real.
+
+IMPORTANTE
+- No se crea una segunda cuenta ni se duplica la deuda.
+- No se ejecuta ninguna migración SQL.
+- No modifica cuentas que ya tengan movimientos.
+- El cambio del saldo inicial se realiza desde la propia aplicación y solo después de confirmación.
+- Antes de reemplazar, conserva una copia de los archivos actuales.

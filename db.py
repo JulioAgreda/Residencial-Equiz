@@ -939,6 +939,28 @@ def crear_cuenta_por_cobrar(payload):
     sb = get_client()
     return sb.table("cuentas_por_cobrar").insert(payload).execute()
 
+def actualizar_saldo_apertura_cuenta_por_cobrar(cuenta_id, saldo_apertura):
+    """Actualiza el saldo inicial de una cuenta por cobrar existente.
+
+    La interfaz debe comprobar previamente que no existan movimientos asociados.
+    """
+    sb = get_client()
+    existentes = (
+        sb.table("movimientos_cuentas_cobrar")
+        .select("id")
+        .eq("cuenta_id", cuenta_id)
+        .limit(1)
+        .execute()
+    )
+    if existentes.data:
+        raise ValueError("No se puede corregir el saldo inicial porque la cuenta ya tiene movimientos.")
+    return (
+        sb.table("cuentas_por_cobrar")
+        .update({"saldo_apertura": float(saldo_apertura)})
+        .eq("id", cuenta_id)
+        .execute()
+    )
+
 def listar_movimientos_cuentas_cobrar():
     sb = get_client()
     res = sb.table("movimientos_cuentas_cobrar").select("*").order("fecha", desc=True).execute()

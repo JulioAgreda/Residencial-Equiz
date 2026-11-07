@@ -1293,9 +1293,21 @@ elif pagina == "💰 Finanzas":
             fecha_origen_c=c.date_input("Fecha de origen",key="v12_origen_cxc")
             fecha_corte_c=d.date_input("Fecha de corte / saldo inicial",key="v12_corte_cxc")
             vencimiento_c=e.date_input("Vencimiento",value=None,key="v12_venc_cxc")
-            f,g=st.columns(2)
-            monto_c=f.number_input("Monto original (Bs)",min_value=0.01,step=10.0,key="v12_monto_cxc")
-            saldo_c=g.number_input("Saldo por cobrar a la fecha de corte (Bs)",min_value=0.0,step=10.0,key="v12_saldo_cxc")
+            monto_c=st.number_input("Monto original (Bs)",min_value=0.01,step=10.0,key="v12_monto_cxc")
+            situacion_c=st.radio(
+                "Situación de la deuda a la fecha de corte",
+                ["El monto completo sigue pendiente", "Ya se recibieron pagos antes de la fecha de corte"],
+                index=0, key="v12_situacion_cxc", horizontal=False,
+                help="Si no hubo pagos anteriores, EQUISE tomará automáticamente el monto original como saldo inicial."
+            )
+            if situacion_c == "El monto completo sigue pendiente":
+                saldo_c=float(monto_c)
+                st.info(f"Saldo inicial que se registrará: {fmt_money(saldo_c)}")
+            else:
+                saldo_c=st.number_input(
+                    "Saldo pendiente a la fecha de corte (Bs)", min_value=0.0,
+                    max_value=float(monto_c), step=10.0, format="%.2f", key="v12_saldo_cxc"
+                )
             documento_c=st.text_input("Contrato, recibo o respaldo",key="v12_doc_cxc")
             obs_c=st.text_area("Observaciones",key="v12_obs_cxc")
             guardar_c=st.form_submit_button("Guardar cuenta por cobrar")
@@ -1317,29 +1329,82 @@ elif pagina == "💰 Finanzas":
 
         st.divider()
         st.subheader("Registrar devolución recibida")
-        if cuentas_cobrar:
-            mapa_c={f'{x["codigo"]} · {x["deudor"]} · saldo Bs {float(deudores.calcular_saldo(x, mov_cxc_por_id.get(x["id"], []))):.2f}':x for x in cuentas_cobrar if float(deudores.calcular_saldo(x, mov_cxc_por_id.get(x["id"], []))) > 0}
+        cuentas_con_saldo = []
+        cuentas_a_revisar = []
+        for cuenta_c in cuentas_cobrar:
+            movimientos_c = mov_cxc_por_id.get(cuenta_c.get("id"), [])
+            saldo_actual_c = float(deudores.calcular_saldo(cuenta_c, movimientos_c))
+            if saldo_actual_c > 0:
+                cuentas_con_saldo.append((cuenta_c, saldo_actual_c))
+            elif saldo_actual_c == 0 and float(cuenta_c.get("monto_original") or 0) > 0 and not movimientos_c:
+                # Cuenta creada sin movimientos y con saldo inicial cero: permite corregirla
+                # desde la aplicación, sin SQL y sin tocar cuentas con historial.
+                cuentas_a_revisar.append(cuenta_c)
+
+        if cuentas_a_revisar:
+            with st.expander("⚠️ Revisar cuenta registrada sin saldo inicial", expanded=True):
+                st.warning(
+                    "Hay cuentas sin movimientos cuyo saldo inicial es Bs 0,00. "
+                    "Si el monto original sigue totalmente pendiente, puedes corregir el saldo desde aquí."
+                )
+                mapa_reparacion = {
+                    f'{c.get("codigo", "—")} · {c.get("deudor", "—")} · monto original Bs {float(c.get("monto_original") or 0):,.2f}': c
+                    for c in cuentas_a_revisar
+                }
+                cuenta_reparar_label = st.selectbox(
+                    "Cuenta que necesita corrección", list(mapa_reparacion), key="v13_cxc_reparar_seleccion"
+                )
+                cuenta_reparar = mapa_reparacion[cuenta_reparar_label]
+                confirmar_reparacion = st.checkbox(
+                    f"Confirmo que {cuenta_reparar.get('codigo')} no tuvo cobros anteriores y que el monto completo sigue pendiente.",
+                    key="v13_cxc_confirmar_reparacion"
+                )
+                if st.button("Corregir saldo inicial", key="v13_cxc_boton_reparar", disabled=not confirmar_reparacion):
+                    try:
+                        # Segunda comprobación inmediatamente antes de actualizar.
+                        movimientos_verificados = db.listar_movimientos_cuentas_cobrar()
+                        tiene_movimientos = any(m.get("cuenta_id") == cuenta_reparar.get("id") for m in movimientos_verificados)
+                        if tiene_movimientos:
+                            st.error("La cuenta ya tiene movimientos. No se modificó para proteger su historial.")
+                        else:
+                            monto_reparacion = float(cuenta_reparar.get("monto_original") or 0)
+                            db.actualizar_saldo_apertura_cuenta_por_cobrar(cuenta_reparar["id"], monto_reparacion)
+                            st.success(f"Saldo inicial corregido a {fmt_money(monto_reparacion)}. Ahora puedes registrar el cobro.")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"No se pudo corregir el saldo inicial: {e}")
+
+        if cuentas_con_saldo:
+            mapa_c={
+                f'{x.get("codigo", "—")} · {x.get("deudor", "—")} · saldo Bs {saldo:,.2f}': (x, saldo)
+                for x, saldo in cuentas_con_saldo
+            }
             with st.form("v12_cobro_cxc", clear_on_submit=True):
-                elegido_c=st.selectbox("Cuenta por cobrar",list(mapa_c))
+                elegido_c=st.selectbox("Cuenta por cobrar",list(mapa_c), key="v13_cxc_selector_cobro")
+                x, saldo_disponible_c = mapa_c[elegido_c]
+                st.caption(f"Saldo pendiente disponible: {fmt_money(saldo_disponible_c)}")
                 fecha_c=st.date_input("Fecha del cobro",key="v12_fecha_cobro")
-                monto_cobro=st.number_input("Monto cobrado (Bs)",min_value=0.01,step=10.0,key="v12_monto_cobro")
+                monto_cobro=st.number_input(
+                    "Monto cobrado (Bs)", min_value=0.01, max_value=float(saldo_disponible_c),
+                    step=10.0, format="%.2f", key="v12_monto_cobro"
+                )
                 metodo_cobro=st.selectbox("Medio de cobro",["Efectivo","QR","Transferencia Bancaria","Otro"],key="v12_metodo_cobro")
                 referencia_cobro=st.text_input("N.º de comprobante / referencia",key="v12_ref_cobro")
                 obs_cobro=st.text_input("Observación",key="v12_obs_cobro")
                 ok_c=st.form_submit_button("Registrar cobro")
                 if ok_c:
                     try:
-                        x=mapa_c[elegido_c]
                         saldo_actual=deudores.calcular_saldo(x,mov_cxc_por_id.get(x["id"],[]))
                         if monto_cobro > float(saldo_actual): raise ValueError("El cobro supera el saldo por cobrar.")
                         db.crear_movimiento_cuenta_cobrar({"cuenta_id":x["id"],"fecha":str(fecha_c),
                             "tipo":"cobro","monto":monto_cobro,"metodo":metodo_cobro,
-                            "referencia":referencia_cobro or None,"observacion":obs_cobro or None,
+                            "referencia":referencia_cobro.strip() or None,"observacion":obs_cobro.strip() or None,
                             "registrado_por":usuario_actual.get("username")})
                         st.success("Cobro registrado en el auxiliar de cuentas por cobrar. Aún no genera movimiento automático en caja/bancos.")
                         st.rerun()
                     except Exception as e: st.error(f"No se pudo registrar el cobro: {e}")
-        else: st.info("Registra primero una cuenta por cobrar.")
+        elif not cuentas_a_revisar:
+            st.info("No hay cuentas por cobrar con saldo pendiente. Verifica que exista una cuenta registrada con saldo inicial mayor a cero.")
         st.subheader("Detalle de cuentas por cobrar")
         if resumen_cxc["cuentas"]:
             st.dataframe(pd.DataFrame(resumen_cxc["cuentas"]),use_container_width=True,hide_index=True)
