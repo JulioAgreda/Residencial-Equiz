@@ -1,0 +1,34 @@
+ACTUALIZACION EQUISE - ACCESO Y EDICION DEL MODULO FINANZAS
+
+Archivos incluidos:
+- app.py
+- db.py
+
+INSTALACION
+1. Realice una copia de respaldo de los archivos app.py y db.py de su proyecto.
+2. Reemplace ambos archivos por los incluidos en este paquete.
+3. Reinicie la aplicacion Streamlit.
+4. Ingrese con un usuario de rol Cobrador y abra Finanzas.
+5. Compruebe las secciones Prestamos, Egresos e Ingresos.
+
+PERMISOS DEL COBRADOR
+- Puede consultar resumen, cuentas, obligaciones e historiales financieros.
+- Puede registrar prestamos recibidos y realizados, devoluciones de capital y cobros.
+- Puede editar datos de obligaciones y cuentas por cobrar.
+- Puede editar movimientos de obligaciones y cuentas por cobrar, validando que el saldo no quede negativo.
+- Puede registrar y editar egresos (compras y gastos/pagos).
+- Puede registrar y editar ingresos (ventas).
+- No se muestran acciones para eliminar registros al Cobrador.
+- La correccion especial de saldo inicial de una cuenta sin movimientos permanece exclusiva del Administrador.
+
+PERMISOS DEL ADMINISTRADOR
+- Conserva el acceso completo que ya tenia.
+- Conserva la accion de eliminar ingresos (ventas), que sigue oculta para el Cobrador.
+
+IMPORTANTE
+- No se incluye ni se requiere migracion SQL.
+- No se modifican registros existentes durante la instalacion.
+- La edicion de cabeceras con movimientos asociados protege los montos originales y saldos iniciales para no alterar el historial.
+- La edicion de movimientos valida el saldo resultante antes de guardar.
+- Esta actualizacion aplica restricciones en la interfaz de la aplicacion Streamlit. No sustituye politicas RLS de Supabase.
+- La trazabilidad existente de "registrado_por"/"encargado" se conserva; no se agrega una columna de auditoria nueva porque el esquema compartido no acredita que exista.
