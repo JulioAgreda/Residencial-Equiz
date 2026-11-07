@@ -462,6 +462,34 @@ def total_pagado(periodo):
     return sum(float(p["monto"]) for p in (periodo.get("pagos") or []))
 
 
+def mostrar_botones_recibo_garantia(garantia, apartamento, key_sufijo):
+    """Descargas PDF y PNG del comprobante de recepción de garantía."""
+    try:
+        datos = recibo.construir_datos_recibo_garantia(
+            garantia, apartamento,
+            recibido_por=usuario_actual.get("nombre") or usuario_actual.get("username"),
+        )
+        c_pdf, c_png = st.columns(2)
+        with c_pdf:
+            st.download_button(
+                "📄 Descargar recibo de garantía (PDF)",
+                data=recibo.generar_recibo_pdf(datos),
+                file_name=f'{datos["numero_recibo"]}.pdf',
+                mime="application/pdf", use_container_width=True,
+                key=f"recibo_garantia_pdf_{key_sufijo}",
+            )
+        with c_png:
+            st.download_button(
+                "🖼️ Descargar recibo de garantía (PNG)",
+                data=recibo.generar_recibo_png(datos),
+                file_name=f'{datos["numero_recibo"]}.png',
+                mime="image/png", use_container_width=True,
+                key=f"recibo_garantia_png_{key_sufijo}",
+            )
+    except Exception as exc:
+        st.caption(f"⚠️ No se pudo preparar el recibo de garantía: {exc}")
+
+
 def mostrar_botones_recibo(pago, periodo, apartamento, total_pagado_periodo, key_sufijo, servicio=None):
     """Muestra dos botones de descarga (PDF y PNG) para el recibo de un abono de alquiler
     (servicio=None) o de un servicio ('electricidad' / 'agua'). Se usa tanto en la vista normal
@@ -1779,6 +1807,7 @@ elif pagina == "🏠 Apartamentos":
 
     with tab_garantias:
         st.subheader("🛡️ Control de garantías de alquiler")
+        apartamentos_por_id_g = {str(a.get("id")): a for a in cargar_apartamentos()}
         st.caption("La garantía es un depósito reembolsable: no es ingreso por alquiler. Cada garantía queda vinculada al inquilino y a su periodo de ocupación.")
         ocupados_g = [a for a in cargar_apartamentos()
                       if a.get("estado") == "Ocupado" and a.get("tipo_contrato") == "Alquiler"
@@ -1861,6 +1890,10 @@ elif pagina == "🏠 Apartamentos":
                     total_devuelto = sum(float(d.get("monto") or 0) for d in devoluciones_g)
                     saldo = max(0.0, float(g.get("monto_recibido") or 0) - total_danos - total_devuelto)
                     with st.expander(f'{g.get("inquilino_nombre") or "Inquilino"} — {g.get("estado")} — Bs {saldo:,.2f} por devolver'):
+                        apt_g_recibo = apartamentos_por_id_g.get(str(g.get("apartamento_id")), {
+                            "codigo": str(g.get("apartamento_id") or "—"), "piso": ""
+                        })
+                        mostrar_botones_recibo_garantia(g, apt_g_recibo, key_sufijo=f'g_{g["id"]}')
                         x1, x2, x3 = st.columns(3)
                         x1.metric("Garantía recibida", f'Bs {float(g.get("monto_recibido") or 0):,.2f}')
                         x2.metric("Descuentos aprobados", f'Bs {total_danos:,.2f}')

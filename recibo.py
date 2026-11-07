@@ -175,6 +175,37 @@ def _fuente_pdf_unicode():
         return "Helvetica"
 
 
+def construir_datos_recibo_garantia(garantia, apartamento, recibido_por):
+    """Prepara un recibo independiente por la recepción de una garantía reembolsable."""
+    garantia = garantia or {}
+    monto = round(float(garantia.get("monto_recibido") or 0), 2)
+    fecha = garantia.get("fecha_recepcion") or ""
+    return {
+        "numero_recibo": f'REC-G-{int(garantia["id"]):06d}',
+        "fecha_emision": datetime.now(_ZONA_BOLIVIA).strftime("%d/%m/%Y %H:%M"),
+        "titulo": "Recibo de Recepción de Garantía de Alquiler",
+        "apartamento_texto": formatear_apartamento(apartamento),
+        "inquilino_nombre": garantia.get("inquilino_nombre") or "—",
+        "periodo": "Depósito de garantía de alquiler",
+        "fecha_pago": fecha,
+        "metodo_pago": garantia.get("medio_recepcion") or "—",
+        "observacion": garantia.get("observacion") or "",
+        "detalle": [
+            ("Concepto:", "Depósito de garantía reembolsable"),
+            ("Estado de garantía:", garantia.get("estado") or "Vigente"),
+            ("Comprobante de respaldo:", garantia.get("comprobante_recepcion") or "—"),
+        ],
+        "monto_esperado": monto,
+        "total_pagado_periodo": monto,
+        "saldo_pendiente": 0.0,
+        "monto_pagado": monto,
+        "label_monto_esperado": "Monto de garantía acordado:",
+        "label_total_pagado": "Monto recibido:",
+        "label_monto_abono": "MONTO DE GARANTÍA RECIBIDO",
+        "recibido_por": recibido_por or garantia.get("registrado_por") or "—",
+    }
+
+
 def construir_datos_recibo_servicio(servicio, pago, periodo, apartamento, total_pagado_periodo, recibido_por):
     """Como construir_datos_recibo, para un abono de 'electricidad' o 'agua'. El número lleva prefijo propio
     (REC-L / REC-A) porque cada servicio tiene su propia tabla de abonos y los ids se repetirían entre ellas."""
@@ -252,8 +283,8 @@ def generar_recibo_pdf(datos: dict) -> bytes:
         c.line(margen, y, ancho - margen, y)
         y -= 6 * mm
 
-    fila("Monto esperado del mes:", _fmt_bs(datos["monto_esperado"]))
-    fila("Total pagado a la fecha:", _fmt_bs(datos["total_pagado_periodo"]))
+    fila(datos.get("label_monto_esperado", "Monto esperado del mes:"), _fmt_bs(datos["monto_esperado"]))
+    fila(datos.get("label_total_pagado", "Total pagado a la fecha:"), _fmt_bs(datos["total_pagado_periodo"]))
     saldo = datos["saldo_pendiente"]
     fila("Saldo pendiente:" if saldo > 0.009 else "Estado:",
          _fmt_bs(saldo) if saldo > 0.009 else "PAGADO COMPLETO", negrita_valor=True)
@@ -266,7 +297,7 @@ def generar_recibo_pdf(datos: dict) -> bytes:
     c.roundRect(margen, y, ancho - 2 * margen, caja_alto, 2 * mm, fill=1, stroke=0)
     c.setFillColor(colors.white)
     c.setFont("Helvetica-Bold", 10)
-    c.drawString(margen + 4 * mm, y + caja_alto / 2 - 1.5 * mm, "MONTO DE ESTE ABONO")
+    c.drawString(margen + 4 * mm, y + caja_alto / 2 - 1.5 * mm, datos.get("label_monto_abono", "MONTO DE ESTE ABONO"))
     c.setFont("Helvetica-Bold", 15)
     c.drawRightString(ancho - margen - 4 * mm, y + caja_alto / 2 - 2.2 * mm, _fmt_bs(datos["monto_pagado"]))
     c.setFillColor(colors.black)
@@ -361,8 +392,8 @@ def generar_recibo_png(datos: dict) -> bytes:
         draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
         y += 20
 
-    y = fila("Monto esperado del mes:", _fmt_bs(datos["monto_esperado"]), y)
-    y = fila("Total pagado a la fecha:", _fmt_bs(datos["total_pagado_periodo"]), y)
+    y = fila(datos.get("label_monto_esperado", "Monto esperado del mes:"), _fmt_bs(datos["monto_esperado"]), y)
+    y = fila(datos.get("label_total_pagado", "Total pagado a la fecha:"), _fmt_bs(datos["total_pagado_periodo"]), y)
     saldo = datos["saldo_pendiente"]
     y = fila("Saldo pendiente:" if saldo > 0.009 else "Estado:",
              _fmt_bs(saldo) if saldo > 0.009 else "PAGADO COMPLETO", y, negrita_valor=True)
@@ -371,7 +402,7 @@ def generar_recibo_png(datos: dict) -> bytes:
     # ---------- Caja resaltada con el monto de este abono ----------
     caja_alto = 64
     draw.rounded_rectangle([(margen, y), (ancho - margen, y + caja_alto)], radius=10, fill=_COLOR_ACENTO)
-    draw.text((margen + 18, y + caja_alto / 2 - 10), "MONTO DE ESTE ABONO", font=f_caja_label, fill="white")
+    draw.text((margen + 18, y + caja_alto / 2 - 10), datos.get("label_monto_abono", "MONTO DE ESTE ABONO"), font=f_caja_label, fill="white")
     texto_monto = _fmt_bs(datos["monto_pagado"])
     bbox = draw.textbbox((0, 0), texto_monto, font=f_caja_monto)
     draw.text((ancho - margen - 18 - (bbox[2] - bbox[0]), y + caja_alto / 2 - 16), texto_monto,
