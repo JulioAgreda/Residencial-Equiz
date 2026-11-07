@@ -1158,6 +1158,37 @@ elif pagina == "💰 Finanzas" and not es_admin:
             column_config={"Monto cobrado": st.column_config.NumberColumn("Monto cobrado", format="Bs %.2f")}
         )
         st.caption(f"Registros históricos: {len(historial_cobrador)}. Esta vista es de solo lectura.")
+        st.markdown("**Generar recibo de un cobro registrado**")
+        cobros_cobrador = [m for m in movimientos_cobrador if m.get("tipo") == "cobro" and m.get("cuenta_id") in cuentas_por_id_cobrador]
+        if cobros_cobrador:
+            mapa_recibos_cobrador = {
+                f'{m.get("fecha", "—")} · {cuentas_por_id_cobrador[m.get("cuenta_id")].get("codigo", "—")} · Bs {float(m.get("monto") or 0):,.2f} · {cuentas_por_id_cobrador[m.get("cuenta_id")].get("deudor", "—")}': m
+                for m in cobros_cobrador
+            }
+            etiqueta_recibo_cobrador = st.selectbox(
+                "Selecciona el cobro", list(mapa_recibos_cobrador), key="cxc_recibo_cobrador_selector"
+            )
+            movimiento_recibo_cobrador = mapa_recibos_cobrador[etiqueta_recibo_cobrador]
+            cuenta_recibo_cobrador = cuentas_por_id_cobrador[movimiento_recibo_cobrador.get("cuenta_id")]
+            datos_recibo_cobrador = recibo.construir_datos_recibo_cuenta_cobrar(
+                cuenta_recibo_cobrador, movimiento_recibo_cobrador,
+                movimientos_por_cuenta_cobrador.get(cuenta_recibo_cobrador.get("id"), [])
+            )
+            col_pdf_cobrador, col_png_cobrador = st.columns(2)
+            col_pdf_cobrador.download_button(
+                "📄 Descargar recibo PDF",
+                data=recibo.generar_recibo_pdf(datos_recibo_cobrador),
+                file_name=f'{datos_recibo_cobrador["numero_recibo"]}.pdf',
+                mime="application/pdf", key="cxc_recibo_cobrador_pdf"
+            )
+            col_png_cobrador.download_button(
+                "🖼️ Descargar recibo PNG",
+                data=recibo.generar_recibo_png(datos_recibo_cobrador),
+                file_name=f'{datos_recibo_cobrador["numero_recibo"]}.png',
+                mime="image/png", key="cxc_recibo_cobrador_png"
+            )
+        else:
+            st.info("No hay cobros registrados para generar recibos.")
     else:
         st.info("Todavía no hay cobros registrados.")
 
@@ -1408,6 +1439,52 @@ elif pagina == "💰 Finanzas":
         st.subheader("Detalle de cuentas por cobrar")
         if resumen_cxc["cuentas"]:
             st.dataframe(pd.DataFrame(resumen_cxc["cuentas"]),use_container_width=True,hide_index=True)
+
+        st.divider()
+        st.subheader("Historial de cobros y emisión de recibos")
+        cobros_admin = [m for m in movimientos_cxc if m.get("tipo") == "cobro" and m.get("cuenta_id") in {c.get("id") for c in cuentas_cobrar}]
+        cuentas_por_id_admin = {c.get("id"): c for c in cuentas_cobrar}
+        if cobros_admin:
+            historial_admin = []
+            for mov_admin in cobros_admin:
+                cuenta_admin = cuentas_por_id_admin.get(mov_admin.get("cuenta_id"), {})
+                historial_admin.append({
+                    "Fecha": mov_admin.get("fecha") or "—",
+                    "Código": cuenta_admin.get("codigo") or "—",
+                    "Deudor": cuenta_admin.get("deudor") or "—",
+                    "Monto cobrado": float(mov_admin.get("monto") or 0),
+                    "Medio": mov_admin.get("metodo") or "—",
+                    "Registrado por": mov_admin.get("registrado_por") or "—",
+                })
+            st.dataframe(pd.DataFrame(historial_admin), use_container_width=True, hide_index=True)
+            mapa_recibos_admin = {
+                f'{m.get("fecha", "—")} · {cuentas_por_id_admin[m.get("cuenta_id")].get("codigo", "—")} · Bs {float(m.get("monto") or 0):,.2f} · {cuentas_por_id_admin[m.get("cuenta_id")].get("deudor", "—")}': m
+                for m in cobros_admin
+            }
+            etiqueta_recibo_admin = st.selectbox(
+                "Selecciona el cobro para generar su recibo", list(mapa_recibos_admin), key="cxc_recibo_admin_selector"
+            )
+            movimiento_recibo_admin = mapa_recibos_admin[etiqueta_recibo_admin]
+            cuenta_recibo_admin = cuentas_por_id_admin[movimiento_recibo_admin.get("cuenta_id")]
+            datos_recibo_admin = recibo.construir_datos_recibo_cuenta_cobrar(
+                cuenta_recibo_admin, movimiento_recibo_admin,
+                mov_cxc_por_id.get(cuenta_recibo_admin.get("id"), [])
+            )
+            col_pdf_admin, col_png_admin = st.columns(2)
+            col_pdf_admin.download_button(
+                "📄 Descargar recibo PDF",
+                data=recibo.generar_recibo_pdf(datos_recibo_admin),
+                file_name=f'{datos_recibo_admin["numero_recibo"]}.pdf',
+                mime="application/pdf", key="cxc_recibo_admin_pdf"
+            )
+            col_png_admin.download_button(
+                "🖼️ Descargar recibo PNG",
+                data=recibo.generar_recibo_png(datos_recibo_admin),
+                file_name=f'{datos_recibo_admin["numero_recibo"]}.png',
+                mime="image/png", key="cxc_recibo_admin_png"
+            )
+        else:
+            st.info("Todavía no hay cobros registrados para estas cuentas.")
 
 
 # ==================================================================

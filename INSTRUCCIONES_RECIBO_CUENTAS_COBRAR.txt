@@ -1,0 +1,23 @@
+EQUISE - RECIBOS DE COBROS DE CUENTAS POR COBRAR
+
+CONTENIDO
+- app.py: incorpora la selección de cobros históricos y descarga de recibos para Administrador y Cobrador.
+- recibo.py: incorpora el constructor del recibo de cobro de cuenta por cobrar y adapta el diseño institucional existente.
+- db.py: conserva la función de corrección controlada del saldo inicial incorporada en la actualización anterior.
+- assets/logo_equise_horizontal.png: logo horizontal utilizado por los recibos.
+
+INSTALACIÓN
+1. Realiza una copia de seguridad de app.py, db.py y recibo.py actuales.
+2. Reemplaza esos tres archivos por los incluidos en este ZIP.
+3. Copia el logo en la carpeta assets/ (si ya existe el mismo archivo, puedes conservarlo).
+4. Reinicia la aplicación Streamlit.
+
+USO
+- En Finanzas, registra el cobro/devolución recibida como habitualmente.
+- Después de guardar, el movimiento aparecerá en el historial.
+- Selecciona el cobro y descarga su recibo en PDF o PNG.
+- Administrador y Cobrador podrán generar el recibo desde sus respectivos historiales.
+
+El recibo muestra código de cuenta, deudor, concepto, fecha, medio de pago, usuario que registró el movimiento, importe de este abono, total cobrado a la fecha y saldo pendiente después del abono.
+
+No requiere migraciones SQL ni modifica registros de Supabase. La descarga del recibo se genera a partir de los movimientos existentes.

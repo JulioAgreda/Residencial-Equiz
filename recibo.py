@@ -211,6 +211,70 @@ def construir_datos_recibo_garantia(garantia, apartamento, recibido_por=None):
     }
 
 
+def construir_datos_recibo_cuenta_cobrar(cuenta, movimiento, movimientos_cuenta=None):
+    """Prepara el comprobante de un cobro/devolución recibida de una cuenta por cobrar."""
+    cuenta = cuenta or {}
+    movimiento = movimiento or {}
+    movimientos = list(movimientos_cuenta or [])
+    movimiento_id = movimiento.get("id")
+
+    # Orden cronológico estable para calcular el saldo que quedó después de este cobro.
+    def clave(m):
+        return (str(m.get("fecha") or ""), int(m.get("id") or 0))
+
+    movimientos_ordenados = sorted(movimientos, key=clave)
+    saldo = float(cuenta.get("saldo_apertura", cuenta.get("monto_original", 0)) or 0)
+    total_cobrado = 0.0
+    saldo_despues = saldo
+    encontrado = False
+    for mov in movimientos_ordenados:
+        monto_mov = float(mov.get("monto") or 0)
+        tipo = mov.get("tipo")
+        if tipo in ("nuevo_desembolso", "cargo_adicional", "ajuste_incremento"):
+            saldo += monto_mov
+        elif tipo in ("cobro", "ajuste_reduccion"):
+            saldo -= monto_mov
+            if tipo == "cobro":
+                total_cobrado += monto_mov
+        if mov is movimiento or (movimiento_id is not None and str(mov.get("id")) == str(movimiento_id)):
+            saldo_despues = max(0.0, saldo)
+            encontrado = True
+            break
+    if not encontrado:
+        # Respaldo: el registro debe estar incluido en el historial consultado.
+        saldo_despues = max(0.0, saldo)
+        total_cobrado = sum(float(m.get("monto") or 0) for m in movimientos if m.get("tipo") == "cobro")
+
+    monto_original = float(cuenta.get("monto_original") or 0)
+    monto_cobrado = float(movimiento.get("monto") or 0)
+    codigo = str(cuenta.get("codigo") or "SIN-CODIGO")
+    return {
+        "numero_recibo": f'REC-CXC-{int(movimiento_id):06d}' if str(movimiento_id or "").isdigit() else f'REC-CXC-{codigo}',
+        "fecha_emision": datetime.now(_ZONA_BOLIVIA).strftime("%d/%m/%Y %H:%M"),
+        "titulo": "Recibo de Pago de Cuenta por Cobrar",
+        "campos_identificacion": [
+            ("CUENTA POR COBRAR", codigo),
+            ("DEUDOR", cuenta.get("deudor") or "—"),
+            ("CONCEPTO", cuenta.get("descripcion") or cuenta.get("categoria") or "Cobro de deuda registrada"),
+        ],
+        "fecha_pago": movimiento.get("fecha") or "—",
+        "metodo_pago": movimiento.get("metodo") or "—",
+        "recibido_por": movimiento.get("registrado_por") or "No disponible",
+        "detalle": [
+            ("Categoría:", cuenta.get("categoria") or "—"),
+            ("Referencia:", movimiento.get("referencia") or "—"),
+        ],
+        "monto_esperado": monto_original,
+        "total_pagado_periodo": total_cobrado,
+        "saldo_pendiente": saldo_despues,
+        "monto_pagado": monto_cobrado,
+        "label_monto_esperado": "Monto original de la deuda:",
+        "label_total_pagado": "Total cobrado a la fecha:",
+        "label_monto_abono": "MONTO RECIBIDO DE ESTE ABONO",
+        "observacion": movimiento.get("observacion") or "",
+    }
+
+
 def construir_datos_recibo_servicio(servicio, pago, periodo, apartamento, total_pagado_periodo, recibido_por):
     """Como construir_datos_recibo, para un abono de 'electricidad' o 'agua'. El número lleva prefijo propio
     (REC-L / REC-A) porque cada servicio tiene su propia tabla de abonos y los ids se repetirían entre ellas."""
@@ -294,6 +358,8 @@ def generar_recibo_png(datos: dict) -> bytes:
         titulo = "ELECTRICIDAD"
     elif "AGUA" in titulo_raw:
         titulo = "AGUA"
+    elif "CUENTA POR COBRAR" in titulo_raw or "DEUDA" in titulo_raw:
+        titulo = "COBRO DE DEUDA"
     else:
         titulo = "ALQUILER"
     d.text((850, 67), "RECIBO DE PAGO", font=f_kicker, fill="white", anchor="mm")
@@ -310,7 +376,7 @@ def generar_recibo_png(datos: dict) -> bytes:
     panel_top = y
     panel_h = 164
     d.rounded_rectangle((margin, panel_top, W-margin, panel_top+panel_h), radius=18, fill=pale)
-    campos = [
+    campos = datos.get("campos_identificacion") or [
         ("APARTAMENTO", datos.get("apartamento_texto", "—")),
         ("INQUILINO", datos.get("inquilino_nombre", "—")),
         ("PERIODO / CONCEPTO", datos.get("periodo", "—")),
