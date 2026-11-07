@@ -247,9 +247,22 @@ def construir_datos_recibo_cuenta_cobrar(cuenta, movimiento, movimientos_cuenta=
 
     monto_original = float(cuenta.get("monto_original") or 0)
     monto_cobrado = float(movimiento.get("monto") or 0)
-    codigo = str(cuenta.get("codigo") or "SIN-CODIGO")
+    # Recupera el código de la cuenta usando los nombres de campo habituales.
+    # Si la fila no trae código, identifica la cuenta con su ID interno en lugar
+    # de imprimir el texto genérico "SIN-CODIGO".
+    codigo = (
+        cuenta.get("codigo")
+        or cuenta.get("codigo_unico")
+        or cuenta.get("codigo_cuenta")
+        or cuenta.get("numero_cuenta")
+    )
+    if codigo:
+        codigo = str(codigo).strip()
+    else:
+        cuenta_id = cuenta.get("id")
+        codigo = f"CXC-{cuenta_id}" if cuenta_id is not None else "Código no registrado"
     return {
-        "numero_recibo": f'REC-CXC-{int(movimiento_id):06d}' if str(movimiento_id or "").isdigit() else f'REC-CXC-{codigo}',
+        "numero_recibo": f'REC-CXC-{int(movimiento_id):06d}' if str(movimiento_id or "").isdigit() else f'REC-CXC-{codigo}', 
         "fecha_emision": datetime.now(_ZONA_BOLIVIA).strftime("%d/%m/%Y %H:%M"),
         "titulo": "Recibo de Pago de Cuenta por Cobrar",
         "campos_identificacion": [
@@ -261,7 +274,6 @@ def construir_datos_recibo_cuenta_cobrar(cuenta, movimiento, movimientos_cuenta=
         "metodo_pago": movimiento.get("metodo") or "—",
         "recibido_por": movimiento.get("registrado_por") or "No disponible",
         "detalle": [
-            ("Categoría:", cuenta.get("categoria") or "—"),
             ("Referencia:", movimiento.get("referencia") or "—"),
         ],
         "monto_esperado": monto_original,
