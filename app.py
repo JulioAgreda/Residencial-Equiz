@@ -36,7 +36,7 @@ PISOS = ["Planta Baja", "Primer Piso", "Segundo Piso", "Tercer Piso"]
 ROLES = ["Administrador", "Cobrador"]
 
 CATEGORIAS_COMPRA = ["Artículos de limpieza", "Repuestos", "Herramientas", "Dispositivos", "Otros artículos"]
-CATEGORIAS_GASTO_OPERATIVO = ["Electricidad", "Agua", "Internet", "Honorarios", "Impuestos", "Otros servicios y gastos"]
+CATEGORIAS_GASTO_OPERATIVO = ["Electricidad", "Agua", "Internet", "Honorarios", "Sueldos", "Viáticos", "Impuestos", "Otros servicios y gastos"]
 # Compatibilidad temporal con ramas históricas de la aplicación que se conservan para reversión.
 CATEGORIAS_GASTO = CATEGORIAS_COMPRA
 CATEGORIAS_PAGO = CATEGORIAS_GASTO_OPERATIVO
