@@ -4076,8 +4076,9 @@ elif pagina == "🏦 Conciliación bancaria":
 
                     candidatos_manual_cb = []
                     for mov_candidato_cb in movimientos_sistema_libres_cb:
-                        if mov_candidato_cb.get("tipo") != direccion_manual_cb:
-                            continue
+                        # Una misma operación bancaria puede respaldarse con varios
+                        # registros del sistema, incluso de distinta naturaleza:
+                        # ingresos y egresos (p. ej. anticipo, rendición y devolución).
                         diferencia_dias_cb = abs((linea_manual_cb["fecha"] - mov_candidato_cb["fecha"]).days)
                         if diferencia_dias_cb > max(45, dias_cb):
                             continue
@@ -4161,11 +4162,17 @@ elif pagina == "🏦 Conciliación bancaria":
                             )
                             partes_nuevas_manual_cb.append({"sistema_idx": int(idx_sistema_sel_cb), "monto": round(float(monto_parte_cb), 2)})
                         suma_asignada_cb = round(sum(x["monto"] for x in partes_nuevas_manual_cb), 2)
+                        tipos_seleccionados_cb = {
+                            next(m["tipo"] for m in candidatos_manual_cb if int(m["idx"]) == int(x["sistema_idx"]))
+                            for x in partes_nuevas_manual_cb
+                        }
+                        if len(tipos_seleccionados_cb) > 1:
+                            st.info("Estás combinando ingresos y egresos del sistema en una misma conciliación. Verifica que correspondan a la misma operación, anticipo o rendición.")
                         st.write(f"**Total asignado:** Bs {suma_asignada_cb:,.2f} / Bs {monto_banco_manual_cb:,.2f}")
                         if st.button("Confirmar esta conciliación manual", key=f"cb_confirmar_manual_{clave_manual_cb}_{idx_banco_manual_cb}",
                                       disabled=not partes_nuevas_manual_cb, use_container_width=True):
                             if abs(suma_asignada_cb - monto_banco_manual_cb) > 0.004:
-                                st.error("La suma asignada debe coincidir exactamente con el importe del movimiento bancario.")
+                                st.error("La suma de los importes seleccionados (ingresos y egresos) debe coincidir exactamente con el importe del movimiento bancario.")
                             else:
                                 # Revalidar capacidad disponible para evitar asignar dos veces el mismo registro.
                                 capacidad_ok_cb = True

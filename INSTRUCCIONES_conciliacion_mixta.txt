@@ -1,0 +1,31 @@
+EQUISE — Conciliación manual mixta (ingresos + egresos)
+
+CAMBIO
+El selector manual permite seleccionar ingresos y egresos del sistema dentro de una misma
+conciliación bancaria. Se conserva el filtro temporal (45 días o el margen configurado,
+el que sea mayor). El selector de clasificación del movimiento bancario sigue disponible.
+
+VALIDACIÓN
+La suma de los importes asignados se compara con el valor absoluto del movimiento bancario.
+Se muestra una advertencia cuando se combinan ingresos y egresos para recordar que deben
+pertenecer a la misma operación, anticipo o rendición.
+
+EJEMPLO
+Para una salida bancaria de Bs 450, si los registros que documentan esa operación suman
+Bs 450 (por ejemplo, gastos rendidos y devolución del saldo documentada en el sistema),
+pueden seleccionarse aunque algunos estén clasificados como ingreso y otros como egreso.
+
+PRECAUCIÓN CONTABLE
+Esta versión suma los importes absolutos asignados; no realiza neteo contable de ingresos
+menos egresos. Se usa para relacionar registros que respaldan una operación o rendición.
+Antes de confirmar, verifica que la suma bruta coincida exactamente con el importe bancario
+y que el registro de devolución corresponda realmente a esa rendición, no a un ingreso
+independiente que deba conciliarse con otro movimiento bancario.
+
+INSTALACIÓN
+Reemplaza únicamente app.py en la raíz del repositorio residencial-equiz por el incluido.
+No reemplaces db.py ni ejecutes SQL. Confirma el commit y espera el despliegue.
+
+VALIDACIÓN
+app.py pasó análisis sintáctico y compilación en memoria. No se ha probado contra el
+Streamlit desplegado ni Supabase real.
