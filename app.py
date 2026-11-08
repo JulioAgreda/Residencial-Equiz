@@ -386,6 +386,36 @@ def movimientos_financieros_para_conciliacion(desde, hasta):
         except (TypeError, ValueError):
             return None
 
+    # El desembolso original del préstamo también debe compararse con el banco.
+    # Se lee de la obligación existente; no se crea un ingreso nuevo ni se altera Finanzas.
+    # Se incluye aunque la obligación esté cancelada, porque el saldo cero normalmente
+    # significa que el capital ya fue devuelto, no que el desembolso original no existió.
+    for obligacion in obligaciones:
+        f_origen = fecha_en_rango(obligacion.get("fecha_origen"))
+        monto_origen = round(float(obligacion.get("monto_original") or 0), 2)
+        if not f_origen or monto_origen <= 0:
+            continue
+        salida.append({
+            "id": obligacion.get("id") or 0,
+            "fecha": f_origen,
+            "tipo": "Ingreso",
+            "origen": "Finanzas - préstamo recibido",
+            "categoria": obligacion.get("categoria") or "Préstamo recibido",
+            "detalle": " ".join(x for x in (
+                obligacion.get("codigo") or "",
+                obligacion.get("descripcion") or "Desembolso de préstamo",
+                obligacion.get("documento_referencia") or "",
+                obligacion.get("observaciones") or ""
+            ) if x),
+            "persona": obligacion.get("acreedor") or "",
+            "comprobante": obligacion.get("documento_referencia") or "",
+            "metodo": "Sin método",
+            "metodo_original": "Sin método",
+            "estado": obligacion.get("estado") or "Registrado",
+            "monto": monto_origen,
+            "encargado": obligacion.get("creado_por") or "",
+        })
+
     for m in movs_obligaciones:
         if m.get("tipo") != "pago_capital":
             continue
@@ -4054,14 +4084,46 @@ elif pagina == "🏦 Conciliación bancaria":
                             k_s_cb = str(parte_cb["sistema_idx"])
                             usados_sistema_manual_cb[k_s_cb] = usados_sistema_manual_cb.get(k_s_cb, 0.0) + float(parte_cb["monto"])
 
-                    opciones_candidatos_cb = [int(m["idx"]) for m in candidatos_manual_cb]
                     etiquetas_candidatos_cb = {int(m["idx"]): _etiqueta_mov_sistema_cb(m) for m in candidatos_manual_cb}
+                    # Buscador por nombre, apartamento, concepto, periodo, fecha o importe.
+                    clave_busqueda_cb = f"cb_buscar_sistema_{clave_manual_cb}_{idx_banco_manual_cb}"
+                    busqueda_sistema_cb = st.text_input(
+                        "Buscar registro por inquilino, acreedor, apartamento, concepto, mes o importe",
+                        key=clave_busqueda_cb,
+                        placeholder="Ej.: Dussan, mayo, apartamento SP, alquiler, 1100..."
+                    ).strip().casefold()
+
+                    def _texto_busqueda_mov_cb(m):
+                        campos = (
+                            m.get("fecha"), m.get("tipo"), m.get("monto"), m.get("origen"),
+                            m.get("persona"), m.get("apartamento"), m.get("categoria"),
+                            m.get("periodo"), m.get("detalle"), m.get("comprobante"),
+                            m.get("metodo"), m.get("metodo_original")
+                        )
+                        return " ".join(str(x or "") for x in campos).casefold()
+
+                    candidatos_filtrados_cb = [
+                        m for m in candidatos_manual_cb
+                        if not busqueda_sistema_cb or busqueda_sistema_cb in _texto_busqueda_mov_cb(m)
+                    ]
+                    ids_filtrados_cb = [int(m["idx"]) for m in candidatos_filtrados_cb]
+                    st.caption(
+                        f"Mostrando {len(candidatos_filtrados_cb)} de {len(candidatos_manual_cb)} registros disponibles. "
+                        "Escribe una palabra, nombre, mes, apartamento o importe para reducir la lista."
+                    )
+
+                    # Mantener visibles las selecciones anteriores aunque el usuario cambie el texto de búsqueda.
+                    key_multiselect_cb = f"cb_seleccion_manual_{clave_manual_cb}_{idx_banco_manual_cb}"
+                    seleccion_previa_cb = st.session_state.get(key_multiselect_cb, [])
+                    opciones_candidatos_cb = list(dict.fromkeys(ids_filtrados_cb + [
+                        int(v) for v in seleccion_previa_cb if int(v) in etiquetas_candidatos_cb
+                    ]))
                     seleccion_manual_cb = st.multiselect(
                         "Registros del sistema que corresponden a este movimiento",
                         options=opciones_candidatos_cb,
                         format_func=lambda v: etiquetas_candidatos_cb.get(v, str(v)),
-                        key=f"cb_seleccion_manual_{clave_manual_cb}_{idx_banco_manual_cb}",
-                        help="Puedes seleccionar uno o varios registros. Por ejemplo, un solo depósito puede cubrir alquiler, agua y electricidad."
+                        key=key_multiselect_cb,
+                        help="Puedes seleccionar uno o varios registros. El buscador anterior filtra por nombre, apartamento, concepto, periodo, fecha o importe."
                     )
                     if seleccion_manual_cb:
                         st.caption("Indica cuánto del importe de cada registro corresponde a esta transferencia.")

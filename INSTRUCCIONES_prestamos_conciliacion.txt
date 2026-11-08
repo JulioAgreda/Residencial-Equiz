@@ -1,0 +1,39 @@
+EQUISE — Integrar desembolsos de préstamos recibidos en conciliación
+
+CAUSA
+La conciliación ya leía los movimientos tipo pago_capital (devoluciones), pero no leía el
+desembolso original registrado en obligaciones_financieras. Por eso un préstamo recibido
+por transferencia no aparecía como ingreso seleccionable.
+
+CORRECCIÓN
+app.py ahora incorpora cada obligación con fecha_origen dentro del periodo y monto_original
+mayor que cero como un movimiento comparable:
+- Dirección: Ingreso.
+- Fecha: fecha_origen.
+- Importe: monto_original.
+- Contraparte: acreedor.
+- Referencias: código, descripción y documento de respaldo.
+
+Se incluye incluso si la obligación aparece Cancelada o tiene saldo pendiente cero: la
+cancelación refleja la devolución del préstamo y no elimina el desembolso que ocurrió.
+Los movimientos pago_capital continúan leyéndose por separado como egresos.
+
+SEGURIDAD CONTABLE
+Esta incorporación es solo una lectura auxiliar para conciliación. No crea ingresos en Caja,
+no altera la obligación, no crea devoluciones y no duplica asientos.
+El registro de origen proviene de obligaciones_financieras y usa monto_original, no saldo
+pendiente ni saldo_apertura.
+
+INSTALACIÓN
+1. Reemplaza únicamente app.py en la raíz del repositorio residencial-equiz por el app.py
+   incluido en el ZIP.
+2. No reemplaces db.py.
+3. Confirma el commit y espera el despliegue de Streamlit.
+4. Vuelve a cargar o ejecutar la conciliación del extracto de octubre.
+5. Busca el movimiento del 13/10/2026 por Bs 1.400, acreedor Dussan Danny.
+
+VALIDACIÓN Y ALCANCE
+app.py pasó validación sintáctica y compilación en memoria. No se probó contra la base de
+datos ni el despliegue real. No se requiere migración SQL para esta modificación.
+Antes de confirmar la conciliación, verifica que la fecha e importe de la obligación
+coincidan con el extracto. No vuelvas a registrar el préstamo ni su devolución.

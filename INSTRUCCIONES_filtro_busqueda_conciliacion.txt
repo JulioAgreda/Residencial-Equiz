@@ -1,0 +1,32 @@
+EQUISE — Filtro de búsqueda para conciliación manual
+
+QUÉ AGREGA
+En el selector de registros del sistema, antes del multiselect, aparece un buscador.
+Permite filtrar los candidatos por texto coincidente en:
+- Nombre de inquilino, acreedor o persona.
+- Apartamento.
+- Concepto u origen del movimiento.
+- Categoría y periodo/mes.
+- Fecha.
+- Importe.
+- Comprobante y método de pago.
+
+El contador muestra cuántos registros coinciden con la búsqueda y cuántos candidatos
+totales existen. Las selecciones ya realizadas se conservan al cambiar el texto de búsqueda.
+
+INSTALACIÓN
+1. Reemplaza únicamente app.py en la raíz del repositorio residencial-equiz por el app.py
+   incluido en este ZIP.
+2. No reemplaces db.py.
+3. Confirma el cambio en GitHub y espera el despliegue de Streamlit.
+4. Abre una conciliación manual y utiliza el campo «Buscar registro...».
+
+EJEMPLOS
+- Escribe «Dussan» para buscar el acreedor.
+- Escribe «mayo» para localizar un periodo.
+- Escribe «SP» para buscar un apartamento si ese código figura en el registro.
+- Escribe «1100» para localizar importes de Bs 1.100.
+
+VALIDACIÓN
+app.py pasó análisis sintáctico y compilación en memoria. No se ha probado en el despliegue
+real ni contra Supabase. No requiere migración SQL.
