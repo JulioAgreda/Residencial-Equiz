@@ -3898,7 +3898,7 @@ elif pagina == "🏦 Conciliación bancaria":
             mov_parte_cb = dict(mov_original_parte_cb)
             mov_parte_cb["monto"] = importe_parte_cb
             mov_parte_cb["monto_conciliado_manual"] = importe_parte_cb
-            sistemas_par_cb.append(mov_parte_cb)
+            sistemas_par_manual_cb.append(mov_parte_cb)
         pares_manuales_cb.append({
             "banco": [linea_asig_cb],
             "sistema": sistemas_par_cb,

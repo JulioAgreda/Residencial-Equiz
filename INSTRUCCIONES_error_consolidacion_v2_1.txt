@@ -1,0 +1,24 @@
+EQUISE — Corrección puntual del error al confirmar conciliación manual
+
+ERROR IDENTIFICADO
+NameError en app.py al consolidar:
+sistemas_par_cb.append(mov_parte_cb)
+
+CAUSA
+La lista se había declarado con el nombre sistemas_par_manual_cb, pero una línea intentaba
+utilizar otro nombre (sistemas_par_cb). Python generaba NameError al confirmar la asignación.
+
+CORRECCIÓN
+Se corrigió esa referencia para que utilice sistemas_par_manual_cb de forma consistente.
+
+INSTALACIÓN
+1. Reemplaza únicamente app.py en la raíz del repositorio residencial-equiz por el app.py
+   incluido en este paquete.
+2. No reemplaces db.py: no se modificó para esta corrección puntual.
+3. Confirma el cambio (commit) y espera a que Streamlit termine el despliegue.
+4. Vuelve a probar la misma asignación manual de Bs 3.100.
+
+IMPORTANTE
+La corrección elimina el NameError mostrado en la captura. El archivo pasó validación de
+sintaxis Python, pero no se ha probado contra el despliegue real ni contra Supabase.
+No ejecutes migraciones SQL por este error.
