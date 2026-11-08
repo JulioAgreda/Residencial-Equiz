@@ -1,0 +1,22 @@
+EQUISE — Confirmación expresa para cerrar conciliaciones con diferencia
+
+CAMBIO
+Cuando la suma asignada no coincide con el importe bancario:
+1. Se solicita una justificación obligatoria.
+2. Se muestra una casilla de confirmación expresa que indica el importe de la diferencia.
+3. El botón de confirmación permanece deshabilitado hasta que se escriba el motivo y se marque
+   la casilla de aceptación.
+4. La asignación se guarda como estado "con_diferencia", con importe, diferencia y motivo.
+
+Cuando la diferencia es cero, no se solicita esta aceptación adicional.
+
+INSTALACIÓN
+1. Extrae el ZIP.
+2. Reemplaza únicamente app.py en la raíz del repositorio residencial-equiz.
+3. No reemplaces db.py ni ejecutes SQL.
+4. Confirma el cambio y espera el despliegue de Streamlit.
+
+VALIDACIÓN
+app.py pasó análisis sintáctico y compilación en memoria. No se ha probado en el despliegue
+real ni contra Supabase. La persistencia de la conciliación fuera de la sesión requiere guardar
+el historial, según el flujo ya existente.

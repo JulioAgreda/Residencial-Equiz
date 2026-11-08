@@ -3935,7 +3935,11 @@ elif pagina == "🏦 Conciliación bancaria":
             "union": "Conciliación manual",
             "confianza": "Manual",
             "dias": max([abs((linea_asig_cb["fecha"] - x["fecha"]).days) for x in sistemas_par_manual_cb] or [0]),
-            "razones": ["Asignación confirmada manualmente por el usuario."]
+            "razones": ["Asignación confirmada manualmente por el usuario."],
+            "estado_conciliacion": asignacion_cb.get("estado_conciliacion", "exacta"),
+            "total_asignado": round(sum(float(a.get("monto") or 0) for a in asignacion_cb.get("asignaciones", [])), 2),
+            "diferencia": round(float(asignacion_cb.get("diferencia") or 0), 2),
+            "observacion_diferencia": asignacion_cb.get("observacion_diferencia", "")
         })
 
     # Retirar del listado pendiente los registros usados manualmente; si la asignación
@@ -4057,7 +4061,13 @@ elif pagina == "🏦 Conciliación bancaria":
                             f"pero estás indicando {direccion_manual_cb}. Verifica el concepto bancario antes de confirmar."
                         )
                     if asignacion_existente_cb:
-                        st.success("Asignación manual guardada para esta revisión.")
+                        if asignacion_existente_cb.get("estado_conciliacion") == "con_diferencia":
+                            st.warning(
+                                f"Conciliación cerrada CON DIFERENCIA: Bs {abs(float(asignacion_existente_cb.get('diferencia') or 0)):,.2f}. "
+                                f"Motivo: {asignacion_existente_cb.get('observacion_diferencia') or 'Sin observación registrada'}"
+                            )
+                        else:
+                            st.success("Conciliación manual exacta guardada para esta revisión.")
                         for a_cb in asignacion_existente_cb["asignaciones"]:
                             mov_a_cb = next((m for m in movimientos_sistema_libres_cb if int(m["idx"]) == int(a_cb["sistema_idx"])), None)
                             etiqueta_a_cb = _etiqueta_mov_sistema_cb(mov_a_cb) if mov_a_cb else f"Registro sistema #{a_cb['sistema_idx']}"
@@ -4168,11 +4178,39 @@ elif pagina == "🏦 Conciliación bancaria":
                         }
                         if len(tipos_seleccionados_cb) > 1:
                             st.info("Estás combinando ingresos y egresos del sistema en una misma conciliación. Verifica que correspondan a la misma operación, anticipo o rendición.")
-                        st.write(f"**Total asignado:** Bs {suma_asignada_cb:,.2f} / Bs {monto_banco_manual_cb:,.2f}")
-                        if st.button("Confirmar esta conciliación manual", key=f"cb_confirmar_manual_{clave_manual_cb}_{idx_banco_manual_cb}",
-                                      disabled=not partes_nuevas_manual_cb, use_container_width=True):
-                            if abs(suma_asignada_cb - monto_banco_manual_cb) > 0.004:
-                                st.error("La suma de los importes seleccionados (ingresos y egresos) debe coincidir exactamente con el importe del movimiento bancario.")
+                        diferencia_manual_cb = round(monto_banco_manual_cb - suma_asignada_cb, 2)
+                        st.write(f"**Total asignado:** Bs {suma_asignada_cb:,.2f} / **Banco:** Bs {monto_banco_manual_cb:,.2f}")
+                        if abs(diferencia_manual_cb) <= 0.004:
+                            st.success("Los importes coinciden. Puedes cerrar como conciliación exacta.")
+                            observacion_diferencia_cb = ""
+                        else:
+                            st.warning(
+                                f"Existe una diferencia de Bs {abs(diferencia_manual_cb):,.2f}. "
+                                + ("El banco registra más que los registros seleccionados." if diferencia_manual_cb > 0
+                                   else "Los registros seleccionados suman más que el movimiento bancario.")
+                            )
+                            observacion_diferencia_cb = st.text_area(
+                                "Justificación obligatoria de la diferencia",
+                                key=f"cb_motivo_diferencia_{clave_manual_cb}_{idx_banco_manual_cb}",
+                                placeholder="Ej.: devolución realizada en noviembre; comisión bancaria; pago parcial; diferencia pendiente de identificar...",
+                                help="La conciliación quedará identificada como CON DIFERENCIA. No se creará automáticamente ningún ingreso o gasto por el importe restante."
+                            ).strip()
+                            st.caption("Podrás cerrar con diferencia, pero el importe quedará visible como pendiente de aclaración; no se considerará conciliación exacta.")
+                            aceptar_diferencia_cb = st.checkbox(
+                                f"Confirmo que revisé la diferencia de Bs {abs(diferencia_manual_cb):,.2f}, estoy de acuerdo con cerrar esta conciliación con diferencia y acepto que quede pendiente de aclaración.",
+                                value=False,
+                                key=f"cb_aceptar_diferencia_{clave_manual_cb}_{idx_banco_manual_cb}"
+                            )
+
+                        if st.button("Confirmar conciliación manual", key=f"cb_confirmar_manual_{clave_manual_cb}_{idx_banco_manual_cb}",
+                                      disabled=(not partes_nuevas_manual_cb or
+                                                (abs(diferencia_manual_cb) > 0.004 and
+                                                 (not observacion_diferencia_cb or not aceptar_diferencia_cb))),
+                                      use_container_width=True):
+                            if abs(diferencia_manual_cb) > 0.004 and not observacion_diferencia_cb:
+                                st.error("Para cerrar con diferencia debes escribir una justificación.")
+                            elif abs(diferencia_manual_cb) > 0.004 and not aceptar_diferencia_cb:
+                                st.error("Debes confirmar expresamente que estás de acuerdo con cerrar esta conciliación con diferencia.")
                             else:
                                 # Revalidar capacidad disponible para evitar asignar dos veces el mismo registro.
                                 capacidad_ok_cb = True
@@ -4190,7 +4228,11 @@ elif pagina == "🏦 Conciliación bancaria":
                                         "monto_banco": float(linea_manual_cb["monto"]),
                                         "descripcion_banco": str(linea_manual_cb.get("contraparte") or linea_manual_cb.get("transaccion") or ""),
                                         "direccion_manual": direccion_manual_cb,
-                                        "asignaciones": partes_nuevas_manual_cb
+                                        "asignaciones": partes_nuevas_manual_cb,
+                                        "estado_conciliacion": "exacta" if abs(diferencia_manual_cb) <= 0.004 else "con_diferencia",
+                                        "total_asignado": suma_asignada_cb,
+                                        "diferencia": diferencia_manual_cb,
+                                        "observacion_diferencia": observacion_diferencia_cb
                                     }
                                     st.session_state[clave_estado_manual_cb] = asignaciones_manual_cb
                                     st.rerun()

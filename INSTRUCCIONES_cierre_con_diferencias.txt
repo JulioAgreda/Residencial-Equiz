@@ -1,0 +1,34 @@
+EQUISE — Cierre manual de conciliación con diferencia
+
+QUÉ CAMBIA
+La conciliación manual ya no exige que la suma de los registros seleccionados coincida
+exactamente con el importe bancario.
+
+MODALIDADES
+1. Conciliación exacta: diferencia de Bs 0,00. Se confirma normalmente.
+2. Conciliación con diferencia: se permite confirmar si se escribe una justificación
+   obligatoria. Se guarda el total asignado, el importe del banco, la diferencia y el motivo.
+
+CÁLCULO
+Diferencia = importe absoluto del movimiento bancario - suma de importes asignados.
+- Positiva: el banco registra más que los registros seleccionados.
+- Negativa: los registros seleccionados suman más que el banco.
+
+CONTROL CONTABLE
+- No se crea un ingreso/gasto automático por la diferencia.
+- No se altera el importe original de los registros contables.
+- La asignación queda identificada como exacta o con diferencia.
+- La justificación se conserva en la asignación manual y en la instantánea de historial.
+- La diferencia debe revisarse posteriormente; no debe interpretarse como cuadratura exacta.
+
+INSTALACIÓN
+1. Extrae el ZIP.
+2. Reemplaza únicamente app.py en la raíz del repositorio residencial-equiz.
+3. No reemplaces db.py ni ejecutes SQL.
+4. Confirma el commit y espera el despliegue.
+5. Prueba primero con un caso donde exista una diferencia conocida.
+
+VALIDACIÓN
+app.py pasó análisis sintáctico y compilación en memoria. No se ha probado en Streamlit
+desplegado ni contra Supabase real. La persistencia fuera de la sesión depende de guardar
+la conciliación en el historial existente.
