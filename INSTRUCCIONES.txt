@@ -1,23 +1,25 @@
-CORRECCIÓN — Botones Anterior/Siguiente de Gestión de cobros
+EQUISE — Gestión de cobros: respetar tipo de contrato
 
-Causa:
-Streamlit no permite modificar st.session_state de la misma clave después de que el
-selectbox con esa clave ya fue creado durante la ejecución. Los botones intentaban
-hacerlo directamente y provocaban StreamlitWidgetAlreadyInstantiatedError.
+CAMBIO
+La pantalla unificada verifica el campo tipo_contrato del apartamento:
+- Si es "Anticrético" (también admite "Anticretico"), no muestra alquiler mensual.
+- Muestra capital anticrético y moneda, además de fechas y condiciones disponibles.
+- Excluye monto_alquiler, pagos/esperado/deuda de alquiler de los totales actuales.
+- Cambia la pestaña "Alquiler" por "Anticrético".
+- No permite registrar un nuevo alquiler desde esta pantalla para un anticrético.
+- Mantiene electricidad, agua e historial.
+- Si hay pagos históricos de alquiler para el periodo, los deja visibles como históricos,
+  sin incluirlos en el saldo actual del anticrético.
+- Para contratos de "Alquiler", conserva el flujo anterior.
 
-Corrección:
-Los botones ahora utilizan callbacks on_click. Streamlit ejecuta el callback antes
-de reconstruir los widgets, por lo que la selección cambia sin modificar una clave
-ya instanciada. Se conservan los límites del primer y último apartamento.
-
-Instalación:
+INSTALACIÓN
 1. Haz copia de seguridad del app.py desplegado.
-2. Reemplaza únicamente app.py por el archivo app.py incluido en este ZIP
-   (el archivo se llama app_correccion_botones_cobros.py en el paquete).
-3. No reemplaces db.py ni ejecutes migraciones SQL.
-4. Despliega y prueba Anterior/Siguiente, además de seleccionar directamente otro
-   apartamento desde el desplegable.
+2. Extrae el ZIP y reemplaza únicamente app.py en el repositorio.
+3. No reemplaces db.py ni ejecutes SQL.
+4. Despliega y prueba un apartamento de Alquiler y uno de Anticrético.
+5. Verifica que el anticrético no genere deuda mensual y que electricidad/agua sigan
+   permitiendo registrar pagos si existe el periodo de servicio.
 
-Validación:
-El archivo pasó análisis sintáctico y compilación de Python. No se ha probado en
-la instancia real de Streamlit/Supabase.
+VALIDACIÓN
+app.py pasó análisis sintáctico y compilación. No se ha probado en Streamlit/Supabase real.
+No se modificó el esquema ni se alteraron registros históricos.

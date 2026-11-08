@@ -2649,6 +2649,8 @@ elif pagina == "💳 Gestión de cobros":
             )
 
     apt_cobros = apartamentos[idx_cobros]
+    tipo_contrato_cobros = str(apt_cobros.get("tipo_contrato") or "").strip().lower()
+    es_anticretico_cobros = tipo_contrato_cobros in ("anticrético", "anticretico")
     st.divider()
     ca, cb, cc = st.columns([1.2, 2.4, 1.4])
     with ca:
@@ -2657,7 +2659,13 @@ elif pagina == "💳 Gestión de cobros":
         st.markdown("**" + str(apt_cobros.get("inquilino_nombre") or "Sin inquilino registrado") + "**")
         st.caption(f'Piso: {apt_cobros.get("piso") or "—"} · Estado: {apt_cobros.get("estado") or "—"}')
     with cc:
-        st.metric("Alquiler habitual", fmt_money(float(apt_cobros.get("monto_alquiler") or 0)))
+        if es_anticretico_cobros:
+            moneda_antic_cobros = str(apt_cobros.get("anticretico_moneda") or "BOB").upper()
+            simbolo_antic_cobros = "USD" if moneda_antic_cobros == "USD" else "Bs"
+            st.metric("Capital anticrético", f"{simbolo_antic_cobros} {float(apt_cobros.get('monto_anticretico') or 0):,.2f}")
+            st.caption("No corresponde cobro mensual de alquiler.")
+        else:
+            st.metric("Alquiler habitual", fmt_money(float(apt_cobros.get("monto_alquiler") or 0)))
 
     periodo_alq_cobros = db.obtener_periodo(apt_cobros["id"], mes_cobros, int(anio_cobros))
     periodo_elec_cobros = db.obtener_periodo_servicio("electricidad", apt_cobros["id"], mes_cobros, int(anio_cobros))
@@ -2670,6 +2678,10 @@ elif pagina == "💳 Gestión de cobros":
         return esperado, pagado_local, esperado - pagado_local
 
     alq_esp, alq_pag, alq_deu = _resumen_servicio_cobros(periodo_alq_cobros, "pagos", float(apt_cobros.get("monto_alquiler") or 0))
+    # Un contrato anticrético no genera alquiler mensual. Excluir cualquier monto_alquiler
+    # heredado y los pagos asociados de los totales actuales de cobros.
+    if es_anticretico_cobros:
+        alq_esp, alq_pag, alq_deu = 0.0, 0.0, 0.0
     elec_esp, elec_pag, elec_deu = _resumen_servicio_cobros(periodo_elec_cobros, "pagos_electricidad")
     agua_esp, agua_pag, agua_deu = _resumen_servicio_cobros(periodo_agua_cobros, "pagos_agua")
 
@@ -2687,68 +2699,119 @@ elif pagina == "💳 Gestión de cobros":
         if periodo is None:
             st.caption("Aún no existe periodo/lectura registrado para este servicio.")
 
+    etiqueta_contrato_cobros = "💰 Anticrético" if es_anticretico_cobros else "🏠 Alquiler"
     tab_resumen_cobros, tab_alquiler_cobros, tab_elec_cobros, tab_agua_cobros, tab_hist_cobros = st.tabs(
-        ["📊 Resumen", "🏠 Alquiler", "⚡ Electricidad", "💧 Agua", "📜 Historial"]
+        ["📊 Resumen", etiqueta_contrato_cobros, "⚡ Electricidad", "💧 Agua", "📜 Historial"]
     )
 
     with tab_resumen_cobros:
-        r1, r2, r3 = st.columns(3)
-        with r1:
-            _tarjeta_estado_cobro("🏠 Alquiler", alq_esp, alq_pag, alq_deu, periodo_alq_cobros)
-        with r2:
-            _tarjeta_estado_cobro("⚡ Electricidad", elec_esp, elec_pag, elec_deu, periodo_elec_cobros)
-        with r3:
-            _tarjeta_estado_cobro("💧 Agua", agua_esp, agua_pag, agua_deu, periodo_agua_cobros)
-        st.info("Selecciona una pestaña de servicio para registrar un pago o abono. El apartamento y el periodo se mantienen seleccionados.")
+        if es_anticretico_cobros:
+            r1, r2, r3 = st.columns(3)
+            with r1:
+                st.metric("Capital anticrético", f"{simbolo_antic_cobros} {float(apt_cobros.get('monto_anticretico') or 0):,.2f}")
+            with r2:
+                st.metric("Electricidad pendiente", fmt_money(elec_deu))
+            with r3:
+                st.metric("Agua pendiente", fmt_money(agua_deu))
+            st.info("Este apartamento tiene contrato de anticrético. No se genera alquiler mensual; aquí se gestionan únicamente los servicios y el historial.")
+        else:
+            r1, r2, r3 = st.columns(3)
+            with r1:
+                _tarjeta_estado_cobro("🏠 Alquiler", alq_esp, alq_pag, alq_deu, periodo_alq_cobros)
+            with r2:
+                _tarjeta_estado_cobro("⚡ Electricidad", elec_esp, elec_pag, elec_deu, periodo_elec_cobros)
+            with r3:
+                _tarjeta_estado_cobro("💧 Agua", agua_esp, agua_pag, agua_deu, periodo_agua_cobros)
+            st.info("Selecciona una pestaña de servicio para registrar un pago o abono. El apartamento y el periodo se mantienen seleccionados.")
 
     with tab_alquiler_cobros:
-        st.subheader("🏠 Pago de alquiler")
-        _tarjeta_estado_cobro("Alquiler del periodo", alq_esp, alq_pag, alq_deu, periodo_alq_cobros)
-        if es_admin:
-            with st.expander("✏️ Ajustar monto esperado del alquiler"):
-                nuevo_esperado_cobros = st.number_input(
-                    "Monto esperado (Bs)", min_value=0.0, step=50.0, value=alq_esp,
-                    key=f"cobros_alq_esperado_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
-                )
-                if st.button("Guardar monto esperado", key=f"cobros_alq_guardar_esp_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"):
-                    try:
-                        if periodo_alq_cobros:
-                            db.actualizar_periodo(periodo_alq_cobros["id"], {"monto_esperado": nuevo_esperado_cobros})
-                        else:
-                            db.obtener_o_crear_periodo(apt_cobros["id"], mes_cobros, int(anio_cobros), nuevo_esperado_cobros, apt_cobros.get("inquilino_nombre"))
-                        limpiar_cache()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"No se pudo actualizar el monto: {e}")
-        with st.form(f"cobros_form_alq_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            with c1:
-                monto_alq_nuevo = st.number_input("Monto recibido (Bs)", min_value=0.0, step=10.0, key=f"cobros_alq_monto_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}")
-                fecha_alq_nuevo = st.date_input("Fecha de pago", value=date.today(), format="DD/MM/YYYY", key=f"cobros_alq_fecha_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}")
-            with c2:
-                metodo_alq_nuevo = st.selectbox("Método de pago", METODOS_ABONO, key=f"cobros_alq_metodo_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}")
-                obs_alq_nuevo = st.text_input("Observación (opcional)", key=f"cobros_alq_obs_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}")
-            if st.form_submit_button("💾 Registrar pago de alquiler", use_container_width=True):
-                if monto_alq_nuevo <= 0:
-                    st.error("El monto debe ser mayor a cero.")
-                else:
-                    try:
-                        periodo_guardar_alq = db.obtener_o_crear_periodo(apt_cobros["id"], mes_cobros, int(anio_cobros), alq_esp, apt_cobros.get("inquilino_nombre"))
-                        db.crear_pago({
-                            "periodo_id": periodo_guardar_alq["id"], "fecha": str(fecha_alq_nuevo),
-                            "monto": monto_alq_nuevo, "metodo_pago": metodo_alq_nuevo,
-                            "observacion": obs_alq_nuevo or None,
-                        })
-                        limpiar_cache()
-                        st.success("Pago de alquiler registrado.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"No se pudo registrar el pago: {e}")
-        if periodo_alq_cobros and periodo_alq_cobros.get("pagos"):
-            st.markdown("**Abonos de este periodo**")
-            for pago_cobros in sorted(periodo_alq_cobros["pagos"], key=lambda x: x.get("fecha") or ""):
-                with st.expander(f'{pago_cobros.get("fecha")} · {fmt_money(pago_cobros.get("monto"))} · {pago_cobros.get("metodo_pago") or ""}'):
-                    mostrar_botones_recibo(pago_cobros, periodo_alq_cobros, apt_cobros, alq_pag, key_sufijo=f"cobros_alq_{pago_cobros['id']}")
+        if es_anticretico_cobros:
+            st.subheader("💰 Información del contrato anticrético")
+            st.metric("Capital recibido", f"{simbolo_antic_cobros} {float(apt_cobros.get('monto_anticretico') or 0):,.2f}")
+            st.caption("No corresponde registrar alquiler mensual para este apartamento.")
+            if apt_cobros.get("anticretico_fecha_entrega"):
+                st.write(f"**Fecha de entrega:** {apt_cobros.get('anticretico_fecha_entrega')}")
+            if apt_cobros.get("anticretico_fecha_devolucion"):
+                st.write(f"**Fecha pactada de devolución:** {apt_cobros.get('anticretico_fecha_devolucion')}")
+            if apt_cobros.get("anticretico_condiciones"):
+                st.write(f"**Condiciones:** {apt_cobros.get('anticretico_condiciones')}")
+            if periodo_alq_cobros and periodo_alq_cobros.get("pagos"):
+                st.warning("Existen pagos históricos clasificados como alquiler en este periodo. Se conservan para consulta, pero no se incluyen en los cobros actuales del anticrético.")
+                for pago_hist_antic_cobros in periodo_alq_cobros.get("pagos") or []:
+                    st.caption(f"{pago_hist_antic_cobros.get('fecha')} · {fmt_money(pago_hist_antic_cobros.get('monto'))} · Registro histórico")
+        else:
+            st.subheader("🏠 Pago de alquiler")
+            _tarjeta_estado_cobro("Alquiler del periodo", alq_esp, alq_pag, alq_deu, periodo_alq_cobros)
+            if es_admin:
+                with st.expander("✏️ Ajustar monto esperado del alquiler"):
+                    nuevo_esperado_cobros = st.number_input(
+                        "Monto esperado (Bs)", min_value=0.0, step=50.0, value=alq_esp,
+                        key=f"cobros_alq_esperado_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                    )
+                    if st.button("Guardar monto esperado", key=f"cobros_alq_guardar_esp_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"):
+                        try:
+                            if periodo_alq_cobros:
+                                db.actualizar_periodo(periodo_alq_cobros["id"], {"monto_esperado": nuevo_esperado_cobros})
+                            else:
+                                db.obtener_o_crear_periodo(
+                                    apt_cobros["id"], mes_cobros, int(anio_cobros),
+                                    nuevo_esperado_cobros, apt_cobros.get("inquilino_nombre")
+                                )
+                            limpiar_cache()
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"No se pudo actualizar el monto: {e}")
+            with st.form(f"cobros_form_alq_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}", clear_on_submit=True):
+                c1, c2 = st.columns(2)
+                with c1:
+                    monto_alq_nuevo = st.number_input(
+                        "Monto recibido (Bs)", min_value=0.0, step=10.0,
+                        key=f"cobros_alq_monto_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                    )
+                    fecha_alq_nuevo = st.date_input(
+                        "Fecha de pago", value=date.today(), format="DD/MM/YYYY",
+                        key=f"cobros_alq_fecha_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                    )
+                with c2:
+                    metodo_alq_nuevo = st.selectbox(
+                        "Método de pago", METODOS_ABONO,
+                        key=f"cobros_alq_metodo_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                    )
+                    obs_alq_nuevo = st.text_input(
+                        "Observación (opcional)",
+                        key=f"cobros_alq_obs_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                    )
+                if st.form_submit_button("💾 Registrar pago de alquiler", use_container_width=True):
+                    if monto_alq_nuevo <= 0:
+                        st.error("El monto debe ser mayor a cero.")
+                    else:
+                        try:
+                            periodo_guardar_alq = db.obtener_o_crear_periodo(
+                                apt_cobros["id"], mes_cobros, int(anio_cobros),
+                                alq_esp, apt_cobros.get("inquilino_nombre")
+                            )
+                            db.crear_pago({
+                                "periodo_id": periodo_guardar_alq["id"],
+                                "fecha": str(fecha_alq_nuevo),
+                                "monto": monto_alq_nuevo,
+                                "metodo_pago": metodo_alq_nuevo,
+                                "observacion": obs_alq_nuevo or None,
+                            })
+                            limpiar_cache()
+                            st.success("Pago de alquiler registrado.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"No se pudo registrar el pago: {e}")
+            if periodo_alq_cobros and periodo_alq_cobros.get("pagos"):
+                st.markdown("**Abonos de este periodo**")
+                for pago_cobros in sorted(periodo_alq_cobros["pagos"], key=lambda x: x.get("fecha") or ""):
+                    with st.expander(
+                        f'{pago_cobros.get("fecha")} · {fmt_money(pago_cobros.get("monto"))} · {pago_cobros.get("metodo_pago") or ""}'
+                    ):
+                        mostrar_botones_recibo(
+                            pago_cobros, periodo_alq_cobros, apt_cobros, alq_pag,
+                            key_sufijo=f"cobros_alq_{pago_cobros['id']}"
+                        )
 
     def _panel_pago_servicio_cobros(servicio, periodo, campo_pagos, esperado, pagado, deuda, etiqueta):
         st.subheader(etiqueta)
