@@ -36,7 +36,7 @@ PISOS = ["Planta Baja", "Primer Piso", "Segundo Piso", "Tercer Piso"]
 ROLES = ["Administrador", "Cobrador"]
 
 CATEGORIAS_COMPRA = ["Artículos de limpieza", "Repuestos", "Herramientas", "Dispositivos", "Otros artículos"]
-CATEGORIAS_GASTO_OPERATIVO = ["Electricidad", "Agua", "Internet", "Honorarios", "Impuestos", "Otros servicios y gastos"]
+CATEGORIAS_GASTO_OPERATIVO = ["Electricidad", "Agua", "Internet", "Honorarios", "Sueldos", "Viáticos", "Impuestos", "Otros servicios y gastos"]
 # Compatibilidad temporal con ramas históricas de la aplicación que se conservan para reversión.
 CATEGORIAS_GASTO = CATEGORIAS_COMPRA
 CATEGORIAS_PAGO = CATEGORIAS_GASTO_OPERATIVO
@@ -4942,10 +4942,23 @@ elif pagina == "💸 Egresos":
     nombre_encargado = usuario_actual.get("nombre") or usuario_actual.get("username")
     tab_reg, tab_hist = st.tabs(["➕ Registrar egreso", "📜 Historial consolidado"])
     with tab_reg:
+        # El selector de tipo debe quedar FUERA del formulario:
+        # los widgets dentro de st.form no provocan rerun al cambiar, por lo que
+        # la lista de categorías podía quedarse mostrando las opciones de Compra.
+        tipo = st.radio(
+            "Tipo de egreso",
+            ["Compra", "Gasto / pago"],
+            horizontal=True,
+            key="v13_tipo_egreso",
+        )
+        categorias = CATEGORIAS_COMPRA if tipo == "Compra" else CATEGORIAS_GASTO_OPERATIVO
+        clave_categoria = "compra" if tipo == "Compra" else "pago"
         with st.form("v13_form_egreso_unico", clear_on_submit=True):
-            tipo = st.radio("Tipo de egreso", ["Compra", "Gasto / pago"], horizontal=True)
-            categorias = CATEGORIAS_COMPRA if tipo == "Compra" else CATEGORIAS_GASTO_OPERATIVO
-            categoria = st.selectbox("Categoría", categorias)
+            categoria = st.selectbox(
+                "Categoría",
+                categorias,
+                key=f"v13_categoria_egreso_{clave_categoria}",
+            )
             fecha = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
             monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0, format="%.2f")
             col1, col2 = st.columns(2)
