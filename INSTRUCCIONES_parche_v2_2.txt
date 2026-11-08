@@ -1,0 +1,19 @@
+EQUISE — Parche V2.2: corrección de referencias restantes
+
+La captura posterior al parche V2.1 mostró que aún quedaban dos referencias a `sistemas_par_cb`:
+- En el campo `sistema` del par manual.
+- En el cálculo de la diferencia de días.
+
+La lista realmente declarada es `sistemas_par_manual_cb`. Ambas referencias se corrigieron
+para utilizar el nombre declarado de forma consistente.
+
+INSTALACIÓN
+1. Reemplaza únicamente el archivo app.py del repositorio por el app.py incluido en este ZIP.
+2. No reemplaces db.py.
+3. Confirma el cambio en GitHub y espera el despliegue de Streamlit.
+4. Reintenta la consolidación manual.
+
+VALIDACIÓN
+El archivo pasó análisis sintáctico y compilación en memoria. Se verificó que no quedan
+referencias al identificador `sistemas_par_cb`. Aún no se ha probado en el despliegue real.
+No ejecutar migraciones SQL por este error.

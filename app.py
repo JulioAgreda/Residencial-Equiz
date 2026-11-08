@@ -3901,10 +3901,10 @@ elif pagina == "🏦 Conciliación bancaria":
             sistemas_par_manual_cb.append(mov_parte_cb)
         pares_manuales_cb.append({
             "banco": [linea_asig_cb],
-            "sistema": sistemas_par_cb,
+            "sistema": sistemas_par_manual_cb,
             "union": "Conciliación manual",
             "confianza": "Manual",
-            "dias": max([abs((linea_asig_cb["fecha"] - x["fecha"]).days) for x in sistemas_par_cb] or [0]),
+            "dias": max([abs((linea_asig_cb["fecha"] - x["fecha"]).days) for x in sistemas_par_manual_cb] or [0]),
             "razones": ["Asignación confirmada manualmente por el usuario."]
         })
 
