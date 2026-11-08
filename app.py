@@ -4870,10 +4870,20 @@ elif pagina == "💸 Egresos":
     nombre_encargado = usuario_actual.get("nombre") or usuario_actual.get("username")
     tab_reg, tab_hist = st.tabs(["➕ Registrar egreso", "📜 Historial consolidado"])
     with tab_reg:
+        # Fuera del formulario para que el cambio de tipo actualice las categorías al instante.
+        tipo = st.radio(
+            "Tipo de egreso",
+            ["Compra", "Gasto / pago"],
+            horizontal=True,
+            key="v13_tipo_egreso_unico",
+        )
+        categorias = CATEGORIAS_COMPRA if tipo == "Compra" else CATEGORIAS_GASTO_OPERATIVO
         with st.form("v13_form_egreso_unico", clear_on_submit=True):
-            tipo = st.radio("Tipo de egreso", ["Compra", "Gasto / pago"], horizontal=True)
-            categorias = CATEGORIAS_COMPRA if tipo == "Compra" else CATEGORIAS_GASTO_OPERATIVO
-            categoria = st.selectbox("Categoría", categorias)
+            categoria = st.selectbox(
+                "Categoría",
+                categorias,
+                key=f"v13_categoria_egreso_{tipo}",
+            )
             fecha = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
             monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0, format="%.2f")
             col1, col2 = st.columns(2)
