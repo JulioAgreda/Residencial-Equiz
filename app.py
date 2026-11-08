@@ -2606,6 +2606,19 @@ elif pagina == "💳 Gestión de cobros":
         max(int(st.session_state["cobros_apartamento_idx"]), 0), len(apartamentos) - 1
     )
 
+    # Los callbacks actualizan el estado ANTES de que Streamlit vuelva a crear
+    # el selectbox. No se debe modificar la clave de un widget después de instanciarlo.
+    def _cobros_ir_anterior():
+        st.session_state["cobros_apartamento_idx"] = max(
+            0, int(st.session_state.get("cobros_apartamento_idx", 0)) - 1
+        )
+
+    def _cobros_ir_siguiente():
+        st.session_state["cobros_apartamento_idx"] = min(
+            len(apartamentos) - 1,
+            int(st.session_state.get("cobros_apartamento_idx", 0)) + 1
+        )
+
     c_busca, c_periodo, c_nav = st.columns([2.5, 1.25, 1.4])
     with c_busca:
         idx_cobros = st.selectbox(
@@ -2623,14 +2636,17 @@ elif pagina == "💳 Gestión de cobros":
         st.write("")
         nav_ant, nav_sig = st.columns(2)
         with nav_ant:
-            if st.button("← Anterior", use_container_width=True, disabled=idx_cobros <= 0, key="cobros_anterior"):
-                st.session_state["cobros_apartamento_idx"] = idx_cobros - 1
-                st.rerun()
+            st.button(
+                "← Anterior", use_container_width=True,
+                disabled=idx_cobros <= 0, key="cobros_anterior",
+                on_click=_cobros_ir_anterior,
+            )
         with nav_sig:
-            if st.button("Siguiente →", use_container_width=True,
-                         disabled=idx_cobros >= len(apartamentos) - 1, key="cobros_siguiente"):
-                st.session_state["cobros_apartamento_idx"] = idx_cobros + 1
-                st.rerun()
+            st.button(
+                "Siguiente →", use_container_width=True,
+                disabled=idx_cobros >= len(apartamentos) - 1,
+                key="cobros_siguiente", on_click=_cobros_ir_siguiente,
+            )
 
     apt_cobros = apartamentos[idx_cobros]
     st.divider()

@@ -1,0 +1,23 @@
+CORRECCIÓN — Botones Anterior/Siguiente de Gestión de cobros
+
+Causa:
+Streamlit no permite modificar st.session_state de la misma clave después de que el
+selectbox con esa clave ya fue creado durante la ejecución. Los botones intentaban
+hacerlo directamente y provocaban StreamlitWidgetAlreadyInstantiatedError.
+
+Corrección:
+Los botones ahora utilizan callbacks on_click. Streamlit ejecuta el callback antes
+de reconstruir los widgets, por lo que la selección cambia sin modificar una clave
+ya instanciada. Se conservan los límites del primer y último apartamento.
+
+Instalación:
+1. Haz copia de seguridad del app.py desplegado.
+2. Reemplaza únicamente app.py por el archivo app.py incluido en este ZIP
+   (el archivo se llama app_correccion_botones_cobros.py en el paquete).
+3. No reemplaces db.py ni ejecutes migraciones SQL.
+4. Despliega y prueba Anterior/Siguiente, además de seleccionar directamente otro
+   apartamento desde el desplegable.
+
+Validación:
+El archivo pasó análisis sintáctico y compilación de Python. No se ha probado en
+la instancia real de Streamlit/Supabase.
