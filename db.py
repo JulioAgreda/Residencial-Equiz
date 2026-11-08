@@ -974,6 +974,43 @@ def listar_movimientos_obligaciones():
     res = sb.table("movimientos_obligaciones").select("*").order("fecha", desc=True).execute()
     return res.data or []
 
+def actualizar_saldo_apertura_obligacion(obligacion_id, saldo_apertura):
+    """Corrige saldo inicial solo si la obligación todavía no tiene movimientos.
+
+    Se usa para registros creados por error con saldo cero cuando el capital
+    completo continúa pendiente. La comprobación se repite en la capa de datos.
+    """
+    sb = get_client()
+    existentes = (
+        sb.table("movimientos_obligaciones")
+        .select("id")
+        .eq("obligacion_id", obligacion_id)
+        .limit(1)
+        .execute()
+    )
+    if existentes.data:
+        raise ValueError("No se puede corregir el saldo inicial porque la obligación ya tiene movimientos.")
+    saldo = float(saldo_apertura)
+    if saldo < 0:
+        raise ValueError("El saldo inicial no puede ser negativo.")
+    obligacion = (
+        sb.table("obligaciones_financieras")
+        .select("id,monto_original")
+        .eq("id", obligacion_id)
+        .single()
+        .execute()
+    )
+    fila = obligacion.data or {}
+    monto_original = float(fila.get("monto_original") or 0)
+    if saldo > monto_original:
+        raise ValueError("El saldo inicial no puede superar el monto original.")
+    return (
+        sb.table("obligaciones_financieras")
+        .update({"saldo_apertura": saldo})
+        .eq("id", obligacion_id)
+        .execute()
+    )
+
 def crear_movimiento_obligacion(payload):
     sb = get_client()
     return sb.table("movimientos_obligaciones").insert(payload).execute()

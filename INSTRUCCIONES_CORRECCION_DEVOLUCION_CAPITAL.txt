@@ -1,0 +1,37 @@
+EQUISE - Correccion del selector de devolucion de capital
+
+ARCHIVOS INCLUIDOS
+- app.py
+- db.py
+
+INSTALACION
+1. Realiza una copia de respaldo de los app.py y db.py actuales.
+2. Reemplaza ambos archivos por los incluidos en este paquete.
+3. Reinicia Streamlit y vuelve a ingresar a Finanzas > Prestamos recibidos.
+
+QUE SE CORRIGIO
+1. Al registrar una nueva obligacion, si el capital completo sigue pendiente,
+   el saldo inicial se asigna automaticamente igual al monto original.
+2. Si ya hubo devoluciones antes de la fecha de corte, se puede elegir esa
+   situacion e introducir el saldo real pendiente a la fecha de corte.
+3. Las obligaciones existentes con saldo cero, monto original mayor a cero y
+   sin movimientos apareceran en una seccion de revision. El administrador
+   podra corregirlas desde la aplicacion, sin SQL y sin crear otra obligacion.
+4. La correccion exige confirmacion expresa y la capa db.py vuelve a comprobar
+   que no existan movimientos asociados antes de actualizar el saldo inicial.
+5. El selector de devolucion solo se muestra cuando existen obligaciones con
+   saldo pendiente positivo. Si no hay ninguna, se explica la situacion.
+
+IMPORTANTE
+- No se crea ni duplica ninguna obligacion.
+- No se eliminan ni modifican movimientos existentes.
+- Solo confirma la correccion de una obligacion si realmente no hubo pagos
+  anteriores y el capital completo sigue pendiente.
+- No requiere migracion SQL.
+
+VERIFICACIONES REALIZADAS
+- app.py, db.py y deudas.py compilan correctamente.
+- Se verifico el calculo: saldo inicial cero, correccion al monto original y
+  descuento de un pago parcial de ejemplo.
+- La conexion real a Supabase y el registro de una devolucion deben comprobarse
+  en la instancia de EQUISE despues de instalar la actualizacion.

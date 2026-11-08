@@ -36,7 +36,7 @@ PISOS = ["Planta Baja", "Primer Piso", "Segundo Piso", "Tercer Piso"]
 ROLES = ["Administrador", "Cobrador"]
 
 CATEGORIAS_COMPRA = ["Artículos de limpieza", "Repuestos", "Herramientas", "Dispositivos", "Otros artículos"]
-CATEGORIAS_GASTO_OPERATIVO = ["Electricidad", "Agua", "Internet", "Honorarios", "Sueldos", "Viáticos", "Impuestos", "Otros servicios y gastos"]
+CATEGORIAS_GASTO_OPERATIVO = ["Electricidad", "Agua", "Internet", "Honorarios", "Impuestos", "Otros servicios y gastos"]
 # Compatibilidad temporal con ramas históricas de la aplicación que se conservan para reversión.
 CATEGORIAS_GASTO = CATEGORIAS_COMPRA
 CATEGORIAS_PAGO = CATEGORIAS_GASTO_OPERATIVO
@@ -1264,7 +1264,20 @@ elif pagina == "💰 Finanzas":
             vencimiento=e.date_input("Vencimiento", value=None)
             f,g=st.columns(2)
             monto=f.number_input("Monto original (Bs)", min_value=0.01, step=10.0, format="%.2f")
-            saldo=g.number_input("Saldo pendiente a la fecha de corte (Bs)", min_value=0.0, step=10.0, format="%.2f")
+            situacion_obl=st.radio(
+                "Situación de la obligación a la fecha de corte",
+                ["El monto completo sigue pendiente", "Ya se realizaron pagos antes de la fecha de corte"],
+                index=0, key="v13_situacion_obligacion",
+                help="Si todavía no devolviste capital, EQUISE tomará automáticamente el monto original como saldo pendiente."
+            )
+            if situacion_obl == "El monto completo sigue pendiente":
+                saldo=float(monto)
+                st.info(f"Saldo inicial que se registrará: {fmt_money(saldo)}")
+            else:
+                saldo=st.number_input(
+                    "Saldo pendiente a la fecha de corte (Bs)", min_value=0.0,
+                    max_value=float(monto), step=10.0, format="%.2f", key="v13_saldo_obligacion"
+                )
             documento=st.text_input("Contrato, factura o documento de respaldo")
             obs=st.text_area("Observaciones")
             guardar=st.form_submit_button("Guardar obligación")
@@ -1287,21 +1300,75 @@ elif pagina == "💰 Finanzas":
                     st.rerun()
                 except Exception as e: st.error(f"No se pudo guardar: {e}")
 
-        st.divider()
+        # Detecta obligaciones que se guardaron con saldo inicial cero y aún no tienen
+        # movimientos. Solo se ofrecen para corrección tras confirmación expresa.
+        obligaciones_a_revisar=[]
+        obligaciones_con_saldo=[]
+        for obligacion in obligaciones:
+            movs_obl=mov_obl_por_id.get(obligacion.get("id"), [])
+            saldo_calculado=float(deudas.calcular_saldo(obligacion, movs_obl))
+            if saldo_calculado > 0:
+                obligaciones_con_saldo.append((obligacion, saldo_calculado))
+            elif (saldo_calculado == 0
+                  and float(obligacion.get("monto_original") or 0) > 0
+                  and not movs_obl):
+                obligaciones_a_revisar.append(obligacion)
+
+        if obligaciones_a_revisar:
+            with st.expander("⚠️ Revisar obligación registrada sin saldo inicial", expanded=True):
+                st.warning(
+                    "Hay obligaciones sin movimientos cuyo saldo inicial es Bs 0,00. "
+                    "Si el capital completo sigue pendiente de devolución, puedes corregirlo aquí."
+                )
+                mapa_reparacion_obl={
+                    f'{o.get("codigo") or "SIN CÓDIGO"} · {o.get("acreedor") or "Sin acreedor"} · monto original Bs {float(o.get("monto_original") or 0):,.2f}':o
+                    for o in obligaciones_a_revisar
+                }
+                etiqueta_reparar_obl=st.selectbox(
+                    "Obligación que necesita corrección", list(mapa_reparacion_obl),
+                    key="v13_obl_reparar_seleccion"
+                )
+                obligacion_reparar=mapa_reparacion_obl[etiqueta_reparar_obl]
+                confirmar_reparacion_obl=st.checkbox(
+                    "Confirmo que esta obligación no tuvo devoluciones anteriores y que el capital completo sigue pendiente.",
+                    key="v13_obl_confirmar_reparacion"
+                )
+                if st.button("Corregir saldo inicial de la obligación", key="v13_obl_boton_reparar", disabled=not confirmar_reparacion_obl):
+                    try:
+                        # La capa de datos vuelve a comprobar que no existan movimientos.
+                        monto_reparacion_obl=float(obligacion_reparar.get("monto_original") or 0)
+                        db.actualizar_saldo_apertura_obligacion(
+                            obligacion_reparar["id"], monto_reparacion_obl
+                        )
+                        st.success(
+                            f"Saldo inicial corregido a {fmt_money(monto_reparacion_obl)}. "
+                            "Ahora puedes registrar la devolución de capital."
+                        )
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"No se pudo corregir el saldo inicial: {e}")
+
         st.subheader("Registrar devolución de capital")
-        if obligaciones:
-            mapa={f'{o["codigo"]} · {o["acreedor"]} · saldo Bs {float(deudas.calcular_saldo(o, mov_obl_por_id.get(o["id"], []))):.2f}':o for o in obligaciones if float(deudas.calcular_saldo(o, mov_obl_por_id.get(o["id"], []))) > 0}
+        if obligaciones_con_saldo:
+            mapa={
+                f'{o.get("codigo") or "SIN CÓDIGO"} · {o.get("acreedor") or "Sin acreedor"} · saldo Bs {saldo:,.2f}':(o, saldo)
+                for o, saldo in obligaciones_con_saldo
+            }
             with st.form("v12_pago_obligacion", clear_on_submit=True):
-                elegido=st.selectbox("Obligación",list(mapa))
+                elegido=st.selectbox("Obligación",list(mapa), key="v13_obligacion_selector_pago")
+                o, saldo_disponible_obl=mapa[elegido]
+                st.caption(f"Capital pendiente: {fmt_money(saldo_disponible_obl)}")
                 fecha=st.date_input("Fecha del pago",key="v12_fecha_pago")
-                monto_pago=st.number_input("Capital pagado (Bs)",min_value=0.01,step=10.0,key="v12_monto_pago")
+                monto_pago=st.number_input(
+                    "Capital pagado (Bs)", min_value=0.01, max_value=float(saldo_disponible_obl),
+                    step=10.0, format="%.2f", key="v12_monto_pago"
+                )
                 metodo=st.selectbox("Medio de pago",["Efectivo","QR","Transferencia Bancaria","Otro"],key="v12_metodo_pago")
                 referencia=st.text_input("N.º de comprobante / referencia",key="v12_ref_pago")
                 obs_pago=st.text_input("Observación",key="v12_obs_pago")
                 ok=st.form_submit_button("Registrar pago")
                 if ok:
                     try:
-                        o=mapa[elegido]
                         saldo_actual=deudas.calcular_saldo(o,mov_obl_por_id.get(o["id"],[]))
                         if monto_pago > float(saldo_actual): raise ValueError("El pago supera el saldo pendiente.")
                         db.crear_movimiento_obligacion({"obligacion_id":o["id"],"fecha":str(fecha),
@@ -1311,7 +1378,12 @@ elif pagina == "💰 Finanzas":
                         st.success("Pago registrado en el auxiliar de deuda. Aún no genera movimiento automático en caja/bancos.")
                         st.rerun()
                     except Exception as e: st.error(f"No se pudo registrar el pago: {e}")
-        else: st.info("Registra primero una obligación.")
+        elif obligaciones_a_revisar:
+            st.info("Las obligaciones aparecen aquí para corregir su saldo inicial. Confirma la que todavía tenga capital pendiente.")
+        elif obligaciones:
+            st.info("Todas las obligaciones registradas tienen saldo cero. No hay capital pendiente de devolución.")
+        else:
+            st.info("Registra primero una obligación.")
 
         st.subheader("Detalle de obligaciones")
         if resumen_obl["obligaciones"]:
@@ -4870,20 +4942,10 @@ elif pagina == "💸 Egresos":
     nombre_encargado = usuario_actual.get("nombre") or usuario_actual.get("username")
     tab_reg, tab_hist = st.tabs(["➕ Registrar egreso", "📜 Historial consolidado"])
     with tab_reg:
-        # Fuera del formulario para que el cambio de tipo actualice las categorías al instante.
-        tipo = st.radio(
-            "Tipo de egreso",
-            ["Compra", "Gasto / pago"],
-            horizontal=True,
-            key="v13_tipo_egreso_unico",
-        )
-        categorias = CATEGORIAS_COMPRA if tipo == "Compra" else CATEGORIAS_GASTO_OPERATIVO
         with st.form("v13_form_egreso_unico", clear_on_submit=True):
-            categoria = st.selectbox(
-                "Categoría",
-                categorias,
-                key=f"v13_categoria_egreso_{tipo}",
-            )
+            tipo = st.radio("Tipo de egreso", ["Compra", "Gasto / pago"], horizontal=True)
+            categorias = CATEGORIAS_COMPRA if tipo == "Compra" else CATEGORIAS_GASTO_OPERATIVO
+            categoria = st.selectbox("Categoría", categorias)
             fecha = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
             monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0, format="%.2f")
             col1, col2 = st.columns(2)
