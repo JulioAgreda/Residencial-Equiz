@@ -1,0 +1,36 @@
+EQUISE — Conciliación bancaria interactiva (primera versión)
+
+ARCHIVOS
+- app.py: reemplaza el app.py actual del repositorio.
+- db.py: reemplaza el db.py actual del repositorio.
+No reemplazar otros módulos.
+
+QUÉ INCORPORA
+1. En «En el banco, sin registrar» aparece «Resolver movimientos manualmente».
+2. Para cada movimiento bancario se pueden seleccionar uno o varios movimientos pendientes del sistema.
+3. Se puede distribuir el importe del banco entre varios registros del sistema.
+4. La suma de las asignaciones debe coincidir exactamente con el importe bancario.
+5. Un registro del sistema puede recibir asignaciones parciales desde más de una transferencia, sin superar su importe disponible.
+6. Se puede retirar una asignación manual antes de guardar la conciliación.
+7. Las asignaciones manuales se incluyen en la instantánea del historial.
+8. Las asignaciones no crean, editan ni eliminan ingresos, gastos o movimientos financieros originales.
+
+LIMITACIONES
+- Las asignaciones viven en la sesión mientras se trabaja; para conservarlas como antecedente, guardar la conciliación en el historial.
+- El historial guarda la instantánea y las asignaciones, pero todavía no existe una tabla independiente para reabrir y continuar una conciliación manual después de cerrar la sesión.
+- Solo se proponen registros pendientes del sistema, con la misma dirección (ingreso/egreso) y dentro de 45 días.
+- No se crea automáticamente un ingreso o egreso faltante; debe registrarse en su módulo contable.
+- No se modifica el algoritmo automático.
+
+INSTALACIÓN
+1. Extraer app.py y db.py del ZIP.
+2. Reemplazar ambos archivos en la carpeta principal del repositorio residencial-equiz.
+3. Confirmar el commit y esperar el despliegue de Streamlit.
+4. Subir nuevamente el extracto y revisar «Resolver movimientos manualmente».
+5. Probar primero con un caso conocido.
+
+VALIDACIÓN
+Los dos archivos pasaron validación sintáctica Python. No se ejecutó contra Supabase real ni contra el despliegue Streamlit del usuario. No se incluye ni requiere una nueva migración SQL en esta primera versión.
+
+PRUEBA RECOMENDADA
+Usar un movimiento conocido y uno o varios registros del sistema cuya suma coincida exactamente con el importe bancario. Confirmar que el indicador de conciliados aumenta y que los importes originales no cambian.

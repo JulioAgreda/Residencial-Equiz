@@ -8,9 +8,6 @@ import pandas as pd
 from datetime import date
 import bcrypt
 import db
-st.write("Módulo DB cargado desde:", db.__file__)
-st.write("Función de historial disponible:",
-         hasattr(db, "listar_conciliaciones_bancarias"))
 import accesos
 import aire_acondicionado
 import compromisos
@@ -3830,20 +3827,30 @@ elif pagina == "🏦 Conciliación bancaria":
         ext_cb["lineas"], conciliacion.unificar_sistema(rd_cb["movimientos"], movs_cuadre_cb), dias=dias_cb, incluir_efectivo=efectivo_cb,
         palabras_excluir=[p.strip() for p in palabras_cb.split(",") if p.strip()], desde=ext_cb["desde"], hasta=ext_cb["hasta"])
     rs_cb = r_cb["resumen"]
+    clave_manual_cb = f"{firma_cb}_{ext_cb['desde']}_{ext_cb['hasta']}"
+    clave_estado_manual_cb = f"cb_asignaciones_manuales_{clave_manual_cb}"
+    if clave_estado_manual_cb not in st.session_state:
+        st.session_state[clave_estado_manual_cb] = {}
+    asignaciones_manual_cb = st.session_state[clave_estado_manual_cb]
+    cantidad_resuelta_manual_cb = len(asignaciones_manual_cb)
 
     # ---------------- 4. Resultado ----------------
     st.subheader("3. Resultado")
     comparables_cb = rs_cb["banco"]["n"] - rs_cb["excluidos"]["n"]
-    pct_cb = round(100 * rs_cb["conciliado"]["n"] / comparables_cb) if comparables_cb else 0
+    conciliados_totales_cb = rs_cb["conciliado"]["n"] + cantidad_resuelta_manual_cb
+    pendientes_banco_cb = max(0, rs_cb["sin_registro"]["n"] - cantidad_resuelta_manual_cb)
+    pct_cb = round(100 * conciliados_totales_cb / comparables_cb) if comparables_cb else 0
     cr1, cr2, cr3, cr4 = st.columns(4)
-    cr1.metric("Conciliados", f'{rs_cb["conciliado"]["n"]} de {comparables_cb}', help=f"{pct_cb}% de los movimientos del banco ya están en el sistema")
-    cr2.metric("En el banco, sin registrar", rs_cb["sin_registro"]["n"],
+    cr1.metric("Conciliados", f'{conciliados_totales_cb} de {comparables_cb}', help=f"{pct_cb}% de los movimientos bancarios están conciliados automática o manualmente")
+    cr2.metric("En el banco, sin registrar", pendientes_banco_cb,
                help=f'Entra {fmt_money(rs_cb["sin_registro"]["creditos"])} · Sale {fmt_money(rs_cb["sin_registro"]["debitos"])}')
     cr3.metric("En el sistema, sin banco", rs_cb["sistema_sin_banco"]["n"],
                help=f'Ingresos {fmt_money(rs_cb["sistema_sin_banco"]["ingresos"])} · Egresos {fmt_money(rs_cb["sistema_sin_banco"]["egresos"])}')
     cr4.metric("Efectivo (no comparado)", rs_cb["efectivo_no_comparado"]["n"])
-    st.markdown(f"**{pct_cb}%** de los movimientos del banco ya están registrados en el sistema. "
-                f"Sin registrar: entra {fmt_money(rs_cb['sin_registro']['creditos'])} y sale {fmt_money(rs_cb['sin_registro']['debitos'])}.")
+    st.markdown(f"**{pct_cb}%** de los movimientos del banco están conciliados automática o manualmente. "
+                f"Pendientes de resolver: {pendientes_banco_cb}.")
+    if cantidad_resuelta_manual_cb:
+        st.caption(f"Se han vinculado manualmente {cantidad_resuelta_manual_cb} movimiento(s) bancario(s) en esta revisión.")
     if rs_cb["por_confianza"]["Revisar"] or rs_cb["por_confianza"]["Media"]:
         st.caption(f'Coincidencias: {rs_cb["por_confianza"]["Alta"]} con confianza alta, {rs_cb["por_confianza"]["Media"]} media y '
                    f'{rs_cb["por_confianza"]["Revisar"]} para revisar (pestaña «Conciliados»).')
@@ -3865,6 +3872,120 @@ elif pagina == "🏦 Conciliación bancaria":
                                 + (f" — _{l_cb['detalle']}_" if l_cb["detalle"] else ""))
                     for causa_cb in x_cb["causas"]:
                         st.markdown(f"- {causa_cb}")
+
+            # ---------- Conciliación manual: asignar un movimiento bancario a uno o varios registros ----------
+            st.divider()
+            st.subheader("Resolver movimientos manualmente")
+            st.info("Selecciona los registros del sistema que corresponden a cada movimiento bancario. La suma asignada debe ser exactamente igual al importe del banco. Esto solo crea una relación de conciliación: no modifica ni duplica ingresos o gastos.")
+            asignaciones_manual_cb = st.session_state[clave_estado_manual_cb]
+
+            movimientos_sistema_libres_cb = [x["mov"] for x in r_cb["sistema_sin_banco"]]
+            def _etiqueta_mov_sistema_cb(m):
+                return (f"{m['fecha']:%d/%m/%Y} · {m.get('tipo','')} · Bs {abs(float(m.get('monto') or 0)):,.2f} · "
+                        f"{m.get('origen','')} · {m.get('persona','')} · {m.get('detalle','')[:75]}")
+
+            total_resueltos_manual_cb = 0
+            for item_manual_cb in r_cb["banco_sin_registro"]:
+                linea_manual_cb = item_manual_cb["linea"]
+                idx_banco_manual_cb = int(linea_manual_cb["idx"])
+                monto_banco_manual_cb = round(abs(float(linea_manual_cb["monto"])), 2)
+                direccion_manual_cb = "Ingreso" if float(linea_manual_cb["monto"]) > 0 else "Egreso"
+                asignacion_existente_cb = asignaciones_manual_cb.get(str(idx_banco_manual_cb))
+
+                titulo_manual_cb = (f"{linea_manual_cb['fecha']:%d/%m/%Y} · "
+                                    f"{'Entrada' if direccion_manual_cb == 'Ingreso' else 'Salida'} · "
+                                    f"Bs {monto_banco_manual_cb:,.2f} · "
+                                    f"{linea_manual_cb.get('contraparte') or linea_manual_cb.get('transaccion') or 'Sin descripción'}")
+                with st.expander(("✅ " if asignacion_existente_cb else "⚠️ ") + titulo_manual_cb,
+                                 expanded=not bool(asignacion_existente_cb)):
+                    if asignacion_existente_cb:
+                        st.success("Asignación manual guardada para esta revisión.")
+                        for a_cb in asignacion_existente_cb["asignaciones"]:
+                            mov_a_cb = next((m for m in movimientos_sistema_libres_cb if int(m["idx"]) == int(a_cb["sistema_idx"])), None)
+                            etiqueta_a_cb = _etiqueta_mov_sistema_cb(mov_a_cb) if mov_a_cb else f"Registro sistema #{a_cb['sistema_idx']}"
+                            st.write(f"• Bs {float(a_cb['monto']):,.2f} → {etiqueta_a_cb}")
+                        if st.button("Quitar asignación manual", key=f"cb_quitar_manual_{clave_manual_cb}_{idx_banco_manual_cb}"):
+                            asignaciones_manual_cb.pop(str(idx_banco_manual_cb), None)
+                            st.session_state[clave_estado_manual_cb] = asignaciones_manual_cb
+                            st.rerun()
+                        total_resueltos_manual_cb += 1
+                        continue
+
+                    candidatos_manual_cb = []
+                    for mov_candidato_cb in movimientos_sistema_libres_cb:
+                        if mov_candidato_cb.get("tipo") != direccion_manual_cb:
+                            continue
+                        diferencia_dias_cb = abs((linea_manual_cb["fecha"] - mov_candidato_cb["fecha"]).days)
+                        if diferencia_dias_cb > max(45, dias_cb):
+                            continue
+                        candidatos_manual_cb.append(mov_candidato_cb)
+
+                    if not candidatos_manual_cb:
+                        st.warning("No hay registros pendientes del sistema con la misma dirección (ingreso/egreso) dentro de los 45 días. Revisa la pestaña «En el sistema, sin banco» o registra el movimiento que falte en su módulo.")
+                        continue
+
+                    usados_sistema_manual_cb = {}
+                    for asignacion_otro_cb in asignaciones_manual_cb.values():
+                        for parte_cb in asignacion_otro_cb.get("asignaciones", []):
+                            k_s_cb = str(parte_cb["sistema_idx"])
+                            usados_sistema_manual_cb[k_s_cb] = usados_sistema_manual_cb.get(k_s_cb, 0.0) + float(parte_cb["monto"])
+
+                    opciones_candidatos_cb = [int(m["idx"]) for m in candidatos_manual_cb]
+                    etiquetas_candidatos_cb = {int(m["idx"]): _etiqueta_mov_sistema_cb(m) for m in candidatos_manual_cb}
+                    seleccion_manual_cb = st.multiselect(
+                        "Registros del sistema que corresponden a este movimiento",
+                        options=opciones_candidatos_cb,
+                        format_func=lambda v: etiquetas_candidatos_cb.get(v, str(v)),
+                        key=f"cb_seleccion_manual_{clave_manual_cb}_{idx_banco_manual_cb}",
+                        help="Puedes seleccionar uno o varios registros. Por ejemplo, un solo depósito puede cubrir alquiler, agua y electricidad."
+                    )
+                    if seleccion_manual_cb:
+                        st.caption("Indica cuánto del importe de cada registro corresponde a esta transferencia.")
+                        partes_nuevas_manual_cb = []
+                        for idx_sistema_sel_cb in seleccion_manual_cb:
+                            mov_sel_cb = next(m for m in candidatos_manual_cb if int(m["idx"]) == int(idx_sistema_sel_cb))
+                            saldo_disp_cb = round(abs(float(mov_sel_cb.get("monto") or 0)) - usados_sistema_manual_cb.get(str(idx_sistema_sel_cb), 0.0), 2)
+                            if saldo_disp_cb <= 0:
+                                st.warning(f"El registro seleccionado ya está asignado completamente: {etiquetas_candidatos_cb[idx_sistema_sel_cb]}")
+                                continue
+                            monto_sugerido_cb = min(monto_banco_manual_cb, saldo_disp_cb)
+                            monto_parte_cb = st.number_input(
+                                f"Importe a asignar · {etiquetas_candidatos_cb[idx_sistema_sel_cb]}",
+                                min_value=0.0, max_value=float(saldo_disp_cb), value=float(monto_sugerido_cb),
+                                step=0.01, format="%.2f",
+                                key=f"cb_monto_manual_{clave_manual_cb}_{idx_banco_manual_cb}_{idx_sistema_sel_cb}"
+                            )
+                            partes_nuevas_manual_cb.append({"sistema_idx": int(idx_sistema_sel_cb), "monto": round(float(monto_parte_cb), 2)})
+                        suma_asignada_cb = round(sum(x["monto"] for x in partes_nuevas_manual_cb), 2)
+                        st.write(f"**Total asignado:** Bs {suma_asignada_cb:,.2f} / Bs {monto_banco_manual_cb:,.2f}")
+                        if st.button("Confirmar esta conciliación manual", key=f"cb_confirmar_manual_{clave_manual_cb}_{idx_banco_manual_cb}",
+                                      disabled=not partes_nuevas_manual_cb, use_container_width=True):
+                            if abs(suma_asignada_cb - monto_banco_manual_cb) > 0.004:
+                                st.error("La suma asignada debe coincidir exactamente con el importe del movimiento bancario.")
+                            else:
+                                # Revalidar capacidad disponible para evitar asignar dos veces el mismo registro.
+                                capacidad_ok_cb = True
+                                for parte_cb in partes_nuevas_manual_cb:
+                                    mov_validar_cb = next(m for m in candidatos_manual_cb if int(m["idx"]) == parte_cb["sistema_idx"])
+                                    ya_usado_cb = usados_sistema_manual_cb.get(str(parte_cb["sistema_idx"]), 0.0)
+                                    if parte_cb["monto"] <= 0 or parte_cb["monto"] > round(abs(float(mov_validar_cb.get("monto") or 0)) - ya_usado_cb, 2):
+                                        capacidad_ok_cb = False
+                                if not capacidad_ok_cb:
+                                    st.error("Uno de los registros supera su saldo disponible. Revisa los importes.")
+                                else:
+                                    asignaciones_manual_cb[str(idx_banco_manual_cb)] = {
+                                        "banco_idx": idx_banco_manual_cb,
+                                        "fecha_banco": str(linea_manual_cb["fecha"]),
+                                        "monto_banco": float(linea_manual_cb["monto"]),
+                                        "descripcion_banco": str(linea_manual_cb.get("contraparte") or linea_manual_cb.get("transaccion") or ""),
+                                        "asignaciones": partes_nuevas_manual_cb
+                                    }
+                                    st.session_state[clave_estado_manual_cb] = asignaciones_manual_cb
+                                    st.rerun()
+                    else:
+                        st.caption("Selecciona al menos un registro para habilitar la conciliación manual.")
+
+            st.caption(f"Movimientos bancarios resueltos manualmente en esta revisión: {total_resueltos_manual_cb} de {len(r_cb['banco_sin_registro'])}.")
         else:
             st.success("Todos los movimientos del banco están registrados en el sistema. 🎉")
     with t_sis:
@@ -3917,6 +4038,7 @@ elif pagina == "🏦 Conciliación bancaria":
                     "efectivo": r_cb["efectivo"],
                     "banco": r_cb["banco"],
                     "resumen": resumen_guardado,
+                    "conciliacion_manual": st.session_state.get(clave_estado_manual_cb, {}) if "clave_estado_manual_cb" in locals() else {},
                     "parametros": {"dias": dias_cb, "incluir_efectivo": efectivo_cb, "palabras_excluir": [p.strip() for p in palabras_cb.split(",") if p.strip()]}
                 }, default=str))
                 db.guardar_conciliacion_bancaria({
