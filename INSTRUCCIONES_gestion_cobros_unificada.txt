@@ -1,0 +1,41 @@
+EQUISE — Gestión de cobros unificada (primera versión)
+
+BASE DE ESTA ACTUALIZACIÓN
+Esta versión parte de la rama de aplicación que contiene las correcciones recientes de
+conciliación manual, filtro de búsqueda, clasificación de movimientos, conciliación mixta,
+diferencias justificadas y saldos de reembolso pendientes. Se conserva ese código.
+
+CAMBIOS DE INTERFAZ
+- El menú principal agrupa Pagos de Alquiler, Electricidad y Agua en «Gestión de cobros».
+- Buscador/selector de apartamento con selección persistente.
+- Navegación Anterior/Siguiente entre apartamentos.
+- Selector de mes y año compartido por los tres servicios.
+- Resumen con esperado, pagado y saldo pendiente.
+- Pestañas de Resumen, Alquiler, Electricidad, Agua e Historial.
+- Registro de pagos/abonos en las tablas actuales.
+- Recibos para los pagos visibles en el periodo.
+
+LÍMITES DE ESTA PRIMERA VERSIÓN
+- Alquiler: si no existe el periodo, se crea con el alquiler habitual configurado.
+- Electricidad y agua: solo se permite registrar abonos si ya existe el periodo con lectura/
+  consumo; esta pantalla no inventa lecturas ni cargos. Si falta el periodo, informa al usuario.
+- El historial unificado muestra los pagos del apartamento y periodo elegidos.
+- La edición y eliminación avanzada de pagos sigue en los módulos antiguos/correspondientes;
+  esta primera pantalla se centra en consulta y registro continuo.
+
+INSTALACIÓN
+1. Haz una copia de seguridad del app.py actual.
+2. Extrae el ZIP y reemplaza únicamente app.py en la raíz del repositorio residencial-equiz.
+3. No reemplaces db.py, schema.sql ni ejecutes migraciones SQL.
+4. Confirma el commit y espera el despliegue.
+5. Prueba con un apartamento y periodo conocidos:
+   a) revisar resumen;
+   b) registrar un abono de alquiler;
+   c) registrar abono de electricidad/agua solo si existe lectura;
+   d) confirmar que los pagos siguen apareciendo en los módulos e informes existentes.
+6. Si la pantalla carga correctamente, luego podemos añadir edición de abonos, filtros históricos
+   más amplios y registro de lecturas sin abandonar esta vista.
+
+VALIDACIÓN
+El archivo pasó análisis sintáctico y compilación en memoria. No se ha ejecutado contra
+Supabase ni en el despliegue real. No se modificó db.py ni se hicieron cambios de esquema.
