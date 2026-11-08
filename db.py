@@ -1013,3 +1013,75 @@ def anular_entrega_anticretico(entrega_id, motivo, anulado_por):
     if isinstance(data, list):
         return data[0] if data else None
     return data
+
+
+# ---------- Compatibilidad: garantías y devoluciones existentes ----------
+def listar_garantias_alquiler(apartamento_id=None, estado=None):
+    sb = get_client()
+    q = sb.table("garantias_alquiler").select("*").order("fecha_recepcion", desc=True)
+    if apartamento_id is not None:
+        q = q.eq("apartamento_id", apartamento_id)
+    if estado:
+        q = q.eq("estado", estado)
+    res = q.execute()
+    return res.data or []
+
+
+def crear_garantia_alquiler(payload: dict):
+    """Registra garantía y entrada de tesorería en una sola transacción SQL."""
+    sb = get_client()
+    return sb.rpc("registrar_garantia_y_movimiento", {"p_payload": payload}).execute()
+
+
+def listar_danos_garantia(garantia_id):
+    sb = get_client()
+    res = (sb.table("danos_garantia_alquiler").select("*")
+           .eq("garantia_id", garantia_id).order("fecha", desc=False).execute())
+    return res.data or []
+
+
+def crear_dano_garantia(payload: dict):
+    sb = get_client()
+    return sb.table("danos_garantia_alquiler").insert(payload).execute()
+
+
+def actualizar_garantia_alquiler(garantia_id, payload: dict):
+    sb = get_client()
+    return sb.table("garantias_alquiler").update(payload).eq("id", garantia_id).execute()
+
+
+def registrar_devolucion_garantia(payload: dict):
+    """Registra devolución y salida de tesorería en una sola transacción SQL."""
+    sb = get_client()
+    return sb.rpc("registrar_devolucion_garantia_y_movimiento", {"p_payload": payload}).execute()
+
+
+def listar_devoluciones_garantia(garantia_id):
+    sb = get_client()
+    res = (sb.table("devoluciones_garantia_alquiler").select("*")
+           .eq("garantia_id", garantia_id).order("fecha", desc=True).execute())
+    return res.data or []
+
+
+def listar_devoluciones_anticretico(apartamento_id):
+    """Lista devoluciones de capital anticrético de un apartamento, sin modificar el contrato."""
+    sb = get_client()
+    res = (sb.table("devoluciones_anticretico")
+           .select("*")
+           .eq("apartamento_id", apartamento_id)
+           .order("fecha", desc=True)
+           .execute())
+    return res.data or []
+
+
+def registrar_devolucion_anticretico(payload: dict):
+    """Registra una devolución parcial o total de capital anticrético."""
+    sb = get_client()
+    return sb.table("devoluciones_anticretico").insert(payload).execute()
+
+
+def listar_movimientos_garantias_tesoreria():
+    """Consulta únicamente entradas y salidas originadas por garantías de alquiler."""
+    sb = get_client()
+    res = sb.rpc("listar_movimientos_garantias_tesoreria").execute()
+    return res.data or []

@@ -1,36 +1,47 @@
-EQUISE - MÓDULO DE ENTREGAS DEL CAPITAL ANTICRÉTICO
+EQUISE — INTEGRACIÓN DEL MÓDULO ANTICRÉTICO Y RESTAURACIÓN DE DEVOLUCIONES
 
-CONTENIDO
-- app_entregas_anticretico.py: aplicación basada en la versión actualizada de EQUISE.
-- db_entregas_anticretico.py: capa DB con consultas y RPC de entregas.
-- recibo_entregas_anticretico.py: generador de recibos PDF individuales.
-- migracion_entregas_anticretico.sql: migración aditiva para Supabase.
+OBJETIVO
+Corregir el error:
+  module 'db' has no attribute 'listar_devoluciones_anticretico'
 
-QUÉ INCORPORA
-1. Registra cada entrega con su fecha real de recepción, monto, moneda, etapa (antes/después de firma), medio, referencia, entregante, concepto y observación.
-2. Genera un recibo PDF individual con código AC-000001, AC-000002, etc.
-3. Muestra capital contractual, total recibido y saldo pendiente.
-4. Conserva recibos anulados y su motivo, usuario y fecha de anulación.
-5. Solo las entregas vigentes se suman al total recibido.
-6. Las nuevas entregas se validan en una función SQL transaccional, bloqueando el apartamento para evitar que dos registros simultáneos excedan el capital acordado.
-7. No modifica apartamentos, pagos de alquiler, servicios, devoluciones ni conciliaciones bancarias.
+Esta actualización integra las funciones de entregas parciales del capital anticrético
+con las funciones anteriores de garantías y devoluciones que ya utiliza la aplicación.
+
+ARCHIVOS DEL PAQUETE
+- app.py: aplicación con el módulo de entregas parciales.
+- db.py: capa de datos integrada. Conserva las funciones nuevas y restaura las funciones
+  anteriores de garantías, devoluciones de garantías y devoluciones de capital anticrético.
+- recibo.py: generador de recibos del módulo anticrético.
 
 INSTALACIÓN
-1. Haz una copia de seguridad del repositorio y de la base de datos.
-2. En Supabase SQL Editor ejecuta una sola vez migracion_entregas_anticretico.sql.
-3. La tabla nueva mantiene RLS habilitado y no crea políticas públicas. La aplicación debe utilizar SUPABASE_KEY con service_role/secret exclusivamente en los secretos del servidor (nunca en el navegador ni en código público). Si el secreto actual es anon/publishable, no habilites políticas abiertas: primero configura una clave privada de servidor y revisa la configuración de seguridad.
-4. Reemplaza app.py por app_entregas_anticretico.py (renombrándolo a app.py).
-5. Reemplaza db.py por db_entregas_anticretico.py (renombrándolo a db.py).
-6. Reemplaza recibo.py por recibo_entregas_anticretico.py (renombrándolo a recibo.py).
-7. Conserva el resto de módulos y assets actuales, incluida la carpeta assets/ del logo.
-8. Reinicia Streamlit.
+1. Descarga una copia de seguridad de los archivos actuales del repositorio.
+2. Reemplaza app.py por el app.py de este paquete.
+3. Reemplaza db.py por el db.py de este paquete.
+4. Reemplaza recibo.py por el recibo.py de este paquete.
+5. Conserva los demás módulos y archivos actuales del proyecto; no los elimines ni reemplaces.
+6. Reinicia la aplicación en Streamlit.
 
-IMPORTANTE SOBRE DATOS HISTÓRICOS
-- No se crean entregas automáticamente desde monto_anticretico: ese campo es el capital contractual, no un desglose probado de cobros.
-- Las entregas históricas deben cargarse manualmente con fecha real y respaldo documental.
-- Si una entrega se registró mal, se anula con motivo y luego se registra una nueva entrega vinculada al recibo anulado. El recibo anterior no se borra.
-- No se debe usar la fecha de registro del sistema como fecha de recepción: el formulario pide la fecha real del dinero.
-- La tabla de entregas es independiente de la tabla de devoluciones del capital.
+IMPORTANTE SOBRE SUPABASE
+- Esta actualización corrige la capa Python que ocasiona el error mostrado.
+- No requiere volver a ejecutar la migración SQL si la tabla entregas_anticretico y sus funciones RPC
+  ya fueron creadas correctamente en Supabase.
+- No elimina ni modifica registros de devoluciones existentes.
+- Las funciones de devoluciones siguen consultando la tabla devoluciones_anticretico y registrando
+  devoluciones en esa misma tabla, como en la versión anterior.
+- Las entregas recibidas del capital se mantienen en entregas_anticretico; no se mezclan con
+  devoluciones ni con alquileres.
 
-VALIDACIÓN
-La sintaxis Python debe validarse con py_compile. La migración y RPC requieren ejecutarse y probarse en el proyecto Supabase real antes de poner en producción. No se han probado con credenciales reales ni se afirma que la migración ya esté aplicada.
+VALIDACIONES REALIZADAS
+- Compilación sintáctica de app.py, db.py y recibo.py: correcta.
+- Comprobación estática: todas las llamadas db.<función> realizadas por app.py tienen
+  una función correspondiente en db.py.
+- No se ha ejecutado una prueba contra el proyecto real de Supabase ni contra Streamlit Cloud.
+
+DESPUÉS DE ACTUALIZAR
+Abrir un apartamento con contrato anticrético y comprobar:
+1. Que carga el historial de devoluciones sin el error de atributo.
+2. Que muestra el capital devuelto y el saldo pendiente.
+3. Que permite registrar una devolución de prueba controlada (sin confirmar si no corresponde).
+4. Que la sección de entregas parciales carga su historial.
+
+No registrar movimientos ficticios en apartamentos reales para probar.
