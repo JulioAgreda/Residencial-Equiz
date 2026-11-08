@@ -1,4 +1,5 @@
 import calendar
+import copy
 import io
 import json
 import openpyxl
@@ -3826,19 +3827,123 @@ elif pagina == "🏦 Conciliación bancaria":
     r_cb = conciliacion.conciliar(
         ext_cb["lineas"], conciliacion.unificar_sistema(rd_cb["movimientos"], movs_cuadre_cb), dias=dias_cb, incluir_efectivo=efectivo_cb,
         palabras_excluir=[p.strip() for p in palabras_cb.split(",") if p.strip()], desde=ext_cb["desde"], hasta=ext_cb["hasta"])
-    rs_cb = r_cb["resumen"]
+    # Conservar el resultado automático original y aplicar encima las correcciones manuales.
+    r_cb_base = r_cb
     clave_manual_cb = f"{firma_cb}_{ext_cb['desde']}_{ext_cb['hasta']}"
     clave_estado_manual_cb = f"cb_asignaciones_manuales_{clave_manual_cb}"
     if clave_estado_manual_cb not in st.session_state:
         st.session_state[clave_estado_manual_cb] = {}
     asignaciones_manual_cb = st.session_state[clave_estado_manual_cb]
-    cantidad_resuelta_manual_cb = len(asignaciones_manual_cb)
+
+    # Reconstruir el resultado visible liberando cualquier coincidencia automática
+    # que use un registro reasignado manualmente.
+    r_cb = copy.deepcopy(r_cb_base)
+    banco_por_idx_cb = {int(x["idx"]): x for x in r_cb_base["banco"]}
+    sistema_por_idx_cb = {}
+    for par_base_cb in r_cb_base["pares"]:
+        for mov_base_cb in par_base_cb["sistema"]:
+            sistema_por_idx_cb[int(mov_base_cb["idx"])] = mov_base_cb
+    for pendiente_base_cb in r_cb_base["sistema_sin_banco"]:
+        mov_base_cb = pendiente_base_cb["mov"]
+        sistema_por_idx_cb[int(mov_base_cb["idx"])] = mov_base_cb
+
+    indices_sistema_manuales_cb = {
+        int(parte_cb["sistema_idx"])
+        for asignacion_cb in asignaciones_manual_cb.values()
+        for parte_cb in asignacion_cb.get("asignaciones", [])
+    }
+    pares_restantes_cb = []
+    pares_liberados_cb = []
+    for par_cb in r_cb["pares"]:
+        ids_par_cb = {int(m["idx"]) for m in par_cb["sistema"]}
+        if ids_par_cb & indices_sistema_manuales_cb:
+            pares_liberados_cb.append(par_cb)
+        else:
+            pares_restantes_cb.append(par_cb)
+    r_cb["pares"] = pares_restantes_cb
+
+    bancos_pendientes_cb = {int(x["linea"]["idx"]): x for x in r_cb["banco_sin_registro"]}
+    sistemas_pendientes_cb = {int(x["mov"]["idx"]): x for x in r_cb["sistema_sin_banco"]}
+    for par_liberado_cb in pares_liberados_cb:
+        for banco_liberado_cb in par_liberado_cb["banco"]:
+            bancos_pendientes_cb[int(banco_liberado_cb["idx"])] = {
+                "linea": banco_liberado_cb,
+                "causas": ["Coincidencia automática liberada por una corrección manual."],
+                "sugerencia": "Revisar y volver a asignar manualmente."
+            }
+        for sistema_liberado_cb in par_liberado_cb["sistema"]:
+            sistemas_pendientes_cb[int(sistema_liberado_cb["idx"])] = {
+                "mov": sistema_liberado_cb,
+                "causas": ["Registro liberado de una coincidencia automática por corrección manual."]
+            }
+
+    manual_bancos_cb = set()
+    manual_sistemas_usados_cb = {}
+    pares_manuales_cb = []
+    for idx_banco_asig_cb, asignacion_cb in asignaciones_manual_cb.items():
+        idx_banco_asig_cb = int(idx_banco_asig_cb)
+        linea_asig_cb = banco_por_idx_cb.get(idx_banco_asig_cb)
+        if not linea_asig_cb:
+            continue
+        manual_bancos_cb.add(idx_banco_asig_cb)
+        bancos_pendientes_cb.pop(idx_banco_asig_cb, None)
+        sistemas_par_manual_cb = []
+        for parte_cb in asignacion_cb.get("asignaciones", []):
+            idx_sistema_parte_cb = int(parte_cb["sistema_idx"])
+            mov_original_parte_cb = sistema_por_idx_cb.get(idx_sistema_parte_cb)
+            if not mov_original_parte_cb:
+                continue
+            importe_parte_cb = round(float(parte_cb["monto"]), 2)
+            manual_sistemas_usados_cb[idx_sistema_parte_cb] = manual_sistemas_usados_cb.get(idx_sistema_parte_cb, 0.0) + importe_parte_cb
+            mov_parte_cb = dict(mov_original_parte_cb)
+            mov_parte_cb["monto"] = importe_parte_cb
+            mov_parte_cb["monto_conciliado_manual"] = importe_parte_cb
+            sistemas_par_cb.append(mov_parte_cb)
+        pares_manuales_cb.append({
+            "banco": [linea_asig_cb],
+            "sistema": sistemas_par_cb,
+            "union": "Conciliación manual",
+            "confianza": "Manual",
+            "dias": max([abs((linea_asig_cb["fecha"] - x["fecha"]).days) for x in sistemas_par_cb] or [0]),
+            "razones": ["Asignación confirmada manualmente por el usuario."]
+        })
+
+    # Retirar del listado pendiente los registros usados manualmente; si la asignación
+    # fue parcial, dejar únicamente el saldo no aplicado como pendiente.
+    for idx_sistema_usado_cb, monto_usado_cb in manual_sistemas_usados_cb.items():
+        mov_original_cb = sistema_por_idx_cb[idx_sistema_usado_cb]
+        sistemas_pendientes_cb.pop(idx_sistema_usado_cb, None)
+        saldo_residual_cb = round(abs(float(mov_original_cb.get("monto") or 0)) - monto_usado_cb, 2)
+        if saldo_residual_cb > 0.004:
+            mov_residual_cb = dict(mov_original_cb)
+            mov_residual_cb["monto"] = saldo_residual_cb
+            mov_residual_cb["detalle"] = (str(mov_original_cb.get("detalle") or "") + " [saldo no asignado]").strip()
+            sistemas_pendientes_cb[idx_sistema_usado_cb] = {
+                "mov": mov_residual_cb,
+                "causas": ["Saldo restante de un registro parcialmente conciliado manualmente."]
+            }
+
+    r_cb["pares"].extend(pares_manuales_cb)
+    r_cb["banco_sin_registro"] = sorted(bancos_pendientes_cb.values(), key=lambda x: (x["linea"]["fecha"], x["linea"]["idx"]))
+    r_cb["sistema_sin_banco"] = sorted(sistemas_pendientes_cb.values(), key=lambda x: (x["mov"]["fecha"], x["mov"]["idx"]))
+    r_cb["pares"].sort(key=lambda p: (p["banco"][0]["fecha"], p["banco"][0]["idx"]))
+    sistema_resumen_cb = conciliacion._preparar_sistema(
+        conciliacion.unificar_sistema(rd_cb["movimientos"], movs_cuadre_cb)
+    )
+    for mov_resumen_cb in sistema_resumen_cb:
+        mov_resumen_cb["en_periodo"] = ext_cb["desde"] <= mov_resumen_cb["fecha"] <= ext_cb["hasta"]
+    r_cb["resumen"] = conciliacion._resumen(
+        r_cb["banco"], r_cb["pares"], r_cb["banco_sin_registro"], r_cb["sistema_sin_banco"],
+        r_cb["excluidos"], sistema_resumen_cb, r_cb["efectivo"]
+    )
+    rs_cb = r_cb["resumen"]
+    cantidad_resuelta_manual_cb = len(pares_manuales_cb)
 
     # ---------------- 4. Resultado ----------------
     st.subheader("3. Resultado")
     comparables_cb = rs_cb["banco"]["n"] - rs_cb["excluidos"]["n"]
-    conciliados_totales_cb = rs_cb["conciliado"]["n"] + cantidad_resuelta_manual_cb
-    pendientes_banco_cb = max(0, rs_cb["sin_registro"]["n"] - cantidad_resuelta_manual_cb)
+    conciliados_totales_cb = rs_cb["conciliado"]["n"]
+    pendientes_banco_cb = rs_cb["sin_registro"]["n"]
     pct_cb = round(100 * conciliados_totales_cb / comparables_cb) if comparables_cb else 0
     cr1, cr2, cr3, cr4 = st.columns(4)
     cr1.metric("Conciliados", f'{conciliados_totales_cb} de {comparables_cb}', help=f"{pct_cb}% de los movimientos bancarios están conciliados automática o manualmente")
@@ -3879,13 +3984,18 @@ elif pagina == "🏦 Conciliación bancaria":
             st.info("Selecciona los registros del sistema que corresponden a cada movimiento bancario. La suma asignada debe ser exactamente igual al importe del banco. Esto solo crea una relación de conciliación: no modifica ni duplica ingresos o gastos.")
             asignaciones_manual_cb = st.session_state[clave_estado_manual_cb]
 
-            movimientos_sistema_libres_cb = [x["mov"] for x in r_cb["sistema_sin_banco"]]
+            movimientos_sistema_libres_cb = list(sistema_por_idx_cb.values())
             def _etiqueta_mov_sistema_cb(m):
                 return (f"{m['fecha']:%d/%m/%Y} · {m.get('tipo','')} · Bs {abs(float(m.get('monto') or 0)):,.2f} · "
                         f"{m.get('origen','')} · {m.get('persona','')} · {m.get('detalle','')[:75]}")
 
             total_resueltos_manual_cb = 0
-            for item_manual_cb in r_cb["banco_sin_registro"]:
+            filas_editables_manual_cb = list(r_cb_base["banco_sin_registro"])
+            ids_banco_editables_cb = {int(x["linea"]["idx"]) for x in filas_editables_manual_cb}
+            for idx_banco_guardado_cb in asignaciones_manual_cb:
+                if int(idx_banco_guardado_cb) not in ids_banco_editables_cb and int(idx_banco_guardado_cb) in banco_por_idx_cb:
+                    filas_editables_manual_cb.append({"linea": banco_por_idx_cb[int(idx_banco_guardado_cb)], "causas": [], "sugerencia": ""})
+            for item_manual_cb in filas_editables_manual_cb:
                 linea_manual_cb = item_manual_cb["linea"]
                 idx_banco_manual_cb = int(linea_manual_cb["idx"])
                 monto_banco_manual_cb = round(abs(float(linea_manual_cb["monto"])), 2)
@@ -3904,7 +4014,12 @@ elif pagina == "🏦 Conciliación bancaria":
                             mov_a_cb = next((m for m in movimientos_sistema_libres_cb if int(m["idx"]) == int(a_cb["sistema_idx"])), None)
                             etiqueta_a_cb = _etiqueta_mov_sistema_cb(mov_a_cb) if mov_a_cb else f"Registro sistema #{a_cb['sistema_idx']}"
                             st.write(f"• Bs {float(a_cb['monto']):,.2f} → {etiqueta_a_cb}")
-                        if st.button("Quitar asignación manual", key=f"cb_quitar_manual_{clave_manual_cb}_{idx_banco_manual_cb}"):
+                        col_editar_asig_cb, col_quitar_asig_cb = st.columns(2)
+                        if col_editar_asig_cb.button("Modificar asignación", key=f"cb_editar_manual_{clave_manual_cb}_{idx_banco_manual_cb}"):
+                            asignaciones_manual_cb.pop(str(idx_banco_manual_cb), None)
+                            st.session_state[clave_estado_manual_cb] = asignaciones_manual_cb
+                            st.rerun()
+                        if col_quitar_asig_cb.button("Quitar asignación manual", key=f"cb_quitar_manual_{clave_manual_cb}_{idx_banco_manual_cb}"):
                             asignaciones_manual_cb.pop(str(idx_banco_manual_cb), None)
                             st.session_state[clave_estado_manual_cb] = asignaciones_manual_cb
                             st.rerun()
@@ -3921,11 +4036,20 @@ elif pagina == "🏦 Conciliación bancaria":
                         candidatos_manual_cb.append(mov_candidato_cb)
 
                     if not candidatos_manual_cb:
-                        st.warning("No hay registros pendientes del sistema con la misma dirección (ingreso/egreso) dentro de los 45 días. Revisa la pestaña «En el sistema, sin banco» o registra el movimiento que falte en su módulo.")
+                        st.warning("No hay registros del sistema con la misma dirección (ingreso/egreso) dentro de los 45 días.")
                         continue
+                    ids_automaticos_candidatos_cb = {
+                        int(m["idx"])
+                        for par_auto_cb in r_cb_base["pares"]
+                        for m in par_auto_cb["sistema"]
+                    }
+                    if any(int(m["idx"]) in ids_automaticos_candidatos_cb for m in candidatos_manual_cb):
+                        st.warning("También puedes seleccionar registros que ya aparecen en «Conciliados». Al confirmar, EQUISE liberará su coincidencia automática anterior y la sustituirá por esta asignación manual. El otro movimiento bancario quedará pendiente para revisión.")
 
                     usados_sistema_manual_cb = {}
-                    for asignacion_otro_cb in asignaciones_manual_cb.values():
+                    for clave_banco_otro_cb, asignacion_otro_cb in asignaciones_manual_cb.items():
+                        if str(clave_banco_otro_cb) == str(idx_banco_manual_cb):
+                            continue
                         for parte_cb in asignacion_otro_cb.get("asignaciones", []):
                             k_s_cb = str(parte_cb["sistema_idx"])
                             usados_sistema_manual_cb[k_s_cb] = usados_sistema_manual_cb.get(k_s_cb, 0.0) + float(parte_cb["monto"])

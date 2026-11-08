@@ -1,0 +1,31 @@
+EQUISE — Conciliación manual con corrección de coincidencias automáticas
+
+INSTALAR
+Reemplaza app.py y db.py en la raíz del repositorio residencial-equiz por los incluidos.
+Haz copia de seguridad antes. No cambies otros archivos. Confirma commit y espera el despliegue.
+
+NUEVO COMPORTAMIENTO
+- El selector manual incluye movimientos del sistema pendientes y también los que ya fueron emparejados automáticamente.
+- Si eliges un registro ya conciliado automáticamente, al confirmar la asignación manual se libera la coincidencia automática anterior.
+- El movimiento bancario que estaba emparejado con ese registro vuelve a pendientes para revisión.
+- La asignación manual sustituye el vínculo anterior; no modifica ni duplica el registro contable original.
+- Puedes modificar o quitar una asignación manual durante la sesión.
+- Se recalculan los resultados automáticos y manuales, evitando contar dos veces el mismo movimiento bancario.
+- Se permite asignación parcial; el saldo no asignado del registro queda pendiente.
+
+EJEMPLO
+Transferencia bancaria Bs 3.100 del 09/10/2026:
+- Alquiler marzo Bs 1.000
+- Alquiler abril Bs 1.000
+- Alquiler mayo Bs 1.100
+Al elegir mayo aunque esté en «Conciliados», el sistema libera el vínculo automático anterior y permite confirmar la nueva relación. El movimiento bancario que tenía ese vínculo quedará pendiente.
+
+ALCANCE Y LIMITACIONES
+- La asignación manual queda en la sesión hasta guardar la conciliación en el historial.
+- El historial guarda la instantánea, pero aún no existe reapertura para continuar editando una conciliación después de cerrar la sesión.
+- Los candidatos deben tener la misma dirección (ingreso/egreso) y fecha dentro de 45 días.
+- No se modifica el importe, fecha ni concepto del registro contable original.
+- No se ejecuta migración SQL.
+
+VALIDACIÓN
+Los archivos app.py y db.py pasaron validación sintáctica AST. No se probó con el Supabase real ni con el despliegue del usuario. Realizar primero una prueba con un movimiento conocido.
