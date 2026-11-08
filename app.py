@@ -2817,91 +2817,137 @@ elif pagina == "💳 Gestión de cobros":
         st.subheader(etiqueta)
         _tarjeta_estado_cobro(etiqueta, esperado, pagado, deuda, periodo)
 
-        # Si aún no existe el periodo, permitir crear la lectura desde esta misma pantalla.
-        if periodo is None:
-            ui_lectura = SERVICIOS_UI[servicio]
-            with st.expander("📏 Registrar lectura y habilitar cobro", expanded=True):
-                st.caption("Registra aquí las lecturas del medidor. Al guardar se creará el periodo y podrás registrar el pago sin salir de Gestión de cobros.")
-                try:
-                    tarifa_actual_integrada = float(db.obtener_tarifa(servicio) or 0)
-                except Exception:
-                    tarifa_actual_integrada = 0.0
-                ultimo_integrado = db.ultimo_periodo_servicio(servicio, apt_cobros["id"])
-                medidores_integrados = calc_consumo.cantidad_medidores_luz(apt_cobros) if servicio == "electricidad" else 1
-                ant_default_integrado = float((ultimo_integrado or {}).get(ui_lectura["col_actual"]) or 0)
-                ant2_default_integrado = float((ultimo_integrado or {}).get("kwh_actual_2") or 0)
-                act_default_integrado = ant_default_integrado
-                act2_default_integrado = ant2_default_integrado
+        ui_lectura = SERVICIOS_UI[servicio]
+        # Lecturas visibles tanto para periodos nuevos como para periodos ya creados.
+        with st.expander("📏 Consultar o modificar lectura", expanded=False):
+            if periodo is None:
+                st.caption("Todavía no existe un periodo para este servicio y mes. Registra las lecturas para crearlo y habilitar los pagos.")
+            else:
+                st.caption("Este periodo ya existe. Puedes corregir las lecturas; los pagos registrados se conservarán y el saldo se recalculará con el nuevo monto esperado.")
 
-                with st.form(f"cobros_lectura_{servicio}_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"):
-                    if medidores_integrados == 2:
-                        st.markdown("**Medidor 1**")
-                    cl1, cl2 = st.columns(2)
-                    with cl1:
-                        lectura_ant_integrada = st.number_input(
-                            ui_lectura["etq_anterior"], min_value=0.0, step=1.0,
-                            value=ant_default_integrado,
-                            key=f"cobros_{servicio}_ant_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
-                        )
-                    with cl2:
-                        lectura_act_integrada = st.number_input(
-                            ui_lectura["etq_actual"], min_value=0.0, step=1.0,
-                            value=act_default_integrado,
-                            key=f"cobros_{servicio}_act_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
-                        )
-                    if medidores_integrados == 2:
-                        st.markdown("**Medidor 2**")
-                        cl3, cl4 = st.columns(2)
-                        with cl3:
-                            lectura_ant2_integrada = st.number_input(
-                                "Medidor 2 · Kwh anterior", min_value=0.0, step=1.0,
-                                value=ant2_default_integrado,
-                                key=f"cobros_{servicio}_ant2_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
-                            )
-                        with cl4:
-                            lectura_act2_integrada = st.number_input(
-                                "Medidor 2 · Kwh actual", min_value=0.0, step=1.0,
-                                value=act2_default_integrado,
-                                key=f"cobros_{servicio}_act2_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
-                            )
-                    else:
-                        lectura_ant2_integrada = lectura_act2_integrada = 0.0
+            try:
+                tarifa_actual_integrada = float(db.obtener_tarifa(servicio) or 0)
+            except Exception:
+                tarifa_actual_integrada = 0.0
 
-                    tarifa_integrada = st.number_input(
-                        ui_lectura["etq_tarifa"], min_value=0.0, step=0.01,
-                        value=tarifa_actual_integrada, format="%.4f",
-                        key=f"cobros_{servicio}_tarifa_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+            ultimo_integrado = db.ultimo_periodo_servicio(servicio, apt_cobros["id"])
+            medidores_integrados = calc_consumo.cantidad_medidores_luz(apt_cobros) if servicio == "electricidad" else 1
+
+            # Si el periodo existe, precargar sus lecturas. Si no, usar la lectura final del periodo anterior.
+            ant_default_integrado = float(
+                (periodo or {}).get(ui_lectura["col_anterior"])
+                if (periodo or {}).get(ui_lectura["col_anterior"]) is not None
+                else (ultimo_integrado or {}).get(ui_lectura["col_actual"]) or 0
+            )
+            act_default_integrado = float((periodo or {}).get(ui_lectura["col_actual"]) or ant_default_integrado)
+            tarifa_default_integrada = float(
+                (periodo or {}).get(ui_lectura["col_tarifa"])
+                if (periodo or {}).get(ui_lectura["col_tarifa"]) is not None
+                else tarifa_actual_integrada
+            )
+            ant2_default_integrado = float(
+                (periodo or {}).get("kwh_anterior_2")
+                if (periodo or {}).get("kwh_anterior_2") is not None
+                else (ultimo_integrado or {}).get("kwh_actual_2") or 0
+            )
+            act2_default_integrado = float((periodo or {}).get("kwh_actual_2") or ant2_default_integrado)
+
+            with st.form(f"cobros_lectura_{servicio}_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"):
+                if medidores_integrados == 2:
+                    st.markdown("**Medidor 1**")
+                cl1, cl2 = st.columns(2)
+                with cl1:
+                    lectura_ant_integrada = st.number_input(
+                        ui_lectura["etq_anterior"], min_value=0.0, step=1.0,
+                        value=ant_default_integrado,
+                        key=f"cobros_{servicio}_ant_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
                     )
-                    consumo_integrado_1 = calc_consumo.calcular_consumo(lectura_ant_integrada, lectura_act_integrada)
-                    consumo_integrado_2 = calc_consumo.calcular_consumo(lectura_ant2_integrada, lectura_act2_integrada) if medidores_integrados == 2 else 0
-                    consumo_integrado = consumo_integrado_1 + consumo_integrado_2
-                    monto_integrado = calc_consumo.calcular_monto(consumo_integrado, tarifa_integrada)
-                    st.info(f"Consumo: {consumo_integrado} {ui_lectura['unidad']} × Bs {tarifa_integrada:.4f} = **{fmt_money(monto_integrado)}**")
-                    if st.form_submit_button("💾 Guardar lectura y crear periodo", use_container_width=True):
-                        if lectura_act_integrada < lectura_ant_integrada or (medidores_integrados == 2 and lectura_act2_integrada < lectura_ant2_integrada):
-                            st.error("La lectura actual no puede ser menor que la lectura anterior.")
-                        else:
-                            payload_integrado = {
-                                ui_lectura["col_anterior"]: lectura_ant_integrada,
-                                ui_lectura["col_actual"]: lectura_act_integrada,
-                                ui_lectura["col_tarifa"]: tarifa_integrada,
-                                "monto_esperado": monto_integrado,
-                                "apartamento_id": apt_cobros["id"],
-                                "mes": mes_cobros,
-                                "anio": int(anio_cobros),
-                            }
-                            if medidores_integrados == 2:
-                                payload_integrado.update({
-                                    "kwh_anterior_2": lectura_ant2_integrada,
-                                    "kwh_actual_2": lectura_act2_integrada,
-                                })
-                            try:
+                with cl2:
+                    lectura_act_integrada = st.number_input(
+                        ui_lectura["etq_actual"], min_value=0.0, step=1.0,
+                        value=act_default_integrado,
+                        key=f"cobros_{servicio}_act_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                    )
+
+                if medidores_integrados == 2:
+                    st.markdown("**Medidor 2**")
+                    cl3, cl4 = st.columns(2)
+                    with cl3:
+                        lectura_ant2_integrada = st.number_input(
+                            "Medidor 2 · Kwh anterior", min_value=0.0, step=1.0,
+                            value=ant2_default_integrado,
+                            key=f"cobros_{servicio}_ant2_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                        )
+                    with cl4:
+                        lectura_act2_integrada = st.number_input(
+                            "Medidor 2 · Kwh actual", min_value=0.0, step=1.0,
+                            value=act2_default_integrado,
+                            key=f"cobros_{servicio}_act2_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                        )
+                else:
+                    lectura_ant2_integrada = lectura_act2_integrada = 0.0
+
+                tarifa_integrada = st.number_input(
+                    ui_lectura["etq_tarifa"], min_value=0.0, step=0.01,
+                    value=tarifa_default_integrada, format="%.4f",
+                    key=f"cobros_{servicio}_tarifa_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                )
+                consumo_integrado_1 = calc_consumo.calcular_consumo(lectura_ant_integrada, lectura_act_integrada)
+                consumo_integrado_2 = calc_consumo.calcular_consumo(lectura_ant2_integrada, lectura_act2_integrada) if medidores_integrados == 2 else 0
+                consumo_integrado = consumo_integrado_1 + consumo_integrado_2
+                monto_integrado = calc_consumo.calcular_monto(consumo_integrado, tarifa_integrada)
+                st.info(f"Consumo: {consumo_integrado} {ui_lectura['unidad']} × Bs {tarifa_integrada:.4f} = **{fmt_money(monto_integrado)}**")
+
+                pagos_existentes_lectura = (periodo or {}).get(campo_pagos) or []
+                if pagos_existentes_lectura:
+                    st.warning(
+                        f"Este periodo tiene {len(pagos_existentes_lectura)} pago(s) registrado(s) por "
+                        f"{fmt_money(sum(float(x.get('monto') or 0) for x in pagos_existentes_lectura))}. "
+                        "Al modificar la lectura se recalculará el saldo; los pagos no se eliminarán."
+                    )
+                    confirmar_recalculo_lectura = st.checkbox(
+                        "Confirmo que deseo guardar la corrección de lectura y recalcular el saldo.",
+                        key=f"cobros_confirmar_lectura_{servicio}_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                    )
+                else:
+                    confirmar_recalculo_lectura = True
+
+                texto_boton_lectura = "💾 Actualizar lectura y recalcular saldo" if periodo else "💾 Guardar lectura y crear periodo"
+                if st.form_submit_button(texto_boton_lectura, use_container_width=True):
+                    if lectura_act_integrada < lectura_ant_integrada or (medidores_integrados == 2 and lectura_act2_integrada < lectura_ant2_integrada):
+                        st.error("La lectura actual no puede ser menor que la lectura anterior.")
+                    elif not confirmar_recalculo_lectura:
+                        st.error("Confirma que deseas recalcular el saldo antes de guardar.")
+                    else:
+                        payload_integrado = {
+                            ui_lectura["col_anterior"]: lectura_ant_integrada,
+                            ui_lectura["col_actual"]: lectura_act_integrada,
+                            ui_lectura["col_tarifa"]: tarifa_integrada,
+                            "monto_esperado": monto_integrado,
+                            "apartamento_id": apt_cobros["id"],
+                            "mes": mes_cobros,
+                            "anio": int(anio_cobros),
+                        }
+                        if medidores_integrados == 2:
+                            payload_integrado.update({
+                                "kwh_anterior_2": lectura_ant2_integrada,
+                                "kwh_actual_2": lectura_act2_integrada,
+                            })
+                        try:
+                            if periodo:
+                                db.actualizar_periodo_servicio(servicio, periodo["id"], payload_integrado)
+                                mensaje_lectura = "Lectura actualizada. Los pagos existentes se conservaron y el saldo se recalculó."
+                            else:
                                 db.crear_periodo_servicio(servicio, payload_integrado)
-                                limpiar_cache()
-                                st.success("Lectura guardada y periodo creado. Ahora puedes registrar el abono.")
-                                st.rerun()
-                            except Exception as exc_integrado:
-                                st.error(f"No se pudo crear el periodo: {exc_integrado}")
+                                mensaje_lectura = "Lectura guardada y periodo creado. Ahora puedes registrar el abono."
+                            limpiar_cache()
+                            st.success(mensaje_lectura)
+                            st.rerun()
+                        except Exception as exc_integrado:
+                            st.error(f"No se pudo guardar la lectura: {exc_integrado}")
+
+        if periodo is None:
+            st.info("Primero registra la lectura en «Consultar o modificar lectura» para habilitar el registro de pagos.")
             return
 
         st.markdown(f"**Monto esperado:** {fmt_money(esperado)} · **Pagado:** {fmt_money(pagado)} · **Saldo:** {fmt_money(deuda)}")

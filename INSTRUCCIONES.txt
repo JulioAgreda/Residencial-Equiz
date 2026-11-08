@@ -1,34 +1,24 @@
-EQUISE — Gestión de cobros: lecturas y pagos integrados + historial completo
+EQUISE — Gestión de cobros: lecturas editables para periodos existentes
 
-CAMBIOS
-1. Electricidad y agua:
-   - Si no existe periodo del mes, aparece «Registrar lectura y habilitar cobro».
-   - Se capturan las lecturas, tarifa y consumo calculado dentro de Gestión de cobros.
-   - Para electricidad conserva la lógica de uno o dos medidores.
-   - Al guardar, crea el periodo en las tablas existentes; luego permite registrar el abono.
-   - Si el periodo ya existe, permite registrar abonos y consultar/editar los abonos del periodo.
-
-2. Historial:
-   - Ya no limita la consulta al mes seleccionado en la parte superior.
-   - Consulta todos los periodos del apartamento y muestra pagos de distintos meses/años.
-   - Permite filtrar por año y servicio.
-   - Para anticréticos no mezcla alquiler; conserva electricidad y agua.
-   - Muestra total encontrado y tabla cronológica.
-
-3. Se mantienen las reglas de tipo de contrato y navegación Anterior/Siguiente.
-4. No se crean tablas nuevas ni se modifica el esquema de Supabase.
+CAMBIO
+- En Electricidad y Agua aparece siempre el expander «Consultar o modificar lectura».
+- Si el periodo no existe, precarga la lectura anterior desde el último periodo y permite crear el periodo.
+- Si el periodo existe, precarga las lecturas guardadas y permite corregirlas.
+- Al corregir se actualiza el mismo periodo mediante actualizar_periodo_servicio; no se crea un duplicado.
+- Los pagos existentes se conservan. Si existen pagos, la pantalla advierte que cambiará el saldo y exige confirmación explícita.
+- El formulario de pagos continúa disponible cuando existe el periodo.
+- Se mantienen reglas de anticrético, historial y navegación.
 
 INSTALACIÓN
-1. Haz una copia de seguridad del app.py actual.
-2. Extrae el ZIP y reemplaza únicamente app.py.
-3. No reemplaces db.py ni ejecutes SQL.
-4. Despliega.
-5. Prueba un apartamento anticrético: en Electricidad y Agua crea periodo de prueba/lectura,
-   registra un abono y luego verifica Historial con Año=Todos y Servicio=Todos.
-6. Prueba también un apartamento de alquiler para verificar que aparezca alquiler en historial.
+1. Respaldar el app.py desplegado.
+2. Extraer el ZIP y reemplazar únicamente app.py en GitHub.
+3. No reemplazar db.py ni ejecutar SQL.
+4. Desplegar y probar PB-03 en Electricidad: abrir «Consultar o modificar lectura», revisar lecturas precargadas, corregir solo si corresponde y guardar.
+5. Confirmar que el total esperado se actualice, que los pagos sigan visibles y que el saldo se recalcule.
+6. Probar un periodo nuevo para verificar que permita crear su periodo.
 
-NOTAS
-- Si no existe tarifa configurada, el formulario precarga Bs 0. Debes verificar/introducir la
-  tarifa correcta antes de guardar.
-- Para apartamentos con dos medidores eléctricos se muestran los dos pares de lecturas.
-- El archivo pasó análisis sintáctico y compilación; no se ha probado contra el Supabase real.
+SEGURIDAD DE DATOS
+La corrección actualiza las columnas de lectura/tarifa/monto_esperado del mismo periodo. No elimina ni modifica filas de pagos. Si ya hay pagos, exige una casilla de confirmación antes de guardar.
+
+VALIDACIÓN
+El archivo pasó análisis sintáctico y compilación de Python. No se ha probado en el entorno desplegado ni contra Supabase real.
