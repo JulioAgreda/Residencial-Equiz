@@ -2816,18 +2816,115 @@ elif pagina == "💳 Gestión de cobros":
     def _panel_pago_servicio_cobros(servicio, periodo, campo_pagos, esperado, pagado, deuda, etiqueta):
         st.subheader(etiqueta)
         _tarjeta_estado_cobro(etiqueta, esperado, pagado, deuda, periodo)
+
+        # Si aún no existe el periodo, permitir crear la lectura desde esta misma pantalla.
         if periodo is None:
-            st.warning("Para registrar un abono primero debe existir el periodo del servicio con su lectura/consumo.")
-            st.caption("Puedes seguir en esta pantalla; el registro de lectura se realiza en el módulo técnico del servicio.")
+            ui_lectura = SERVICIOS_UI[servicio]
+            with st.expander("📏 Registrar lectura y habilitar cobro", expanded=True):
+                st.caption("Registra aquí las lecturas del medidor. Al guardar se creará el periodo y podrás registrar el pago sin salir de Gestión de cobros.")
+                try:
+                    tarifa_actual_integrada = float(db.obtener_tarifa(servicio) or 0)
+                except Exception:
+                    tarifa_actual_integrada = 0.0
+                ultimo_integrado = db.ultimo_periodo_servicio(servicio, apt_cobros["id"])
+                medidores_integrados = calc_consumo.cantidad_medidores_luz(apt_cobros) if servicio == "electricidad" else 1
+                ant_default_integrado = float((ultimo_integrado or {}).get(ui_lectura["col_actual"]) or 0)
+                ant2_default_integrado = float((ultimo_integrado or {}).get("kwh_actual_2") or 0)
+                act_default_integrado = ant_default_integrado
+                act2_default_integrado = ant2_default_integrado
+
+                with st.form(f"cobros_lectura_{servicio}_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"):
+                    if medidores_integrados == 2:
+                        st.markdown("**Medidor 1**")
+                    cl1, cl2 = st.columns(2)
+                    with cl1:
+                        lectura_ant_integrada = st.number_input(
+                            ui_lectura["etq_anterior"], min_value=0.0, step=1.0,
+                            value=ant_default_integrado,
+                            key=f"cobros_{servicio}_ant_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                        )
+                    with cl2:
+                        lectura_act_integrada = st.number_input(
+                            ui_lectura["etq_actual"], min_value=0.0, step=1.0,
+                            value=act_default_integrado,
+                            key=f"cobros_{servicio}_act_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                        )
+                    if medidores_integrados == 2:
+                        st.markdown("**Medidor 2**")
+                        cl3, cl4 = st.columns(2)
+                        with cl3:
+                            lectura_ant2_integrada = st.number_input(
+                                "Medidor 2 · Kwh anterior", min_value=0.0, step=1.0,
+                                value=ant2_default_integrado,
+                                key=f"cobros_{servicio}_ant2_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                            )
+                        with cl4:
+                            lectura_act2_integrada = st.number_input(
+                                "Medidor 2 · Kwh actual", min_value=0.0, step=1.0,
+                                value=act2_default_integrado,
+                                key=f"cobros_{servicio}_act2_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                            )
+                    else:
+                        lectura_ant2_integrada = lectura_act2_integrada = 0.0
+
+                    tarifa_integrada = st.number_input(
+                        ui_lectura["etq_tarifa"], min_value=0.0, step=0.01,
+                        value=tarifa_actual_integrada, format="%.4f",
+                        key=f"cobros_{servicio}_tarifa_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                    )
+                    consumo_integrado_1 = calc_consumo.calcular_consumo(lectura_ant_integrada, lectura_act_integrada)
+                    consumo_integrado_2 = calc_consumo.calcular_consumo(lectura_ant2_integrada, lectura_act2_integrada) if medidores_integrados == 2 else 0
+                    consumo_integrado = consumo_integrado_1 + consumo_integrado_2
+                    monto_integrado = calc_consumo.calcular_monto(consumo_integrado, tarifa_integrada)
+                    st.info(f"Consumo: {consumo_integrado} {ui_lectura['unidad']} × Bs {tarifa_integrada:.4f} = **{fmt_money(monto_integrado)}**")
+                    if st.form_submit_button("💾 Guardar lectura y crear periodo", use_container_width=True):
+                        if lectura_act_integrada < lectura_ant_integrada or (medidores_integrados == 2 and lectura_act2_integrada < lectura_ant2_integrada):
+                            st.error("La lectura actual no puede ser menor que la lectura anterior.")
+                        else:
+                            payload_integrado = {
+                                ui_lectura["col_anterior"]: lectura_ant_integrada,
+                                ui_lectura["col_actual"]: lectura_act_integrada,
+                                ui_lectura["col_tarifa"]: tarifa_integrada,
+                                "monto_esperado": monto_integrado,
+                                "apartamento_id": apt_cobros["id"],
+                                "mes": mes_cobros,
+                                "anio": int(anio_cobros),
+                            }
+                            if medidores_integrados == 2:
+                                payload_integrado.update({
+                                    "kwh_anterior_2": lectura_ant2_integrada,
+                                    "kwh_actual_2": lectura_act2_integrada,
+                                })
+                            try:
+                                db.crear_periodo_servicio(servicio, payload_integrado)
+                                limpiar_cache()
+                                st.success("Lectura guardada y periodo creado. Ahora puedes registrar el abono.")
+                                st.rerun()
+                            except Exception as exc_integrado:
+                                st.error(f"No se pudo crear el periodo: {exc_integrado}")
             return
+
+        st.markdown(f"**Monto esperado:** {fmt_money(esperado)} · **Pagado:** {fmt_money(pagado)} · **Saldo:** {fmt_money(deuda)}")
         with st.form(f"cobros_form_{servicio}_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}", clear_on_submit=True):
             c1, c2 = st.columns(2)
             with c1:
-                monto_serv_nuevo = st.number_input("Monto recibido (Bs)", min_value=0.0, step=10.0, key=f"cobros_{servicio}_monto_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}")
-                fecha_serv_nuevo = st.date_input("Fecha de pago", value=date.today(), format="DD/MM/YYYY", key=f"cobros_{servicio}_fecha_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}")
+                monto_serv_nuevo = st.number_input(
+                    "Monto recibido (Bs)", min_value=0.0, step=10.0,
+                    key=f"cobros_{servicio}_monto_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                )
+                fecha_serv_nuevo = st.date_input(
+                    "Fecha de pago", value=date.today(), format="DD/MM/YYYY",
+                    key=f"cobros_{servicio}_fecha_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                )
             with c2:
-                metodo_serv_nuevo = st.selectbox("Método de pago", METODOS_ABONO, key=f"cobros_{servicio}_metodo_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}")
-                obs_serv_nuevo = st.text_input("Observación (opcional)", key=f"cobros_{servicio}_obs_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}")
+                metodo_serv_nuevo = st.selectbox(
+                    "Método de pago", METODOS_ABONO,
+                    key=f"cobros_{servicio}_metodo_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                )
+                obs_serv_nuevo = st.text_input(
+                    "Observación (opcional)",
+                    key=f"cobros_{servicio}_obs_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                )
             if st.form_submit_button(f"💾 Registrar abono de {etiqueta.lower()}", use_container_width=True):
                 if monto_serv_nuevo <= 0:
                     st.error("El monto debe ser mayor a cero.")
@@ -2843,13 +2940,17 @@ elif pagina == "💳 Gestión de cobros":
                         st.rerun()
                     except Exception as e:
                         st.error(f"No se pudo registrar el abono: {e}")
+
         abonos_serv_local = periodo.get(campo_pagos) or []
         if abonos_serv_local:
             st.markdown("**Abonos de este periodo**")
             for pago_serv_local in sorted(abonos_serv_local, key=lambda x: x.get("fecha") or ""):
                 with st.expander(f'{pago_serv_local.get("fecha")} · {fmt_money(pago_serv_local.get("monto"))} · {pago_serv_local.get("metodo_pago") or ""}'):
-                    mostrar_botones_recibo(pago_serv_local, periodo, apt_cobros, pagado,
-                                           key_sufijo=f"cobros_{servicio}_{pago_serv_local['id']}", servicio=servicio)
+                    mostrar_botones_recibo(
+                        pago_serv_local, periodo, apt_cobros, pagado,
+                        key_sufijo=f"cobros_{servicio}_{pago_serv_local['id']}", servicio=servicio
+                    )
+                    _formulario_editar_abono(servicio, pago_serv_local, f"cobros_{servicio}")
 
     with tab_elec_cobros:
         _panel_pago_servicio_cobros("electricidad", periodo_elec_cobros, "pagos_electricidad", elec_esp, elec_pag, elec_deu, "⚡ Electricidad")
@@ -2857,21 +2958,63 @@ elif pagina == "💳 Gestión de cobros":
         _panel_pago_servicio_cobros("agua", periodo_agua_cobros, "pagos_agua", agua_esp, agua_pag, agua_deu, "💧 Agua")
 
     with tab_hist_cobros:
-        st.subheader("Historial de pagos del apartamento")
+        st.subheader("Historial completo de pagos del apartamento")
+        hcol1, hcol2 = st.columns(2)
+        with hcol1:
+            filtro_hist_anio = st.selectbox(
+                "Año del historial", ["Todos"] + list(range(date.today().year - 5, date.today().year + 2)),
+                key=f"cobros_hist_anio_{apt_cobros['id']}"
+            )
+        with hcol2:
+            filtro_hist_servicio = st.selectbox(
+                "Servicio", ["Todos", "Alquiler", "Electricidad", "Agua"],
+                key=f"cobros_hist_servicio_{apt_cobros['id']}"
+            )
+        anio_hist_consulta = None if filtro_hist_anio == "Todos" else int(filtro_hist_anio)
         filas_hist_cobros = []
-        if periodo_alq_cobros:
-            for x in periodo_alq_cobros.get("pagos") or []:
-                filas_hist_cobros.append({"Fecha": x.get("fecha"), "Servicio": "Alquiler", "Monto (Bs)": float(x.get("monto") or 0), "Método": x.get("metodo_pago") or "", "Observación": x.get("observacion") or ""})
-        if periodo_elec_cobros:
-            for x in periodo_elec_cobros.get("pagos_electricidad") or []:
-                filas_hist_cobros.append({"Fecha": x.get("fecha"), "Servicio": "Electricidad", "Monto (Bs)": float(x.get("monto") or 0), "Método": x.get("metodo_pago") or "", "Observación": x.get("observacion") or ""})
-        if periodo_agua_cobros:
-            for x in periodo_agua_cobros.get("pagos_agua") or []:
-                filas_hist_cobros.append({"Fecha": x.get("fecha"), "Servicio": "Agua", "Monto (Bs)": float(x.get("monto") or 0), "Método": x.get("metodo_pago") or "", "Observación": x.get("observacion") or ""})
+
+        # Alquiler: solo contratos de alquiler.
+        if not es_anticretico_cobros and filtro_hist_servicio in ("Todos", "Alquiler"):
+            for per_hist in db.listar_periodos(
+                apartamento_id=apt_cobros["id"], anio=anio_hist_consulta, solo_activos=True
+            ):
+                for pago_hist in per_hist.get("pagos") or []:
+                    filas_hist_cobros.append({
+                        "Fecha": pago_hist.get("fecha"), "Periodo": f"{per_hist.get('mes')} {per_hist.get('anio')}",
+                        "Servicio": "Alquiler", "Monto (Bs)": float(pago_hist.get("monto") or 0),
+                        "Método": pago_hist.get("metodo_pago") or "", "Observación": pago_hist.get("observacion") or ""
+                    })
+
+        if filtro_hist_servicio in ("Todos", "Electricidad"):
+            for per_hist in db.listar_periodos_servicio(
+                "electricidad", apartamento_id=apt_cobros["id"], anio=anio_hist_consulta, solo_activos=True
+            ):
+                for pago_hist in per_hist.get("pagos_electricidad") or []:
+                    filas_hist_cobros.append({
+                        "Fecha": pago_hist.get("fecha"), "Periodo": f"{per_hist.get('mes')} {per_hist.get('anio')}",
+                        "Servicio": "Electricidad", "Monto (Bs)": float(pago_hist.get("monto") or 0),
+                        "Método": pago_hist.get("metodo_pago") or "", "Observación": pago_hist.get("observacion") or ""
+                    })
+
+        if filtro_hist_servicio in ("Todos", "Agua"):
+            for per_hist in db.listar_periodos_servicio(
+                "agua", apartamento_id=apt_cobros["id"], anio=anio_hist_consulta, solo_activos=True
+            ):
+                for pago_hist in per_hist.get("pagos_agua") or []:
+                    filas_hist_cobros.append({
+                        "Fecha": pago_hist.get("fecha"), "Periodo": f"{per_hist.get('mes')} {per_hist.get('anio')}",
+                        "Servicio": "Agua", "Monto (Bs)": float(pago_hist.get("monto") or 0),
+                        "Método": pago_hist.get("metodo_pago") or "", "Observación": pago_hist.get("observacion") or ""
+                    })
+
         if filas_hist_cobros:
-            st.dataframe(pd.DataFrame(filas_hist_cobros).sort_values("Fecha", ascending=False), use_container_width=True, hide_index=True)
+            df_hist_cobros = pd.DataFrame(filas_hist_cobros)
+            df_hist_cobros["Fecha"] = pd.to_datetime(df_hist_cobros["Fecha"], errors="coerce")
+            df_hist_cobros = df_hist_cobros.sort_values("Fecha", ascending=False)
+            st.metric("Total de pagos encontrados", fmt_money(df_hist_cobros["Monto (Bs)"].sum()))
+            st.dataframe(df_hist_cobros, use_container_width=True, hide_index=True)
         else:
-            st.info("No hay pagos registrados para este apartamento y periodo.")
+            st.info("No se encontraron pagos con los filtros seleccionados. Prueba con «Todos» los años y servicios.")
 
     st.divider()
     st.caption("Los pagos se guardan en las tablas actuales de EQUISE. No se crean tablas nuevas ni se duplican registros.")

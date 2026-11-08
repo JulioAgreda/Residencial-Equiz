@@ -1,25 +1,34 @@
-EQUISE — Gestión de cobros: respetar tipo de contrato
+EQUISE — Gestión de cobros: lecturas y pagos integrados + historial completo
 
-CAMBIO
-La pantalla unificada verifica el campo tipo_contrato del apartamento:
-- Si es "Anticrético" (también admite "Anticretico"), no muestra alquiler mensual.
-- Muestra capital anticrético y moneda, además de fechas y condiciones disponibles.
-- Excluye monto_alquiler, pagos/esperado/deuda de alquiler de los totales actuales.
-- Cambia la pestaña "Alquiler" por "Anticrético".
-- No permite registrar un nuevo alquiler desde esta pantalla para un anticrético.
-- Mantiene electricidad, agua e historial.
-- Si hay pagos históricos de alquiler para el periodo, los deja visibles como históricos,
-  sin incluirlos en el saldo actual del anticrético.
-- Para contratos de "Alquiler", conserva el flujo anterior.
+CAMBIOS
+1. Electricidad y agua:
+   - Si no existe periodo del mes, aparece «Registrar lectura y habilitar cobro».
+   - Se capturan las lecturas, tarifa y consumo calculado dentro de Gestión de cobros.
+   - Para electricidad conserva la lógica de uno o dos medidores.
+   - Al guardar, crea el periodo en las tablas existentes; luego permite registrar el abono.
+   - Si el periodo ya existe, permite registrar abonos y consultar/editar los abonos del periodo.
+
+2. Historial:
+   - Ya no limita la consulta al mes seleccionado en la parte superior.
+   - Consulta todos los periodos del apartamento y muestra pagos de distintos meses/años.
+   - Permite filtrar por año y servicio.
+   - Para anticréticos no mezcla alquiler; conserva electricidad y agua.
+   - Muestra total encontrado y tabla cronológica.
+
+3. Se mantienen las reglas de tipo de contrato y navegación Anterior/Siguiente.
+4. No se crean tablas nuevas ni se modifica el esquema de Supabase.
 
 INSTALACIÓN
-1. Haz copia de seguridad del app.py desplegado.
-2. Extrae el ZIP y reemplaza únicamente app.py en el repositorio.
+1. Haz una copia de seguridad del app.py actual.
+2. Extrae el ZIP y reemplaza únicamente app.py.
 3. No reemplaces db.py ni ejecutes SQL.
-4. Despliega y prueba un apartamento de Alquiler y uno de Anticrético.
-5. Verifica que el anticrético no genere deuda mensual y que electricidad/agua sigan
-   permitiendo registrar pagos si existe el periodo de servicio.
+4. Despliega.
+5. Prueba un apartamento anticrético: en Electricidad y Agua crea periodo de prueba/lectura,
+   registra un abono y luego verifica Historial con Año=Todos y Servicio=Todos.
+6. Prueba también un apartamento de alquiler para verificar que aparezca alquiler en historial.
 
-VALIDACIÓN
-app.py pasó análisis sintáctico y compilación. No se ha probado en Streamlit/Supabase real.
-No se modificó el esquema ni se alteraron registros históricos.
+NOTAS
+- Si no existe tarifa configurada, el formulario precarga Bs 0. Debes verificar/introducir la
+  tarifa correcta antes de guardar.
+- Para apartamentos con dos medidores eléctricos se muestran los dos pares de lecturas.
+- El archivo pasó análisis sintáctico y compilación; no se ha probado contra el Supabase real.
