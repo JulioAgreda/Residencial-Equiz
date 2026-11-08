@@ -8,6 +8,9 @@ import pandas as pd
 from datetime import date
 import bcrypt
 import db
+st.write("Módulo DB cargado desde:", db.__file__)
+st.write("Función de historial disponible:",
+         hasattr(db, "listar_conciliaciones_bancarias"))
 import accesos
 import aire_acondicionado
 import compromisos

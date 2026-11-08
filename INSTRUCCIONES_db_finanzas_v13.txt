@@ -1,0 +1,37 @@
+EQUISE — Corrección de funciones de acceso a Finanzas V13
+
+CAUSA
+La aplicación app.py invoca funciones de acceso a las tablas financieras V13, pero el db.py
+desplegado no las contenía. Esto provocaba el error:
+module 'db' has no attribute 'listar_obligaciones_financieras'.
+
+INSTALACIÓN
+Reemplazar el archivo db.py del proyecto por el archivo db_finanzas_v13_corregido.py,
+renombrándolo exactamente como db.py. No reemplazar app.py.
+
+FUNCIONES INCORPORADAS
+- Listado y creación de obligaciones financieras.
+- Listado y creación de movimientos de obligaciones.
+- Listado y creación de cuentas por cobrar.
+- Listado y creación de movimientos de cuentas por cobrar.
+- Corrección de saldo de apertura solo si no existen movimientos.
+- Generación de códigos OBL-AAAA-NNN y CXC-AAAA-NNN con reintento ante colisiones.
+
+QUÉ NO SE HACE
+- No se modifica app.py.
+- No se ejecuta ni se incluye una migración SQL para producción.
+- No se crean ni alteran tablas de Supabase.
+- No se registran movimientos contables nuevos ni se duplican pagos.
+
+IMPORTANTE SOBRE SUPABASE
+El schema.sql base compartido no contiene las tablas de Finanzas V13. El archivo
+schema_finanzas_v13.sql encontrado en el paquete del proyecto está rotulado como preparación
+y advierte que no debe ejecutarse en producción sin revisión y autorización.
+Este parche corrige la ausencia de funciones Python, pero no demuestra que las cuatro tablas
+financieras existan en la base de datos activa.
+
+VALIDACIÓN
+El archivo pasó validación de sintaxis Python. No se pudo probar contra Supabase real porque
+no se dispone de acceso a sus credenciales ni al estado de las tablas.
+Tras instalarlo, reiniciar la aplicación y volver a abrir Conciliación bancaria.
+Si aparece un error de tabla inexistente, no ejecutar SQL todavía: compartir el mensaje exacto.
