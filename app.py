@@ -362,6 +362,77 @@ def cargar_actividad(desde, hasta):
     return {t: db.listar_actividad_rango(t, desde, hasta) for t in ("pagos_generales", "compras", "ventas")}
 
 
+def movimientos_financieros_para_conciliacion(desde, hasta):
+    """Convierte pagos/cobros de los auxiliares financieros en movimientos comparables con el banco.
+
+    No crea ni modifica asientos: solo lee los movimientos existentes de Finanzas.
+    pago_capital de una obligación = egreso; cobro de una cuenta por cobrar = ingreso.
+    """
+    desde_f, hasta_f = date.fromisoformat(str(desde)[:10]), date.fromisoformat(str(hasta)[:10])
+    obligaciones = db.listar_obligaciones_financieras()
+    movs_obligaciones = db.listar_movimientos_obligaciones()
+    cuentas = db.listar_cuentas_por_cobrar()
+    movs_cuentas = db.listar_movimientos_cuentas_cobrar()
+    obligaciones_por_id = {x.get("id"): x for x in obligaciones}
+    cuentas_por_id = {x.get("id"): x for x in cuentas}
+    salida = []
+
+    def fecha_en_rango(valor):
+        try:
+            f = date.fromisoformat(str(valor)[:10])
+            return f if desde_f <= f <= hasta_f else None
+        except (TypeError, ValueError):
+            return None
+
+    for m in movs_obligaciones:
+        if m.get("tipo") != "pago_capital":
+            continue
+        f = fecha_en_rango(m.get("fecha"))
+        obligacion = obligaciones_por_id.get(m.get("obligacion_id"), {})
+        if not f:
+            continue
+        metodo_original = m.get("metodo") or ""
+        salida.append({
+            "id": m.get("id") or 0, "fecha": f, "tipo": "Egreso",
+            "origen": "Finanzas - devolución de préstamo",
+            "categoria": obligacion.get("categoria") or "Devolución de capital",
+            "detalle": " ".join(x for x in (
+                obligacion.get("descripcion") or "Devolución de capital",
+                m.get("referencia") or "", m.get("observacion") or "") if x),
+            "persona": obligacion.get("acreedor") or "",
+            "comprobante": m.get("referencia") or "",
+            "metodo": cuadre.grupo_metodo(metodo_original),
+            "metodo_original": metodo_original,
+            "estado": "Registrado", "monto": round(float(m.get("monto") or 0), 2),
+            "encargado": m.get("registrado_por") or "",
+        })
+
+    for m in movs_cuentas:
+        if m.get("tipo") != "cobro":
+            continue
+        f = fecha_en_rango(m.get("fecha"))
+        cuenta = cuentas_por_id.get(m.get("cuenta_id"), {})
+        if not f:
+            continue
+        metodo_original = m.get("metodo") or ""
+        salida.append({
+            "id": m.get("id") or 0, "fecha": f, "tipo": "Ingreso",
+            "origen": "Finanzas - cobro de préstamo",
+            "categoria": cuenta.get("categoria") or "Cobro de capital",
+            "detalle": " ".join(x for x in (
+                cuenta.get("descripcion") or "Cobro de capital",
+                m.get("referencia") or "", m.get("observacion") or "") if x),
+            "persona": cuenta.get("deudor") or "",
+            "comprobante": m.get("referencia") or "",
+            "metodo": cuadre.grupo_metodo(metodo_original),
+            "metodo_original": metodo_original,
+            "estado": "Registrado", "monto": round(float(m.get("monto") or 0), 2),
+            "encargado": m.get("registrado_por") or "",
+        })
+
+    return salida
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _actividad_excel_cache(reps, desde, hasta, emitido_por):
     return reportes.generar_excel_reporte(reps, desde, hasta, emitido_por=emitido_por)
@@ -3729,12 +3800,16 @@ elif pagina == "🏦 Conciliación bancaria":
         st.warning("Tu usuario ve solo algunos apartamentos: los cobros de los demás saldrán como «sin registrar» aunque estén registrados.")
 
     # ---------------- 3. Registros del sistema ----------------
+    st.caption("La comparación incluye pagos, compras, ventas, alquiler/servicios y movimientos auxiliares de Finanzas "
+               "(devoluciones de préstamos y cobros de cuentas por cobrar). Estos últimos se leen para conciliar; no se duplican ni se contabilizan otra vez.")
     margen_cb = max(dias_cb, conciliacion.VENTANA_AGRUPADA)
     desde_sis_cb = date.fromordinal(ext_cb["desde"].toordinal() - margen_cb)
     hasta_sis_cb = date.fromordinal(ext_cb["hasta"].toordinal() + margen_cb)
     try:
         actividad_cb = cargar_actividad(str(desde_sis_cb), str(hasta_sis_cb))
         movs_cuadre_cb = cuadre.construir_movimientos(actividad_cb["pagos_generales"], actividad_cb["compras"], actividad_cb["ventas"])
+        # Incluir auxiliares de Finanzas en la conciliación sin duplicar ni crear movimientos contables.
+        movs_cuadre_cb.extend(movimientos_financieros_para_conciliacion(str(desde_sis_cb), str(hasta_sis_cb)))
         periodos_cb = {t: cargar_periodos_abiertos(t) for t in ("alquiler", "electricidad", "agua")}
         try:
             historial_cb = cargar_historial()
