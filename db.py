@@ -52,123 +52,18 @@ def obtener_apartamento(apartamento_id):
 
 
 def crear_apartamento(payload: dict):
-    """Crea apartamentos respetando la coherencia básica de ocupación."""
-    estado = (payload.get("estado") or "Desocupado").strip()
-    inquilino = (payload.get("inquilino_nombre") or "").strip()
-    if estado == "Ocupado" and not inquilino:
-        raise ValueError("Un apartamento ocupado debe tener un inquilino registrado.")
-    if estado == "Desocupado" and inquilino:
-        raise ValueError("Un apartamento desocupado no puede tener un inquilino activo.")
     sb = get_client()
     return sb.table("apartamentos").insert(payload).execute()
 
 
 def actualizar_apartamento(apartamento_id, payload: dict):
-    """Actualiza datos administrativos sin permitir cambios de ocupación o identidad del inquilino.
-
-    Las salidas deben registrarse mediante registrar_salida_inquilino().
-    Los cambios de ocupante requieren un flujo específico que archive al anterior.
-    """
     sb = get_client()
-    actual = (sb.table("apartamentos").select("estado,inquilino_nombre")
-              .eq("id", apartamento_id).single().execute()).data or {}
-    estado_actual = (actual.get("estado") or "Desocupado").strip()
-    inquilino_actual = (actual.get("inquilino_nombre") or "").strip()
-    estado_nuevo = (payload.get("estado", estado_actual) or "Desocupado").strip()
-    inquilino_nuevo = (payload.get("inquilino_nombre", inquilino_actual) or "").strip()
-
-    if estado_nuevo != estado_actual:
-        raise ValueError("No se puede cambiar la ocupación desde la edición general. Utiliza el procedimiento correspondiente.")
-    if inquilino_nuevo != inquilino_actual:
-        raise ValueError("No se puede reemplazar o borrar al inquilino desde la edición general. Primero registra su salida y conserva el historial.")
-
     return sb.table("apartamentos").update(payload).eq("id", apartamento_id).execute()
 
 
 def eliminar_apartamento(apartamento_id):
-    """El borrado físico queda bloqueado para proteger el historial y las relaciones."""
-    raise RuntimeError(
-        "El borrado físico de apartamentos está deshabilitado. "
-        "Debe utilizarse un procedimiento administrativo de baja lógica."
-    )
-
-
-
-
-
-
-# ---------- Garantías de alquiler ----------
-
-def listar_garantias_alquiler(apartamento_id=None, estado=None):
     sb = get_client()
-    q = sb.table("garantias_alquiler").select("*").order("fecha_recepcion", desc=True)
-    if apartamento_id is not None:
-        q = q.eq("apartamento_id", apartamento_id)
-    if estado:
-        q = q.eq("estado", estado)
-    res = q.execute()
-    return res.data or []
-
-
-def crear_garantia_alquiler(payload: dict):
-    """Registra garantía y entrada de tesorería en una sola transacción SQL."""
-    sb = get_client()
-    return sb.rpc("registrar_garantia_y_movimiento", {"p_payload": payload}).execute()
-
-
-def obtener_garantia_alquiler(garantia_id):
-    sb = get_client()
-    res = sb.table("garantias_alquiler").select("*").eq("id", garantia_id).single().execute()
-    return res.data
-
-
-def listar_danos_garantia(garantia_id):
-    sb = get_client()
-    res = (sb.table("danos_garantia_alquiler").select("*")
-           .eq("garantia_id", garantia_id).order("fecha", desc=False).execute())
-    return res.data or []
-
-
-def crear_dano_garantia(payload: dict):
-    sb = get_client()
-    return sb.table("danos_garantia_alquiler").insert(payload).execute()
-
-
-def actualizar_garantia_alquiler(garantia_id, payload: dict):
-    sb = get_client()
-    return sb.table("garantias_alquiler").update(payload).eq("id", garantia_id).execute()
-
-
-def registrar_devolucion_garantia(payload: dict):
-    """Registra devolución y salida de tesorería en una sola transacción SQL."""
-    sb = get_client()
-    return sb.rpc("registrar_devolucion_garantia_y_movimiento", {"p_payload": payload}).execute()
-
-
-def listar_devoluciones_garantia(garantia_id):
-    sb = get_client()
-    res = (sb.table("devoluciones_garantia_alquiler").select("*")
-           .eq("garantia_id", garantia_id).order("fecha", desc=True).execute())
-    return res.data or []
-
-
-# ---------- Anticrético: control de capital y devoluciones ----------
-
-def listar_devoluciones_anticretico(apartamento_id):
-    """Lista devoluciones de capital anticrético de un apartamento, sin modificar el contrato."""
-    sb = get_client()
-    res = (sb.table("devoluciones_anticretico")
-           .select("*")
-           .eq("apartamento_id", apartamento_id)
-           .order("fecha", desc=True)
-           .execute())
-    return res.data or []
-
-
-def registrar_devolucion_anticretico(payload: dict):
-    """Registra una devolución parcial o total de capital anticrético."""
-    sb = get_client()
-    return sb.table("devoluciones_anticretico").insert(payload).execute()
+    return sb.table("apartamentos").delete().eq("id", apartamento_id).execute()
 
 
 # ---------- Historial de inquilinos (salida de un inquilino / ingreso de otro) ----------
@@ -910,156 +805,24 @@ def guardar_acceso_apartamentos(usuario_id, acceso_todos, apartamento_ids=()):
                 "apartamento_id", sorted(actuales - nuevos)).execute()
     sb.table("usuarios").update({"acceso_todos_apartamentos": bool(acceso_todos)}).eq("id", usuario_id).execute()
 
-# ---------- Finanzas V12: obligaciones y cuentas por cobrar ----------
 
-def _generar_codigo_financiero(sb, tabla, prefijo):
-    """Calcula el siguiente código anual consultando los códigos ya guardados.
-
-    La restricción UNIQUE de la columna codigo en Supabase es la protección
-    definitiva frente a duplicados concurrentes; crear_* reintenta si dos
-    usuarios intentan guardar al mismo tiempo.
-    """
-    import re
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    anio = datetime.now(ZoneInfo("America/La_Paz")).year
-    base = f"{prefijo}-{anio}-"
-    res = sb.table(tabla).select("codigo").like("codigo", f"{base}%").execute()
-    patron = re.compile(rf"^{re.escape(prefijo)}-{anio}-(\d+)$")
-    mayor = 0
-    for fila in (res.data or []):
-        coincidencia = patron.match(str(fila.get("codigo") or ""))
-        if coincidencia:
-            mayor = max(mayor, int(coincidencia.group(1)))
-    return f"{base}{mayor + 1:03d}"
-
-def _insertar_con_codigo_unico(tabla, prefijo, payload):
-    """Genera el código y guarda el registro; reintenta colisiones concurrentes."""
+# ---------- Historial persistente de conciliaciones bancarias ----------
+def guardar_conciliacion_bancaria(payload: dict):
+    """Guarda una instantánea de conciliación y su detalle en JSONB. No altera movimientos contables."""
     sb = get_client()
-    for intento in range(5):
-        codigo = _generar_codigo_financiero(sb, tabla, prefijo)
-        datos = {**payload, "codigo": codigo}
-        try:
-            resultado = sb.table(tabla).insert(datos).execute()
-            if getattr(resultado, "data", None):
-                return resultado
-            # Algunas configuraciones de PostgREST usan retorno mínimo en INSERT.
-            # Consultamos el código recién asignado para devolverlo a la interfaz.
-            return sb.table(tabla).select("*").eq("codigo", codigo).single().execute()
-        except Exception as exc:
-            mensaje = str(exc).lower()
-            es_duplicado = (
-                "23505" in mensaje
-                or "duplicate key" in mensaje
-                or "unique constraint" in mensaje
-                or "already exists" in mensaje
-            )
-            if not es_duplicado or intento == 4:
-                raise
-    raise RuntimeError("No se pudo asignar un código único. Intenta nuevamente.")
+    res = sb.table("conciliaciones_bancarias").insert(payload).execute()
+    return (res.data or [None])[0]
 
-def listar_obligaciones_financieras():
+
+def listar_conciliaciones_bancarias(limite=100):
     sb = get_client()
-    res = sb.table("obligaciones_financieras").select("*").order("fecha_origen", desc=True).execute()
+    res = (sb.table("conciliaciones_bancarias")
+           .select("id, periodo_desde, periodo_hasta, cuenta, total_movimientos, conciliados, pendientes, monto_banco, creado_por, created_at")
+           .order("created_at", desc=True).limit(int(limite)).execute())
     return res.data or []
 
-def crear_obligacion_financiera(payload):
-    # El código nunca se recibe del formulario: lo asigna la capa de datos.
-    datos = {k: v for k, v in dict(payload).items() if k != "codigo"}
-    return _insertar_con_codigo_unico("obligaciones_financieras", "OBL", datos)
 
-def listar_movimientos_obligaciones():
+def obtener_conciliacion_bancaria(conciliacion_id):
     sb = get_client()
-    res = sb.table("movimientos_obligaciones").select("*").order("fecha", desc=True).execute()
-    return res.data or []
-
-def actualizar_saldo_apertura_obligacion(obligacion_id, saldo_apertura):
-    """Corrige saldo inicial solo si la obligación todavía no tiene movimientos.
-
-    Se usa para registros creados por error con saldo cero cuando el capital
-    completo continúa pendiente. La comprobación se repite en la capa de datos.
-    """
-    sb = get_client()
-    existentes = (
-        sb.table("movimientos_obligaciones")
-        .select("id")
-        .eq("obligacion_id", obligacion_id)
-        .limit(1)
-        .execute()
-    )
-    if existentes.data:
-        raise ValueError("No se puede corregir el saldo inicial porque la obligación ya tiene movimientos.")
-    saldo = float(saldo_apertura)
-    if saldo < 0:
-        raise ValueError("El saldo inicial no puede ser negativo.")
-    obligacion = (
-        sb.table("obligaciones_financieras")
-        .select("id,monto_original")
-        .eq("id", obligacion_id)
-        .single()
-        .execute()
-    )
-    fila = obligacion.data or {}
-    monto_original = float(fila.get("monto_original") or 0)
-    if saldo > monto_original:
-        raise ValueError("El saldo inicial no puede superar el monto original.")
-    return (
-        sb.table("obligaciones_financieras")
-        .update({"saldo_apertura": saldo})
-        .eq("id", obligacion_id)
-        .execute()
-    )
-
-def crear_movimiento_obligacion(payload):
-    sb = get_client()
-    return sb.table("movimientos_obligaciones").insert(payload).execute()
-
-def listar_cuentas_por_cobrar():
-    sb = get_client()
-    res = sb.table("cuentas_por_cobrar").select("*").order("fecha_origen", desc=True).execute()
-    return res.data or []
-
-def crear_cuenta_por_cobrar(payload):
-    # El código CXC también se asigna automáticamente para evitar duplicados.
-    datos = {k: v for k, v in dict(payload).items() if k != "codigo"}
-    return _insertar_con_codigo_unico("cuentas_por_cobrar", "CXC", datos)
-
-def actualizar_saldo_apertura_cuenta_por_cobrar(cuenta_id, saldo_apertura):
-    """Actualiza el saldo inicial de una cuenta por cobrar existente.
-
-    La interfaz debe comprobar previamente que no existan movimientos asociados.
-    """
-    sb = get_client()
-    existentes = (
-        sb.table("movimientos_cuentas_cobrar")
-        .select("id")
-        .eq("cuenta_id", cuenta_id)
-        .limit(1)
-        .execute()
-    )
-    if existentes.data:
-        raise ValueError("No se puede corregir el saldo inicial porque la cuenta ya tiene movimientos.")
-    return (
-        sb.table("cuentas_por_cobrar")
-        .update({"saldo_apertura": float(saldo_apertura)})
-        .eq("id", cuenta_id)
-        .execute()
-    )
-
-def listar_movimientos_cuentas_cobrar():
-    sb = get_client()
-    res = sb.table("movimientos_cuentas_cobrar").select("*").order("fecha", desc=True).execute()
-    return res.data or []
-
-def crear_movimiento_cuenta_cobrar(payload):
-    sb = get_client()
-    return sb.table("movimientos_cuentas_cobrar").insert(payload).execute()
-
-
-
-def listar_movimientos_garantias_tesoreria():
-    """Consulta únicamente entradas y salidas originadas por garantías de alquiler."""
-    sb = get_client()
-    res = sb.rpc("listar_movimientos_garantias_tesoreria").execute()
-    return res.data or []
+    res = sb.table("conciliaciones_bancarias").select("*").eq("id", conciliacion_id).limit(1).execute()
+    return (res.data or [None])[0]

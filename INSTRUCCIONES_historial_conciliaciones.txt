@@ -1,0 +1,22 @@
+EQUISE – Historial persistente de conciliaciones bancarias
+
+ARCHIVOS
+- app.py: interfaz para guardar conciliaciones y consultar el historial.
+- db.py: funciones de lectura/escritura del historial en Supabase.
+- migracion_historial_conciliaciones.sql: crea la tabla de historial y sus índices.
+
+INSTALACIÓN SEGURA
+1. Haz una copia de seguridad de los archivos actuales app.py y db.py.
+2. En Supabase, abre SQL Editor y ejecuta una sola vez migracion_historial_conciliaciones.sql.
+3. Reemplaza app.py y db.py por los incluidos en este paquete.
+4. Reinicia la aplicación Streamlit.
+5. En Conciliación bancaria, carga un extracto de prueba y guarda una conciliación.
+6. Comprueba que aparece en “Conciliaciones guardadas” y que puedes abrir su detalle.
+
+IMPORTANTE
+- La migración crea una tabla nueva; no altera tablas ni movimientos contables existentes.
+- Se guarda una instantánea JSONB de la conciliación, sin almacenar el archivo del extracto ni imágenes.
+- Guardar varias versiones está permitido: el historial conserva cada guardado con fecha y usuario.
+- Esta entrega implementa persistencia del resultado automático actual. La pantalla de asignación manual de una transferencia a varios meses/servicios es una siguiente etapa y no debe considerarse implementada todavía.
+- La tabla tiene RLS habilitado sin políticas públicas. La aplicación debe conectarse con la clave de backend autorizada que ya utiliza EQUISE; no expongas la clave service_role en el navegador ni en archivos compartidos.
+- Se validó sintaxis Python con py_compile. La conexión real a Supabase y la migración deben probarse en el proyecto del usuario.

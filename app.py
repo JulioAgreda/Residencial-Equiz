@@ -1,5 +1,6 @@
 import calendar
 import io
+import json
 import openpyxl
 import zipfile
 import streamlit as st
@@ -3893,6 +3894,80 @@ elif pagina == "🏦 Conciliación bancaria":
                          use_container_width=True, hide_index=True, column_config=fmt_cb)
         else:
             st.info("No hay registros en efectivo para mostrar (o activaste «Comparar también los pagos en efectivo»).")
+
+    # ---------------- 5. Guardar y consultar historial ----------------
+    st.divider()
+    st.subheader("4. Guardar conciliación e historial")
+    st.caption("Guarda el resultado de esta revisión para consultarlo después. Se almacena una instantánea de los datos; no se duplican ingresos ni egresos y no se guardan imágenes ni el archivo del extracto.")
+    col_guardar_cb, col_hist_cb = st.columns([1, 1])
+    with col_guardar_cb:
+        cuenta_cb = st.text_input("Identificación de la cuenta bancaria (opcional)", key="cb_cuenta_historial", placeholder="Ej. Banco Unión · Cuenta terminación 1234")
+        confirmar_guardado_cb = st.checkbox("Confirmo que deseo guardar esta versión de la conciliación", key="cb_confirmar_guardado")
+        if st.button("💾 Guardar conciliación", key="cb_guardar_historial", disabled=not confirmar_guardado_cb, use_container_width=True):
+            try:
+                resumen_guardado = rs_cb
+                instantanea = json.loads(json.dumps({
+                    "pares": r_cb["pares"],
+                    "banco_sin_registro": r_cb["banco_sin_registro"],
+                    "sistema_sin_banco": r_cb["sistema_sin_banco"],
+                    "excluidos": r_cb["excluidos"],
+                    "efectivo": r_cb["efectivo"],
+                    "banco": r_cb["banco"],
+                    "resumen": resumen_guardado,
+                    "parametros": {"dias": dias_cb, "incluir_efectivo": efectivo_cb, "palabras_excluir": [p.strip() for p in palabras_cb.split(",") if p.strip()]}
+                }, default=str))
+                db.guardar_conciliacion_bancaria({
+                    "periodo_desde": str(ext_cb["desde"]), "periodo_hasta": str(ext_cb["hasta"]),
+                    "cuenta": cuenta_cb.strip() or None,
+                    "total_movimientos": int(resumen_guardado["banco"]["n"]),
+                    "conciliados": int(resumen_guardado["conciliado"]["n"]),
+                    "pendientes": int(resumen_guardado["sin_registro"]["n"] + resumen_guardado["sistema_sin_banco"]["n"]),
+                    "monto_banco": float(resumen_guardado["banco"]["creditos"] + resumen_guardado["banco"]["debitos"]),
+                    "creado_por": usuario_actual.get("nombre") or usuario_actual.get("username"),
+                    "detalle": instantanea
+                })
+                st.success("Conciliación guardada. Podrás consultarla desde el historial.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"No se pudo guardar. Verifica que hayas ejecutado la migración SQL de historial: {e}")
+    with col_hist_cb:
+        st.markdown("**Conciliaciones guardadas**")
+        try:
+            historial_cb = db.listar_conciliaciones_bancarias(100)
+            if historial_cb:
+                df_hist_cb = pd.DataFrame([{
+                    "Desde": x.get("periodo_desde"), "Hasta": x.get("periodo_hasta"),
+                    "Cuenta": x.get("cuenta") or "—", "Movimientos": x.get("total_movimientos"),
+                    "Conciliados": x.get("conciliados"), "Pendientes": x.get("pendientes"),
+                    "Guardado por": x.get("creado_por") or "—", "Fecha de guardado": x.get("created_at")
+                } for x in historial_cb])
+                st.dataframe(df_hist_cb, use_container_width=True, hide_index=True)
+                mapa_hist_cb = {f'{x.get("periodo_desde")} a {x.get("periodo_hasta")} · {x.get("cuenta") or "Sin cuenta"} · {x.get("created_at", "")[:16]}': x for x in historial_cb}
+                elegido_hist_cb = st.selectbox("Consultar una conciliación guardada", list(mapa_hist_cb), key="cb_historial_selector")
+                if st.button("Consultar detalle guardado", key="cb_historial_abrir", use_container_width=True):
+                    st.session_state["cb_historial_consulta_id"] = mapa_hist_cb[elegido_hist_cb]["id"]
+                consulta_id_cb = st.session_state.get("cb_historial_consulta_id")
+                if consulta_id_cb:
+                    guardada_cb = db.obtener_conciliacion_bancaria(consulta_id_cb)
+                    if guardada_cb:
+                        det_cb = guardada_cb.get("detalle") or {}
+                        st.caption(f'Consulta histórica: {guardada_cb.get("periodo_desde")} a {guardada_cb.get("periodo_hasta")} · {guardada_cb.get("creado_por") or "—"}')
+                        st.json(det_cb.get("resumen", {}), expanded=False)
+                        pares_hist_cb = det_cb.get("pares", [])
+                        if pares_hist_cb:
+                            st.write("**Coincidencias guardadas**")
+                            filas_hist_cb = []
+                            for par in pares_hist_cb:
+                                for b in par.get("banco", []):
+                                    filas_hist_cb.append({"Fecha banco": b.get("fecha"), "Importe banco": b.get("monto"), "Tipo de cruce": par.get("union"), "Confianza": par.get("confianza"), "Registros asociados": len(par.get("sistema", []))})
+                            st.dataframe(pd.DataFrame(filas_hist_cb), use_container_width=True, hide_index=True)
+                        if det_cb.get("banco_sin_registro"):
+                            st.write("**Movimientos bancarios pendientes al guardar**")
+                            st.dataframe(pd.DataFrame([{"Fecha": x.get("linea", {}).get("fecha"), "Importe": x.get("linea", {}).get("monto"), "Causas": "; ".join(x.get("causas", []))} for x in det_cb["banco_sin_registro"]]), use_container_width=True, hide_index=True)
+            else:
+                st.info("Todavía no hay conciliaciones guardadas.")
+        except Exception as e:
+            st.warning(f"No se pudo consultar el historial. Verifica la migración SQL: {e}")
 
     emisor_cb = usuario_actual.get("nombre") or usuario_actual.get("username")
     base_cb = f"conciliacion_bancaria_{ext_cb['desde']:%Y-%m-%d}_{ext_cb['hasta']:%Y-%m-%d}"
