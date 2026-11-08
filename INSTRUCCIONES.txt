@@ -1,46 +1,29 @@
-EQUISE — Adaptación de interfaz para móviles
+EQUISE — Corrección del cierre automático del menú móvil
 
-CAMBIOS
-1. CSS responsivo para teléfonos:
-   - Menos márgenes laterales y títulos ajustados.
-   - Botones y campos más cómodos para tocar.
-   - Columnas se apilan en pantallas estrechas.
-   - Tablas mantienen desplazamiento horizontal.
-2. Menú lateral:
-   - Después de seleccionar un módulo y del rerender de Streamlit, intenta cerrar
-     automáticamente el sidebar en pantallas de hasta 768 px.
-   - En escritorio no aplica el cierre automático.
-   - El acceso al menú sigue disponible mediante el control estándar de Streamlit.
-3. Protección de salida:
-   - Añade la advertencia nativa del navegador al recargar, cerrar la pestaña o
-     abandonar la página.
-   - Cambiar de módulo dentro de la aplicación no debe activar esa advertencia,
-     porque Streamlit realiza un rerun interno y no una descarga de la página.
+PROBLEMA CORREGIDO
+La versión móvil anterior intentaba cerrar el menú únicamente al montar el
+componente. En Streamlit, el cambio de opción provoca un rerun y el botón de
+cierre puede no estar disponible en ese instante.
 
-LIMITACIONES IMPORTANTES
-- Los navegadores modernos deciden el texto de la advertencia; no permiten mostrar
-  un mensaje personalizado.
-- Algunos navegadores móviles (especialmente Safari/iOS) pueden no mostrar el aviso
-  en todos los casos o al cerrar la app desde el selector de aplicaciones.
-- El cierre automático del menú depende de los selectores internos del sidebar de
-  Streamlit. Si la versión del framework cambia esos selectores, la app sigue
-  funcionando, pero podría no cerrarse automáticamente. Debe probarse en el móvil.
-- La advertencia no sustituye el guardado de datos. Completa y envía formularios
-  antes de salir de una pantalla.
+CAMBIO
+- Se instala un listener delegado en el documento principal para detectar
+  selecciones/clics dentro del menú lateral.
+- En móviles (hasta 768 px) programa varios intentos de cierre para acompañar
+  el rerun y la reconstrucción del DOM de Streamlit.
+- Busca el botón de contraer mediante varios selectores compatibles.
+- Mantiene el aviso del navegador ante recarga/cierre de pestaña.
+- No cambia lógica de negocio, cobros, lecturas, historial ni base de datos.
 
 INSTALACIÓN
 1. Respaldar el app.py actualmente desplegado.
-2. Extraer el ZIP y reemplazar únicamente app.py.
-3. No reemplazar db.py ni ejecutar SQL.
-4. Desplegar y probar en un teléfono:
-   a) abrir el menú y seleccionar Gestión de cobros;
-   b) confirmar que el menú se cierre;
-   c) abrir menú y seleccionar otra sección;
-   d) recargar desde el navegador y confirmar que aparezca la advertencia;
-   e) cancelar la recarga y verificar que la pantalla siga abierta;
-   f) confirmar que el menú y los formularios sigan utilizables.
-5. Revisar también en escritorio que el menú continúe funcionando normalmente.
+2. Extraer el ZIP.
+3. Reemplazar únicamente app.py.
+4. No reemplazar db.py ni ejecutar SQL.
+5. Desplegar y probar en móvil seleccionando al menos 3 opciones distintas.
+6. Si sigue sin cerrarse, enviar captura y navegador/dispositivo usado.
 
-VALIDACIÓN
-El archivo pasó análisis sintáctico y compilación de Python. No se ha probado en el
-navegador móvil ni en el Streamlit desplegado.
+NOTA TÉCNICA
+El cierre depende de que el navegador permita al componente acceder al documento
+principal y de los selectores DOM de la versión de Streamlit desplegada. Se reforzó
+el mecanismo, pero debe verificarse en el navegador real. El archivo pasó
+compilación Python; no se ha probado en el dispositivo del usuario.

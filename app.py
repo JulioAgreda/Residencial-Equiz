@@ -92,9 +92,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# El iframe ejecuta el pequeño puente de interfaz en el documento principal.
-# Se limita a móvil: tras elegir una opción, Streamlit vuelve a renderizar y
-# este código cierra el panel lateral si quedó abierto.
+# El componente instala listeners en el documento principal para cerrar el
+# sidebar después de seleccionar una opción en pantallas móviles.
 st.components.v1.html(
     """
     <script>
@@ -114,29 +113,68 @@ st.components.v1.html(
           });
         }
 
-        // Al volver a renderizar después de seleccionar una opción, cerrar
-        // automáticamente el menú lateral en pantallas pequeñas.
+        // Cierre móvil robusto: escuchar la selección del menú en el documento
+        // principal. El listener persiste aunque Streamlit vuelva a renderizar
+        // el componente después de cambiar de página.
+        const mobile = () => host.matchMedia("(max-width: 768px)").matches;
+
         const closeSidebarOnMobile = function () {
-          if (host.innerWidth > 768) return;
-          const sidebar = host.document.querySelector(
-            'section[data-testid="stSidebar"]'
-          );
-          if (!sidebar) return;
+          if (!mobile()) return false;
+          const doc = host.document;
+          const sidebar = doc.querySelector('section[data-testid="stSidebar"]');
+          if (!sidebar) return false;
 
-          const isOpen = sidebar.getAttribute("aria-expanded") !== "false" &&
-                         sidebar.offsetWidth > 0;
-          if (!isOpen) return;
+          const candidates = [
+            sidebar.querySelector('button[data-testid="stSidebarCollapseButton"]'),
+            sidebar.querySelector('button[aria-label*="Collapse"]'),
+            sidebar.querySelector('button[aria-label*="Close"]'),
+            sidebar.querySelector('button[aria-label*="Cerrar"]'),
+            sidebar.querySelector('button[kind="header"]')
+          ].filter(Boolean);
 
-          const closeButton =
-            sidebar.querySelector('button[data-testid="stSidebarCollapseButton"]') ||
-            sidebar.querySelector('button[aria-label*="Collapse"]') ||
-            sidebar.querySelector('button[aria-label*="Cerrar"]');
-
-          if (closeButton) closeButton.click();
+          for (const btn of candidates) {
+            const r = btn.getBoundingClientRect();
+            const visible = r.width > 0 && r.height > 0 &&
+              host.getComputedStyle(btn).visibility !== "hidden" &&
+              host.getComputedStyle(btn).display !== "none";
+            if (visible) {
+              btn.click();
+              return true;
+            }
+          }
+          return false;
         };
 
-        host.setTimeout(closeSidebarOnMobile, 250);
-        host.setTimeout(closeSidebarOnMobile, 650);
+        const scheduleSidebarClose = function () {
+          // Streamlit procesa el cambio de radio y puede reconstruir el DOM.
+          // Reintentar durante el rerun para cerrar el panel cuando reaparezca.
+          [80, 180, 350, 650, 1000].forEach(ms => {
+            host.setTimeout(closeSidebarOnMobile, ms);
+          });
+        };
+
+        if (!host.__equizMobileSidebarListener) {
+          host.__equizMobileSidebarListener = true;
+          const isSidebarNavigation = function (target) {
+            if (!target || !target.closest) return false;
+            const sidebar = target.closest('section[data-testid="stSidebar"]');
+            if (!sidebar) return false;
+            return !!target.closest(
+              'input[type="radio"], label, [role="radio"], button'
+            );
+          };
+
+          host.document.addEventListener("change", function (event) {
+            if (isSidebarNavigation(event.target)) scheduleSidebarClose();
+          }, true);
+
+          host.document.addEventListener("click", function (event) {
+            if (isSidebarNavigation(event.target)) scheduleSidebarClose();
+          }, true);
+        }
+
+        // También intenta cerrar si el componente se monta con el menú abierto.
+        scheduleSidebarClose();
       } catch (e) {
         // La app sigue funcionando aunque el navegador limite el acceso al DOM.
       }
