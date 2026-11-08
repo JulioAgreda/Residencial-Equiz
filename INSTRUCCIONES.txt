@@ -1,29 +1,36 @@
-EQUISE — Corrección del cierre automático del menú móvil
+EQUISE - MÓDULO DE ENTREGAS DEL CAPITAL ANTICRÉTICO
 
-PROBLEMA CORREGIDO
-La versión móvil anterior intentaba cerrar el menú únicamente al montar el
-componente. En Streamlit, el cambio de opción provoca un rerun y el botón de
-cierre puede no estar disponible en ese instante.
+CONTENIDO
+- app_entregas_anticretico.py: aplicación basada en la versión actualizada de EQUISE.
+- db_entregas_anticretico.py: capa DB con consultas y RPC de entregas.
+- recibo_entregas_anticretico.py: generador de recibos PDF individuales.
+- migracion_entregas_anticretico.sql: migración aditiva para Supabase.
 
-CAMBIO
-- Se instala un listener delegado en el documento principal para detectar
-  selecciones/clics dentro del menú lateral.
-- En móviles (hasta 768 px) programa varios intentos de cierre para acompañar
-  el rerun y la reconstrucción del DOM de Streamlit.
-- Busca el botón de contraer mediante varios selectores compatibles.
-- Mantiene el aviso del navegador ante recarga/cierre de pestaña.
-- No cambia lógica de negocio, cobros, lecturas, historial ni base de datos.
+QUÉ INCORPORA
+1. Registra cada entrega con su fecha real de recepción, monto, moneda, etapa (antes/después de firma), medio, referencia, entregante, concepto y observación.
+2. Genera un recibo PDF individual con código AC-000001, AC-000002, etc.
+3. Muestra capital contractual, total recibido y saldo pendiente.
+4. Conserva recibos anulados y su motivo, usuario y fecha de anulación.
+5. Solo las entregas vigentes se suman al total recibido.
+6. Las nuevas entregas se validan en una función SQL transaccional, bloqueando el apartamento para evitar que dos registros simultáneos excedan el capital acordado.
+7. No modifica apartamentos, pagos de alquiler, servicios, devoluciones ni conciliaciones bancarias.
 
 INSTALACIÓN
-1. Respaldar el app.py actualmente desplegado.
-2. Extraer el ZIP.
-3. Reemplazar únicamente app.py.
-4. No reemplazar db.py ni ejecutar SQL.
-5. Desplegar y probar en móvil seleccionando al menos 3 opciones distintas.
-6. Si sigue sin cerrarse, enviar captura y navegador/dispositivo usado.
+1. Haz una copia de seguridad del repositorio y de la base de datos.
+2. En Supabase SQL Editor ejecuta una sola vez migracion_entregas_anticretico.sql.
+3. La tabla nueva mantiene RLS habilitado y no crea políticas públicas. La aplicación debe utilizar SUPABASE_KEY con service_role/secret exclusivamente en los secretos del servidor (nunca en el navegador ni en código público). Si el secreto actual es anon/publishable, no habilites políticas abiertas: primero configura una clave privada de servidor y revisa la configuración de seguridad.
+4. Reemplaza app.py por app_entregas_anticretico.py (renombrándolo a app.py).
+5. Reemplaza db.py por db_entregas_anticretico.py (renombrándolo a db.py).
+6. Reemplaza recibo.py por recibo_entregas_anticretico.py (renombrándolo a recibo.py).
+7. Conserva el resto de módulos y assets actuales, incluida la carpeta assets/ del logo.
+8. Reinicia Streamlit.
 
-NOTA TÉCNICA
-El cierre depende de que el navegador permita al componente acceder al documento
-principal y de los selectores DOM de la versión de Streamlit desplegada. Se reforzó
-el mecanismo, pero debe verificarse en el navegador real. El archivo pasó
-compilación Python; no se ha probado en el dispositivo del usuario.
+IMPORTANTE SOBRE DATOS HISTÓRICOS
+- No se crean entregas automáticamente desde monto_anticretico: ese campo es el capital contractual, no un desglose probado de cobros.
+- Las entregas históricas deben cargarse manualmente con fecha real y respaldo documental.
+- Si una entrega se registró mal, se anula con motivo y luego se registra una nueva entrega vinculada al recibo anulado. El recibo anterior no se borra.
+- No se debe usar la fecha de registro del sistema como fecha de recepción: el formulario pide la fecha real del dinero.
+- La tabla de entregas es independiente de la tabla de devoluciones del capital.
+
+VALIDACIÓN
+La sintaxis Python debe validarse con py_compile. La migración y RPC requieren ejecutarse y probarse en el proyecto Supabase real antes de poner en producción. No se han probado con credenciales reales ni se afirma que la migración ya esté aplicada.

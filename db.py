@@ -977,3 +977,39 @@ def obtener_conciliacion_bancaria(conciliacion_id):
     sb = get_client()
     res = sb.table("conciliaciones_bancarias").select("*").eq("id", conciliacion_id).limit(1).execute()
     return (res.data or [None])[0]
+
+
+# ---------- Entregas parciales del capital anticrético ----------
+def listar_entregas_anticretico(apartamento_id, incluir_anuladas=True):
+    sb = get_client()
+    q = (sb.table("entregas_anticretico").select("*")
+         .eq("apartamento_id", apartamento_id)
+         .order("fecha_entrega", desc=False).order("created_at", desc=False))
+    if not incluir_anuladas:
+        q = q.eq("estado", "vigente")
+    res = q.execute()
+    return res.data or []
+
+
+def registrar_entrega_anticretico(payload):
+    """Registra una entrega mediante RPC transaccional; valida capital y moneda."""
+    sb = get_client()
+    res = sb.rpc("registrar_entrega_anticretico", payload).execute()
+    data = res.data
+    if isinstance(data, list):
+        return data[0] if data else None
+    return data
+
+
+def anular_entrega_anticretico(entrega_id, motivo, anulado_por):
+    """Anula sin borrar el recibo original; conserva trazabilidad."""
+    sb = get_client()
+    res = sb.rpc("anular_entrega_anticretico", {
+        "p_entrega_id": entrega_id,
+        "p_motivo": motivo,
+        "p_anulado_por": anulado_por,
+    }).execute()
+    data = res.data
+    if isinstance(data, list):
+        return data[0] if data else None
+    return data

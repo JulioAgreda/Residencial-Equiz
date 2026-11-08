@@ -2325,6 +2325,164 @@ elif pagina == "🏠 Apartamentos":
                 else:
                     st.success("El capital anticrético está totalmente devuelto.")
 
+                # Registro separado de entregas recibidas del capital anticrético.
+                st.divider()
+                st.subheader("💰 Entregas del capital anticrético")
+                st.caption("Registra cada entrega por su fecha real de recepción, incluso si ocurrió antes de firmar el contrato. Cada entrega genera un recibo independiente.")
+                try:
+                    entregas_ac = db.listar_entregas_anticretico(apt["id"], incluir_anuladas=True)
+                except Exception as exc:
+                    entregas_ac = []
+                    st.error(f"No se pudo consultar el historial de entregas. Verifica la migración de entregas anticréticas: {exc}")
+                entregas_vigentes_ac = [x for x in entregas_ac if (x.get("estado") or "vigente") == "vigente"]
+                moneda_ac = str(apt.get("anticretico_moneda") or "BOB").upper()
+                capital_ac = float(apt.get("monto_anticretico") or 0)
+                total_recibido_ac = sum(float(x.get("monto") or 0) for x in entregas_vigentes_ac if str(x.get("moneda") or moneda_ac).upper() == moneda_ac)
+                saldo_recibir_ac = max(0.0, capital_ac - total_recibido_ac)
+                simbolo_ac = "USD" if moneda_ac == "USD" else "Bs"
+                ec1, ec2, ec3 = st.columns(3)
+                ec1.metric("Capital acordado", f"{simbolo_ac} {capital_ac:,.2f}")
+                ec2.metric("Total recibido", f"{simbolo_ac} {total_recibido_ac:,.2f}")
+                ec3.metric("Saldo por recibir", f"{simbolo_ac} {saldo_recibir_ac:,.2f}")
+                if total_recibido_ac > capital_ac + 0.004:
+                    st.error("Las entregas vigentes superan el capital contractual. No registres nuevos pagos; revisa los movimientos.")
+                elif saldo_recibir_ac <= 0.004:
+                    st.success("El capital anticrético está completamente recibido.")
+                elif total_recibido_ac > 0:
+                    st.info("Estado de recepción: pago parcial.")
+                else:
+                    st.info("Estado de recepción: pendiente de recibir.")
+
+                if saldo_recibir_ac > 0.004 and total_recibido_ac <= capital_ac + 0.004:
+                    with st.expander("➕ Registrar nueva entrega", expanded=not entregas_vigentes_ac):
+                        with st.form(f"form_entrega_anticretico_{apt['id']}"):
+                            ea1, ea2 = st.columns(2)
+                            with ea1:
+                                fecha_entrega_ac = st.date_input("Fecha real de recepción del dinero", value=date.today(), format="DD/MM/YYYY", key=f"fecha_entrega_ac_{apt['id']}")
+                                monto_entrega_ac = st.number_input("Monto recibido", min_value=0.01, max_value=float(saldo_recibir_ac), value=min(float(saldo_recibir_ac), 100.0), step=100.0, key=f"monto_entrega_ac_{apt['id']}")
+                                etapa_entrega_ac = st.selectbox("Momento respecto a la firma", ["Antes de firmar el contrato", "Después de firmar el contrato"], key=f"etapa_entrega_ac_{apt['id']}")
+                            with ea2:
+                                medio_entrega_ac = st.selectbox("Medio de recepción", ["Efectivo", "Transferencia bancaria", "QR", "Depósito", "Cheque", "Otro"], key=f"medio_entrega_ac_{apt['id']}")
+                                referencia_entrega_ac = st.text_input("N.º de comprobante / referencia", key=f"ref_entrega_ac_{apt['id']}")
+                                entregante_ac = st.text_input("Nombre de quien entrega el dinero", value=apt.get("inquilino_nombre") or "", key=f"entregante_ac_{apt['id']}")
+                            anuladas_para_reemplazo_ac = [x for x in entregas_ac if (x.get("estado") or "vigente") == "anulado"]
+                            opciones_reemplazo_ac = {"No reemplaza otro recibo": None}
+                            for x_rep in anuladas_para_reemplazo_ac:
+                                opciones_reemplazo_ac[f"{x_rep.get('numero_recibo')} · {x_rep.get('fecha_entrega')} · {float(x_rep.get('monto') or 0):,.2f}"] = x_rep.get("id")
+                            reemplazo_label_ac = st.selectbox("Recibo anulado que reemplaza (si corresponde)", list(opciones_reemplazo_ac.keys()), key=f"reemplazo_ac_{apt['id']}")
+                            concepto_entrega_ac = st.text_input("Concepto", value="Entrega a cuenta del capital anticrético acordado", key=f"concepto_entrega_ac_{apt['id']}")
+                            observacion_entrega_ac = st.text_area("Observaciones", key=f"obs_entrega_ac_{apt['id']}")
+                            confirmar_entrega_ac = st.checkbox("Confirmo que el dinero fue efectivamente recibido y que los datos son correctos.", key=f"conf_entrega_ac_{apt['id']}")
+                            guardar_entrega_ac = st.form_submit_button("Registrar entrega y generar recibo", type="primary")
+                        if guardar_entrega_ac:
+                            if not confirmar_entrega_ac:
+                                st.error("Debes confirmar la recepción efectiva del dinero.")
+                            elif not entregante_ac.strip():
+                                st.error("Registra el nombre de quien entregó el dinero.")
+                            elif monto_entrega_ac <= 0 or monto_entrega_ac > saldo_recibir_ac + 0.004:
+                                st.error("El monto debe ser positivo y no puede superar el saldo por recibir.")
+                            else:
+                                try:
+                                    nueva_entrega_ac = db.registrar_entrega_anticretico({
+                                        "p_apartamento_id": apt["id"],
+                                        "p_fecha_entrega": str(fecha_entrega_ac),
+                                        "p_monto": round(float(monto_entrega_ac), 2),
+                                        "p_moneda": moneda_ac,
+                                        "p_etapa": "antes_firma" if etapa_entrega_ac.startswith("Antes") else "despues_firma",
+                                        "p_medio_pago": medio_entrega_ac,
+                                        "p_referencia": referencia_entrega_ac.strip() or None,
+                                        "p_entregante": entregante_ac.strip(),
+                                        "p_concepto": concepto_entrega_ac.strip() or "Entrega a cuenta del capital anticrético",
+                                        "p_observacion": observacion_entrega_ac.strip() or None,
+                                        "p_registrado_por": usuario_actual.get("nombre") or usuario_actual.get("username") or "Usuario",
+                                        "p_reemplaza_id": opciones_reemplazo_ac.get(reemplazo_label_ac),
+                                    })
+                                    limpiar_cache()
+                                    st.session_state[f"ultima_entrega_anticretico_{apt['id']}"] = nueva_entrega_ac
+                                    st.success("Entrega registrada correctamente. El recibo está disponible en el historial.")
+                                    st.rerun()
+                                except Exception as exc:
+                                    st.error(f"No se pudo registrar la entrega: {exc}")
+
+                if entregas_ac:
+                    st.markdown("**Historial de entregas y recibos**")
+                    filas_entregas_ac = []
+                    for x in entregas_ac:
+                        filas_entregas_ac.append({
+                            "Recibo": x.get("numero_recibo") or "—",
+                            "Fecha real": parse_fecha(x.get("fecha_entrega")),
+                            "Etapa": "Antes de firma" if x.get("etapa") == "antes_firma" else "Después de firma",
+                            "Entregante": x.get("entregante") or "—",
+                            "Monto": f'{x.get("moneda") or moneda_ac} {float(x.get("monto") or 0):,.2f}',
+                            "Medio": x.get("medio_pago") or "—",
+                            "Estado": "VIGENTE" if (x.get("estado") or "vigente") == "vigente" else "ANULADO",
+                        })
+                    st.dataframe(pd.DataFrame(filas_entregas_ac), use_container_width=True, hide_index=True)
+                    datos_estado_ac = {
+                        "apartamento": recibo.formatear_apartamento(apt),
+                        "titular": apt.get("inquilino_nombre") or "—",
+                        "moneda": moneda_ac,
+                        "capital": capital_ac,
+                        "recibido": total_recibido_ac,
+                        "saldo": saldo_recibir_ac,
+                        "entregas": entregas_ac,
+                    }
+                    st.download_button("📄 Descargar estado de cuenta consolidado (PDF)",
+                        data=recibo.generar_estado_cuenta_anticretico_pdf(datos_estado_ac),
+                        file_name=f"estado_cuenta_anticretico_{apt.get('codigo') or apt['id']}.pdf",
+                        mime="application/pdf", key=f"estado_cuenta_ac_{apt['id']}")
+                    acumulado_por_id_ac = {}
+                    acumulado_ac = 0.0
+                    for x_crono_ac in sorted(entregas_ac, key=lambda z: (z.get("fecha_entrega") or "", z.get("created_at") or "")):
+                        if (x_crono_ac.get("estado") or "vigente") == "vigente":
+                            acumulado_ac += float(x_crono_ac.get("monto") or 0)
+                        acumulado_por_id_ac[x_crono_ac.get("id")] = max(0.0, capital_ac - acumulado_ac)
+                    for x in entregas_ac:
+                        with st.expander(f"🧾 {x.get('numero_recibo') or 'Recibo'} · {x.get('fecha_entrega')} · {x.get('estado', 'vigente').upper()}"):
+                            st.write(f"**Entregante:** {x.get('entregante') or '—'}")
+                            st.write(f"**Monto:** {x.get('moneda') or moneda_ac} {float(x.get('monto') or 0):,.2f}")
+                            st.write(f"**Concepto:** {x.get('concepto') or '—'}")
+                            st.write(f"**Medio:** {x.get('medio_pago') or '—'} · **Referencia:** {x.get('referencia') or '—'}")
+                            if x.get("observacion"):
+                                st.caption("Observación: " + str(x.get("observacion")))
+                            estado_x = x.get("estado") or "vigente"
+                            saldo_despues_x = acumulado_por_id_ac.get(x.get("id"), capital_ac)
+                            datos_pdf_ac = {
+                                "numero_recibo": x.get("numero_recibo") or "—",
+                                "fecha_entrega": x.get("fecha_entrega") or "—",
+                                "apartamento": recibo.formatear_apartamento(apt),
+                                "entregante": x.get("entregante") or "—",
+                                "recibido_por": x.get("registrado_por") or "—",
+                                "monto_texto": f'{x.get("moneda") or moneda_ac} {float(x.get("monto") or 0):,.2f}',
+                                "moneda": x.get("moneda") or moneda_ac,
+                                "etapa_texto": "Antes de firmar el contrato" if x.get("etapa") == "antes_firma" else "Después de firmar el contrato",
+                                "medio_pago": x.get("medio_pago") or "—",
+                                "referencia": x.get("referencia") or "—",
+                                "saldo_posterior": f'{x.get("moneda") or moneda_ac} {saldo_despues_x:,.2f}',
+                                "concepto": x.get("concepto"),
+                                "observacion": x.get("observacion"),
+                                "estado_recibo": estado_x,
+                            }
+                            st.download_button("Descargar recibo PDF", data=recibo.generar_recibo_anticretico_pdf(datos_pdf_ac), file_name=f"{x.get('numero_recibo') or 'recibo_anticretico'}.pdf", mime="application/pdf", key=f"pdf_entrega_ac_{x['id']}")
+                            if estado_x == "vigente" and es_admin:
+                                with st.form(f"anular_entrega_ac_{x['id']}"):
+                                    motivo_anulacion_x = st.text_input("Motivo de anulación", key=f"motivo_anular_ac_{x['id']}")
+                                    confirmar_anulacion_x = st.checkbox("Confirmo que este recibo debe quedar anulado; no se borrará del historial.", key=f"confirm_anular_ac_{x['id']}")
+                                    anular_btn_x = st.form_submit_button("Anular recibo")
+                                if anular_btn_x:
+                                    if not motivo_anulacion_x.strip() or not confirmar_anulacion_x:
+                                        st.error("Indica el motivo y confirma la anulación.")
+                                    else:
+                                        try:
+                                            db.anular_entrega_anticretico(x["id"], motivo_anulacion_x.strip(), usuario_actual.get("nombre") or usuario_actual.get("username") or "Usuario")
+                                            limpiar_cache()
+                                            st.success("Recibo anulado. El registro original permanece en el historial.")
+                                            st.rerun()
+                                        except Exception as exc:
+                                            st.error(f"No se pudo anular el recibo: {exc}")
+                            if estado_x == "anulado":
+                                st.error(f"ANULADO · Motivo: {x.get('motivo_anulacion') or 'No especificado'} · Por: {x.get('anulado_por') or '—'}")
+
     with tab_salida:
         st.markdown("**Registrar que un inquilino se fue**")
         st.caption("Archiva al inquilino en el historial y deja el apartamento libre. Su deuda queda a su nombre: si después paga, "
@@ -4857,6 +5015,12 @@ elif pagina == "🏦 Conciliación bancaria":
                         if len(tipos_seleccionados_cb) > 1:
                             st.info("Estás combinando ingresos y egresos del sistema en una misma conciliación. Verifica que correspondan a la misma operación, anticipo o rendición.")
                         diferencia_manual_cb = round(monto_banco_manual_cb - suma_asignada_cb, 2)
+                        # Inicializar todas las variables de decisión antes de las ramas.
+                        # Evita NameError cuando se confirma una conciliación con diferencia.
+                        motivo_saldo_pendiente_cb = ""
+                        aceptar_saldo_pendiente_cb = True
+                        aceptar_diferencia_cb = False
+                        observacion_diferencia_cb = ""
                         st.write(f"**Total asignado:** Bs {suma_asignada_cb:,.2f} / **Banco:** Bs {monto_banco_manual_cb:,.2f}")
                         if abs(diferencia_manual_cb) <= 0.004 and saldo_pendiente_registro_cb <= 0.004:
                             st.success("Los importes del banco y de los registros seleccionados coinciden. Puedes cerrar como conciliación exacta.")
