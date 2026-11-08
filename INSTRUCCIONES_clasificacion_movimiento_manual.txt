@@ -1,0 +1,32 @@
+EQUISE — Clasificación manual de la naturaleza del movimiento bancario
+
+MOTIVO
+El selector manual deducía Ingreso/Egreso exclusivamente del signo del importe del extracto.
+Eso puede clasificar mal ciertos movimientos si la lectura del extracto o el banco representa
+un concepto de forma particular. El usuario identificó un interés ganado de Bs 0,12 que debe
+tratarse como ingreso.
+
+CAMBIO
+Cada movimiento bancario pendiente ahora muestra un selector «Clasificación del movimiento
+bancario» con Ingreso y Egreso. Por defecto conserva la clasificación deducida del signo.
+El usuario puede cambiarla en casos justificados, por ejemplo:
+- Interés ganado: Ingreso.
+- Comisión bancaria: Egreso.
+
+Si se cambia la clasificación respecto del signo, se muestra una advertencia para verificar
+el concepto. La dirección elegida se guarda dentro de la asignación manual de esa sesión y
+se incorpora a la instantánea del historial al guardar la conciliación.
+
+INSTALACIÓN
+Reemplaza únicamente app.py en la raíz del repositorio residencial-equiz por el incluido.
+No reemplaces db.py. No requiere migración SQL. Confirma el commit y espera el despliegue.
+
+USO
+En el movimiento de Bs 0,12, selecciona «Ingreso» en «Clasificación del movimiento bancario».
+Después busca y selecciona el registro del sistema que representa el interés ganado y confirma
+la asignación por Bs 0,12. Si el interés no está registrado en el sistema, primero debe
+registrarse en el módulo contable que corresponda; la conciliación solo vincula registros.
+
+VALIDACIÓN
+app.py pasó validación sintáctica y compilación en memoria. No se probó en el Streamlit real
+ni en Supabase. No se modifica automáticamente el signo del extracto ni el registro contable.

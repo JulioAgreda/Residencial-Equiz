@@ -4029,15 +4029,33 @@ elif pagina == "🏦 Conciliación bancaria":
                 linea_manual_cb = item_manual_cb["linea"]
                 idx_banco_manual_cb = int(linea_manual_cb["idx"])
                 monto_banco_manual_cb = round(abs(float(linea_manual_cb["monto"])), 2)
-                direccion_manual_cb = "Ingreso" if float(linea_manual_cb["monto"]) > 0 else "Egreso"
+                direccion_signo_banco_cb = "Ingreso" if float(linea_manual_cb["monto"]) > 0 else "Egreso"
                 asignacion_existente_cb = asignaciones_manual_cb.get(str(idx_banco_manual_cb))
+                direccion_guardada_cb = (
+                    asignacion_existente_cb.get("direccion_manual")
+                    if asignacion_existente_cb else None
+                )
+                direccion_predeterminada_cb = direccion_guardada_cb or direccion_signo_banco_cb
 
                 titulo_manual_cb = (f"{linea_manual_cb['fecha']:%d/%m/%Y} · "
-                                    f"{'Entrada' if direccion_manual_cb == 'Ingreso' else 'Salida'} · "
-                                    f"Bs {monto_banco_manual_cb:,.2f} · "
+                                    f"Movimiento bancario · Bs {monto_banco_manual_cb:,.2f} · "
                                     f"{linea_manual_cb.get('contraparte') or linea_manual_cb.get('transaccion') or 'Sin descripción'}")
                 with st.expander(("✅ " if asignacion_existente_cb else "⚠️ ") + titulo_manual_cb,
                                  expanded=not bool(asignacion_existente_cb)):
+                    opciones_direccion_cb = ["Ingreso", "Egreso"]
+                    indice_direccion_cb = opciones_direccion_cb.index(direccion_predeterminada_cb)
+                    direccion_manual_cb = st.selectbox(
+                        "Clasificación del movimiento bancario",
+                        options=opciones_direccion_cb,
+                        index=indice_direccion_cb,
+                        key=f"cb_direccion_manual_{clave_manual_cb}_{idx_banco_manual_cb}",
+                        help="Usa esta opción cuando el signo importado no represente la naturaleza real del movimiento. Ejemplo: interés ganado = Ingreso."
+                    )
+                    if direccion_manual_cb != direccion_signo_banco_cb:
+                        st.warning(
+                            f"El signo del extracto lo clasificó como {direccion_signo_banco_cb}, "
+                            f"pero estás indicando {direccion_manual_cb}. Verifica el concepto bancario antes de confirmar."
+                        )
                     if asignacion_existente_cb:
                         st.success("Asignación manual guardada para esta revisión.")
                         for a_cb in asignacion_existente_cb["asignaciones"]:
@@ -4164,6 +4182,7 @@ elif pagina == "🏦 Conciliación bancaria":
                                         "fecha_banco": str(linea_manual_cb["fecha"]),
                                         "monto_banco": float(linea_manual_cb["monto"]),
                                         "descripcion_banco": str(linea_manual_cb.get("contraparte") or linea_manual_cb.get("transaccion") or ""),
+                                        "direccion_manual": direccion_manual_cb,
                                         "asignaciones": partes_nuevas_manual_cb
                                     }
                                     st.session_state[clave_estado_manual_cb] = asignaciones_manual_cb
