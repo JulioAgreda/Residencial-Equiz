@@ -954,16 +954,21 @@ def crear_movimiento_cuenta_cobrar(payload):
 
 # ---------- Historial persistente de conciliaciones bancarias ----------
 def guardar_conciliacion_bancaria(payload: dict):
-    """Guarda una instantánea de conciliación y su detalle en JSONB. No altera movimientos contables."""
+    """Guarda una versión inmutable de la conciliación. Solo conserva referencias/detalle JSON;
+    nunca inserta ni modifica ingresos, egresos o pagos del sistema."""
     sb = get_client()
-    res = sb.table("conciliaciones_bancarias").insert(payload).execute()
+    datos = dict(payload or {})
+    # En la primera versión se omite grupo_id para que Supabase genere uno por defecto.
+    if datos.get("grupo_id") is None:
+        datos.pop("grupo_id", None)
+    res = sb.table("conciliaciones_bancarias").insert(datos).execute()
     return (res.data or [None])[0]
 
 
 def listar_conciliaciones_bancarias(limite=100):
     sb = get_client()
     res = (sb.table("conciliaciones_bancarias")
-           .select("id, periodo_desde, periodo_hasta, cuenta, total_movimientos, conciliados, pendientes, monto_banco, creado_por, created_at")
+           .select("id, grupo_id, version, estado, periodo_desde, periodo_hasta, cuenta, total_movimientos, conciliados, pendientes, monto_banco, creado_por, created_at")
            .order("created_at", desc=True).limit(int(limite)).execute())
     return res.data or []
 

@@ -4498,6 +4498,23 @@ elif pagina == "🏦 Conciliación bancaria":
     clave_estado_manual_cb = f"cb_asignaciones_manuales_{clave_manual_cb}"
     if clave_estado_manual_cb not in st.session_state:
         st.session_state[clave_estado_manual_cb] = {}
+    # Al reabrir una conciliación, restaurar sus asignaciones manuales sobre el extracto
+    # que el usuario volvió a cargar. Solo se restauran referencias; nunca se insertan
+    # pagos, compras, ventas ni movimientos de Finanzas.
+    reapertura_cb = st.session_state.get("cb_reapertura_pendiente")
+    if reapertura_cb:
+        detalle_reapertura_cb = reapertura_cb.get("detalle") or {}
+        if str(reapertura_cb.get("periodo_desde")) == str(ext_cb["desde"]) and str(reapertura_cb.get("periodo_hasta")) == str(ext_cb["hasta"]):
+            st.session_state[clave_estado_manual_cb] = copy.deepcopy(detalle_reapertura_cb.get("conciliacion_manual") or {})
+            st.session_state["cb_grupo_version_activo"] = {
+                "grupo_id": reapertura_cb.get("grupo_id") or reapertura_cb.get("id"),
+                "version_anterior": int(reapertura_cb.get("version") or 1),
+                "cuenta": reapertura_cb.get("cuenta")
+            }
+            st.session_state.pop("cb_reapertura_pendiente", None)
+            st.success("Conciliación reabierta. Se restauraron las asignaciones manuales; revisa los datos antes de guardar una nueva versión.")
+        else:
+            st.warning("La conciliación seleccionada corresponde a otro periodo. Carga el extracto original de ese mismo periodo para reabrirla.")
     asignaciones_manual_cb = st.session_state[clave_estado_manual_cb]
 
     # Reconstruir el resultado visible liberando cualquier coincidencia automática
@@ -4993,9 +5010,15 @@ elif pagina == "🏦 Conciliación bancaria":
                     "conciliacion_manual": st.session_state.get(clave_estado_manual_cb, {}) if "clave_estado_manual_cb" in locals() else {},
                     "parametros": {"dias": dias_cb, "incluir_efectivo": efectivo_cb, "palabras_excluir": [p.strip() for p in palabras_cb.split(",") if p.strip()]}
                 }, default=str))
+                grupo_activo_cb = st.session_state.get("cb_grupo_version_activo") or {}
+                grupo_id_cb = grupo_activo_cb.get("grupo_id")
+                version_cb = int(grupo_activo_cb.get("version_anterior") or 0) + 1 if grupo_id_cb else 1
                 db.guardar_conciliacion_bancaria({
+                    "grupo_id": grupo_id_cb,
+                    "version": version_cb,
+                    "estado": "guardada",
                     "periodo_desde": str(ext_cb["desde"]), "periodo_hasta": str(ext_cb["hasta"]),
-                    "cuenta": cuenta_cb.strip() or None,
+                    "cuenta": cuenta_cb.strip() or grupo_activo_cb.get("cuenta") or None,
                     "total_movimientos": int(resumen_guardado["banco"]["n"]),
                     "conciliados": int(resumen_guardado["conciliado"]["n"]),
                     "pendientes": int(resumen_guardado["sin_registro"]["n"] + resumen_guardado["sistema_sin_banco"]["n"]),
@@ -5003,7 +5026,8 @@ elif pagina == "🏦 Conciliación bancaria":
                     "creado_por": usuario_actual.get("nombre") or usuario_actual.get("username"),
                     "detalle": instantanea
                 })
-                st.success("Conciliación guardada. Podrás consultarla desde el historial.")
+                st.session_state.pop("cb_grupo_version_activo", None)
+                st.success(f"Versión {version_cb} guardada. Las versiones anteriores se mantienen intactas.")
                 st.rerun()
             except Exception as e:
                 st.error(f"No se pudo guardar. Verifica que hayas ejecutado la migración SQL de historial: {e}")
@@ -5016,13 +5040,19 @@ elif pagina == "🏦 Conciliación bancaria":
                     "Desde": x.get("periodo_desde"), "Hasta": x.get("periodo_hasta"),
                     "Cuenta": x.get("cuenta") or "—", "Movimientos": x.get("total_movimientos"),
                     "Conciliados": x.get("conciliados"), "Pendientes": x.get("pendientes"),
+                    "Versión": x.get("version", 1), "Estado": x.get("estado") or "guardada",
                     "Guardado por": x.get("creado_por") or "—", "Fecha de guardado": x.get("created_at")
                 } for x in historial_cb])
                 st.dataframe(df_hist_cb, use_container_width=True, hide_index=True)
-                mapa_hist_cb = {f'{x.get("periodo_desde")} a {x.get("periodo_hasta")} · {x.get("cuenta") or "Sin cuenta"} · {x.get("created_at", "")[:16]}': x for x in historial_cb}
-                elegido_hist_cb = st.selectbox("Consultar una conciliación guardada", list(mapa_hist_cb), key="cb_historial_selector")
-                if st.button("Consultar detalle guardado", key="cb_historial_abrir", use_container_width=True):
+                mapa_hist_cb = {f'{x.get("periodo_desde")} a {x.get("periodo_hasta")} · V{x.get("version", 1)} · {x.get("cuenta") or "Sin cuenta"} · {x.get("created_at", "")[:16]}': x for x in historial_cb}
+                elegido_hist_cb = st.selectbox("Seleccionar conciliación / versión", list(mapa_hist_cb), key="cb_historial_selector")
+                col_ver_hist_cb, col_reabrir_hist_cb = st.columns(2)
+                if col_ver_hist_cb.button("Consultar detalle guardado", key="cb_historial_abrir", use_container_width=True):
                     st.session_state["cb_historial_consulta_id"] = mapa_hist_cb[elegido_hist_cb]["id"]
+                if col_reabrir_hist_cb.button("↩️ Reabrir conciliación", key="cb_historial_reabrir", use_container_width=True):
+                    st.session_state["cb_reapertura_pendiente"] = db.obtener_conciliacion_bancaria(mapa_hist_cb[elegido_hist_cb]["id"])
+                    st.session_state["cb_historial_consulta_id"] = mapa_hist_cb[elegido_hist_cb]["id"]
+                    st.info("Conciliación seleccionada para reabrir. Vuelve a cargar el extracto bancario original del mismo periodo; al procesarlo se restaurarán las asignaciones.")
                 consulta_id_cb = st.session_state.get("cb_historial_consulta_id")
                 if consulta_id_cb:
                     guardada_cb = db.obtener_conciliacion_bancaria(consulta_id_cb)

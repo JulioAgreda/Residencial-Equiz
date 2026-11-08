@@ -1,0 +1,26 @@
+EQUISE — Función «Reabrir conciliación» con versiones
+
+CONTENIDO
+- app_reabrir.py: aplicación Streamlit actualizada (usar como app.py al desplegar).
+- db_reabrir.py: módulo DB actualizado (usar como db.py al desplegar).
+- migracion_reabrir_conciliacion.sql: migración aditiva para Supabase.
+
+QUÉ HACE
+1. En el historial, seleccionar una conciliación y pulsar «Reabrir conciliación».
+2. Cargar nuevamente el extracto bancario original del mismo periodo.
+3. La aplicación restaura las asignaciones manuales guardadas y permite revisarlas/modificarlas.
+4. Al guardar, crea una nueva versión dentro del mismo grupo. Las versiones previas no se actualizan ni eliminan.
+5. Las asignaciones se guardan como referencias a índices de movimientos bancarios y registros ya existentes del sistema. No se crean pagos, ingresos ni egresos.
+
+IMPORTANTE
+- El archivo del extracto no se almacena en Supabase. Por ello, para reabrir se debe volver a cargar el extracto original del mismo periodo; el sistema verifica el rango de fechas antes de restaurar las asignaciones.
+- Si el periodo no coincide, no se restauran las asignaciones.
+- Ejecutar primero migracion_reabrir_conciliacion.sql una sola vez en Supabase.
+- Luego desplegar app_reabrir.py como app.py y db_reabrir.py como db.py, conservando los demás módulos actuales.
+- No reemplazar schema.sql ni borrar la tabla conciliaciones_bancarias.
+- Antes de desplegar, realizar copia de seguridad de los archivos actuales.
+
+VALIDACIONES REALIZADAS
+- Compilación sintáctica de app y db.
+- Pruebas unitarias existentes de conciliación y cuadre.
+- No se pudo probar la conexión real a Supabase desde este entorno; la migración y permisos deben validarse en el proyecto desplegado.
