@@ -3909,6 +3909,7 @@ elif pagina == "🏦 Conciliación bancaria":
 
     manual_bancos_cb = set()
     manual_sistemas_usados_cb = {}
+    motivos_saldo_pendiente_cb = {}
     pares_manuales_cb = []
     for idx_banco_asig_cb, asignacion_cb in asignaciones_manual_cb.items():
         idx_banco_asig_cb = int(idx_banco_asig_cb)
@@ -3925,6 +3926,8 @@ elif pagina == "🏦 Conciliación bancaria":
                 continue
             importe_parte_cb = round(float(parte_cb["monto"]), 2)
             manual_sistemas_usados_cb[idx_sistema_parte_cb] = manual_sistemas_usados_cb.get(idx_sistema_parte_cb, 0.0) + importe_parte_cb
+            if asignacion_cb.get("motivo_saldo_pendiente"):
+                motivos_saldo_pendiente_cb[idx_sistema_parte_cb] = asignacion_cb.get("motivo_saldo_pendiente")
             mov_parte_cb = dict(mov_original_parte_cb)
             mov_parte_cb["monto"] = importe_parte_cb
             mov_parte_cb["monto_conciliado_manual"] = importe_parte_cb
@@ -3939,7 +3942,9 @@ elif pagina == "🏦 Conciliación bancaria":
             "estado_conciliacion": asignacion_cb.get("estado_conciliacion", "exacta"),
             "total_asignado": round(sum(float(a.get("monto") or 0) for a in asignacion_cb.get("asignaciones", [])), 2),
             "diferencia": round(float(asignacion_cb.get("diferencia") or 0), 2),
-            "observacion_diferencia": asignacion_cb.get("observacion_diferencia", "")
+            "observacion_diferencia": asignacion_cb.get("observacion_diferencia", ""),
+            "saldo_pendiente_registro": round(float(asignacion_cb.get("saldo_pendiente_registro") or 0), 2),
+            "motivo_saldo_pendiente": asignacion_cb.get("motivo_saldo_pendiente", "")
         })
 
     # Retirar del listado pendiente los registros usados manualmente; si la asignación
@@ -3951,10 +3956,25 @@ elif pagina == "🏦 Conciliación bancaria":
         if saldo_residual_cb > 0.004:
             mov_residual_cb = dict(mov_original_cb)
             mov_residual_cb["monto"] = saldo_residual_cb
-            mov_residual_cb["detalle"] = (str(mov_original_cb.get("detalle") or "") + " [saldo no asignado]").strip()
+            motivo_residual_cb = motivos_saldo_pendiente_cb.get(idx_sistema_usado_cb, "")
+            if motivo_residual_cb == "Reembolso/devolución pendiente de recibir":
+                mov_residual_cb["detalle"] = (
+                    str(mov_original_cb.get("detalle") or "")
+                    + f" [REEMBOLSO PENDIENTE Bs {saldo_residual_cb:,.2f}]"
+                ).strip()
+                causa_residual_cb = (
+                    f"Saldo de Bs {saldo_residual_cb:,.2f} pendiente de reembolso/devolución. "
+                    "Aún no se recibió el dinero; permanece pendiente y no se considera conciliado."
+                )
+            else:
+                mov_residual_cb["detalle"] = (str(mov_original_cb.get("detalle") or "") + " [saldo no asignado]").strip()
+                causa_residual_cb = (
+                    f"Saldo restante de Bs {saldo_residual_cb:,.2f} de un registro parcialmente conciliado. "
+                    + (motivo_residual_cb or "Pendiente de aclaración.")
+                )
             sistemas_pendientes_cb[idx_sistema_usado_cb] = {
                 "mov": mov_residual_cb,
-                "causas": ["Saldo restante de un registro parcialmente conciliado manualmente."]
+                "causas": [causa_residual_cb]
             }
 
     r_cb["pares"].extend(pares_manuales_cb)
@@ -4170,8 +4190,14 @@ elif pagina == "🏦 Conciliación bancaria":
                                 step=0.01, format="%.2f",
                                 key=f"cb_monto_manual_{clave_manual_cb}_{idx_banco_manual_cb}_{idx_sistema_sel_cb}"
                             )
-                            partes_nuevas_manual_cb.append({"sistema_idx": int(idx_sistema_sel_cb), "monto": round(float(monto_parte_cb), 2)})
+                            saldo_pendiente_parte_cb = round(max(0.0, saldo_disp_cb - float(monto_parte_cb)), 2)
+                            partes_nuevas_manual_cb.append({
+                                "sistema_idx": int(idx_sistema_sel_cb),
+                                "monto": round(float(monto_parte_cb), 2),
+                                "saldo_pendiente": saldo_pendiente_parte_cb
+                            })
                         suma_asignada_cb = round(sum(x["monto"] for x in partes_nuevas_manual_cb), 2)
+                        saldo_pendiente_registro_cb = round(sum(x.get("saldo_pendiente", 0.0) for x in partes_nuevas_manual_cb), 2)
                         tipos_seleccionados_cb = {
                             next(m["tipo"] for m in candidatos_manual_cb if int(m["idx"]) == int(x["sistema_idx"]))
                             for x in partes_nuevas_manual_cb
@@ -4180,8 +4206,36 @@ elif pagina == "🏦 Conciliación bancaria":
                             st.info("Estás combinando ingresos y egresos del sistema en una misma conciliación. Verifica que correspondan a la misma operación, anticipo o rendición.")
                         diferencia_manual_cb = round(monto_banco_manual_cb - suma_asignada_cb, 2)
                         st.write(f"**Total asignado:** Bs {suma_asignada_cb:,.2f} / **Banco:** Bs {monto_banco_manual_cb:,.2f}")
-                        if abs(diferencia_manual_cb) <= 0.004:
-                            st.success("Los importes coinciden. Puedes cerrar como conciliación exacta.")
+                        if abs(diferencia_manual_cb) <= 0.004 and saldo_pendiente_registro_cb <= 0.004:
+                            st.success("Los importes del banco y de los registros seleccionados coinciden. Puedes cerrar como conciliación exacta.")
+                            observacion_diferencia_cb = ""
+                            motivo_saldo_pendiente_cb = ""
+                            aceptar_saldo_pendiente_cb = True
+                        elif abs(diferencia_manual_cb) <= 0.004 and saldo_pendiente_registro_cb > 0.004:
+                            st.warning(
+                                f"El movimiento bancario está cubierto por Bs {suma_asignada_cb:,.2f}, "
+                                f"pero queda un saldo de Bs {saldo_pendiente_registro_cb:,.2f} del/de los registro(s) del sistema. "
+                                "Ese saldo NO está conciliado."
+                            )
+                            motivo_saldo_pendiente_cb = st.selectbox(
+                                "¿Qué representa el saldo que queda pendiente?",
+                                options=[
+                                    "Reembolso/devolución pendiente de recibir",
+                                    "Saldo pendiente de pago",
+                                    "Otro saldo pendiente de aclaración"
+                                ],
+                                index=0,
+                                key=f"cb_motivo_saldo_{clave_manual_cb}_{idx_banco_manual_cb}"
+                            )
+                            st.caption(
+                                f"Se mantendrán Bs {saldo_pendiente_registro_cb:,.2f} en «En el sistema, sin banco» "
+                                "hasta que se registre y concilie el reembolso/devolución correspondiente."
+                            )
+                            aceptar_saldo_pendiente_cb = st.checkbox(
+                                f"Confirmo que Bs {saldo_pendiente_registro_cb:,.2f} queda pendiente y NO debe marcarse como conciliado.",
+                                value=False,
+                                key=f"cb_aceptar_saldo_{clave_manual_cb}_{idx_banco_manual_cb}"
+                            )
                             observacion_diferencia_cb = ""
                         else:
                             st.warning(
@@ -4205,12 +4259,16 @@ elif pagina == "🏦 Conciliación bancaria":
                         if st.button("Confirmar conciliación manual", key=f"cb_confirmar_manual_{clave_manual_cb}_{idx_banco_manual_cb}",
                                       disabled=(not partes_nuevas_manual_cb or
                                                 (abs(diferencia_manual_cb) > 0.004 and
-                                                 (not observacion_diferencia_cb or not aceptar_diferencia_cb))),
+                                                 (not observacion_diferencia_cb or not aceptar_diferencia_cb)) or
+                                                (saldo_pendiente_registro_cb > 0.004 and
+                                                 not aceptar_saldo_pendiente_cb)),
                                       use_container_width=True):
                             if abs(diferencia_manual_cb) > 0.004 and not observacion_diferencia_cb:
                                 st.error("Para cerrar con diferencia debes escribir una justificación.")
                             elif abs(diferencia_manual_cb) > 0.004 and not aceptar_diferencia_cb:
                                 st.error("Debes confirmar expresamente que estás de acuerdo con cerrar esta conciliación con diferencia.")
+                            elif saldo_pendiente_registro_cb > 0.004 and not aceptar_saldo_pendiente_cb:
+                                st.error("Debes confirmar que el saldo restante quedará pendiente y no se marcará como conciliado.")
                             else:
                                 # Revalidar capacidad disponible para evitar asignar dos veces el mismo registro.
                                 capacidad_ok_cb = True
@@ -4229,10 +4287,15 @@ elif pagina == "🏦 Conciliación bancaria":
                                         "descripcion_banco": str(linea_manual_cb.get("contraparte") or linea_manual_cb.get("transaccion") or ""),
                                         "direccion_manual": direccion_manual_cb,
                                         "asignaciones": partes_nuevas_manual_cb,
-                                        "estado_conciliacion": "exacta" if abs(diferencia_manual_cb) <= 0.004 else "con_diferencia",
+                                        "estado_conciliacion": (
+                                            "parcial_con_saldo_pendiente" if saldo_pendiente_registro_cb > 0.004
+                                            else ("exacta" if abs(diferencia_manual_cb) <= 0.004 else "con_diferencia")
+                                        ),
                                         "total_asignado": suma_asignada_cb,
                                         "diferencia": diferencia_manual_cb,
-                                        "observacion_diferencia": observacion_diferencia_cb
+                                        "observacion_diferencia": observacion_diferencia_cb,
+                                        "saldo_pendiente_registro": saldo_pendiente_registro_cb,
+                                        "motivo_saldo_pendiente": motivo_saldo_pendiente_cb
                                     }
                                     st.session_state[clave_estado_manual_cb] = asignaciones_manual_cb
                                     st.rerun()

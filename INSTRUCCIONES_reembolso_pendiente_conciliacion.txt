@@ -1,0 +1,42 @@
+EQUISE — Saldo de reembolso/devolución pendiente en conciliación manual
+
+PROBLEMA CORREGIDO
+Antes, si el importe bancario coincidía con la parte asignada de un registro mayor, la pantalla
+mostraba «Los importes coinciden» aunque quedara un saldo del registro del sistema sin aplicar.
+Ejemplo: gasto registrado Bs 1.015, transferencia bancaria Bs 1.000, saldo Bs 15 pendiente
+de reembolso/devolución.
+
+NUEVO COMPORTAMIENTO
+- Calcula por separado la diferencia banco vs. importes asignados y el saldo no aplicado
+  de los registros seleccionados.
+- Si banco y asignación coinciden, pero queda saldo del registro, NO lo llama conciliación
+  exacta del registro completo.
+- Solicita clasificar el saldo pendiente: reembolso/devolución por recibir, saldo pendiente
+  de pago u otro saldo pendiente de aclaración.
+- Solicita confirmación expresa de que el saldo permanecerá pendiente y no será marcado
+  como conciliado.
+- El movimiento bancario queda vinculado por el importe efectivamente pagado.
+- El remanente del registro del sistema permanece en «En el sistema, sin banco», con el
+  importe residual y una causa explícita. Si es reembolso/devolución pendiente, se muestra
+  como tal.
+- No se crea un ingreso por el reembolso esperado ni se altera el registro original.
+
+EJEMPLO DE LA CAPTURA
+Registro de compra: Bs 1.015
+Movimiento bancario: Bs 1.000
+Importe aplicado a la transferencia: Bs 1.000
+Reembolso/devolución pendiente: Bs 15
+El sistema debe mostrar Bs 15 pendientes, hasta que efectivamente se reciba el dinero y
+se registre el ingreso correspondiente para conciliarlo después.
+
+INSTALACIÓN
+1. Extrae el ZIP.
+2. Reemplaza únicamente app.py en la raíz del repositorio residencial-equiz.
+3. No reemplaces db.py ni ejecutes SQL.
+4. Confirma el cambio y espera el despliegue.
+5. Repite el caso de prueba de Bs 1.015 vs. Bs 1.000.
+
+VALIDACIÓN
+app.py pasó análisis sintáctico y compilación en memoria. No se probó contra Streamlit
+desplegado ni Supabase real. La persistencia de la asignación requiere guardar la conciliación
+en el historial de la aplicación.
