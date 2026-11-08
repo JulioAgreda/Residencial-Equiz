@@ -1222,6 +1222,9 @@ elif pagina == "💰 Finanzas":
 
     resumen_obl = deudas.resumir_obligaciones(obligaciones, mov_obl_por_id)
     resumen_cxc = deudores.resumir_cuentas(cuentas_cobrar, mov_cxc_por_id)
+    mensaje_finanzas = st.session_state.pop("finanzas_mensaje_exito", None)
+    if mensaje_finanzas:
+        st.success(mensaje_finanzas)
     total_pagar = float(resumen_obl["total_pendiente"])
     total_cobrar = float(resumen_cxc["total_por_cobrar"])
 
@@ -1250,7 +1253,7 @@ elif pagina == "💰 Finanzas":
         st.subheader("Registrar préstamo recibido")
         with st.form("v12_nueva_obligacion", clear_on_submit=True):
             a,b=st.columns(2)
-            codigo=a.text_input("Código único", placeholder="OBL-2026-001")
+            a.text_input("Código único", value="Se genera automáticamente al guardar", disabled=True)
             categoria=a.selectbox("Tipo de obligación", list(deudas.CATEGORIAS_DEUDA))
             acreedor=b.text_input("Acreedor")
             identificacion=b.text_input("CI/NIT del acreedor (opcional)")
@@ -1267,7 +1270,7 @@ elif pagina == "💰 Finanzas":
             guardar=st.form_submit_button("Guardar obligación")
             if guardar:
                 try:
-                    payload={"codigo":codigo.strip(),"categoria":categoria,"acreedor":acreedor.strip(),
+                    payload={"categoria":categoria,"acreedor":acreedor.strip(),
                         "identificacion_acreedor":identificacion.strip() or None,"descripcion":descripcion or None,
                         "fecha_origen":str(fecha_origen),"fecha_corte":str(fecha_corte),
                         "monto_original":monto,"saldo_apertura":saldo,
@@ -1276,8 +1279,11 @@ elif pagina == "💰 Finanzas":
                         "estado":"Vigente","creado_por":usuario_actual.get("username")}
                     deudas.validar_obligacion({**payload,"monto_original":monto})
                     if saldo > monto: raise ValueError("El saldo inicial no puede superar el monto original.")
-                    db.crear_obligacion_financiera(payload)
-                    st.success("Obligación registrada.")
+                    resultado_obligacion = db.crear_obligacion_financiera(payload)
+                    fila_creada = (resultado_obligacion.data or [{}])[0] if getattr(resultado_obligacion, "data", None) else {}
+                    st.session_state["finanzas_mensaje_exito"] = (
+                        f"Obligación registrada con código {fila_creada.get('codigo', 'asignado por el sistema')}."
+                    )
                     st.rerun()
                 except Exception as e: st.error(f"No se pudo guardar: {e}")
 
@@ -1315,7 +1321,7 @@ elif pagina == "💰 Finanzas":
         st.subheader("Registrar préstamo realizado")
         with st.form("v12_nueva_cxc", clear_on_submit=True):
             a,b=st.columns(2)
-            codigo_c=a.text_input("Código único",placeholder="CXC-2026-001")
+            a.text_input("Código único", value="Se genera automáticamente al guardar", disabled=True)
             categoria_c=a.selectbox("Tipo de cuenta",list(deudores.CATEGORIAS_COBRO))
             deudor=b.text_input("Deudor")
             identificacion_c=b.text_input("CI/NIT del deudor (opcional)")
@@ -1344,7 +1350,7 @@ elif pagina == "💰 Finanzas":
             guardar_c=st.form_submit_button("Guardar cuenta por cobrar")
             if guardar_c:
                 try:
-                    payload={"codigo":codigo_c.strip(),"categoria":categoria_c,"deudor":deudor.strip(),
+                    payload={"categoria":categoria_c,"deudor":deudor.strip(),
                         "identificacion_deudor":identificacion_c.strip() or None,"descripcion":descripcion_c or None,
                         "fecha_origen":str(fecha_origen_c),"fecha_corte":str(fecha_corte_c),
                         "monto_original":monto_c,"saldo_apertura":saldo_c,
@@ -1353,8 +1359,11 @@ elif pagina == "💰 Finanzas":
                         "estado":"Vigente","creado_por":usuario_actual.get("username")}
                     deudores.validar_cuenta({**payload,"monto_original":monto_c})
                     if saldo_c > monto_c: raise ValueError("El saldo inicial no puede superar el monto original.")
-                    db.crear_cuenta_por_cobrar(payload)
-                    st.success("Cuenta por cobrar registrada.")
+                    resultado_cxc = db.crear_cuenta_por_cobrar(payload)
+                    fila_cxc_creada = (resultado_cxc.data or [{}])[0] if getattr(resultado_cxc, "data", None) else {}
+                    st.session_state["finanzas_mensaje_exito"] = (
+                        f"Cuenta por cobrar registrada con código {fila_cxc_creada.get('codigo', 'asignado por el sistema')}."
+                    )
                     st.rerun()
                 except Exception as e: st.error(f"No se pudo guardar: {e}")
 

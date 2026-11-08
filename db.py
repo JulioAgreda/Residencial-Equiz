@@ -912,14 +912,62 @@ def guardar_acceso_apartamentos(usuario_id, acceso_todos, apartamento_ids=()):
 
 # ---------- Finanzas V12: obligaciones y cuentas por cobrar ----------
 
+def _generar_codigo_financiero(sb, tabla, prefijo):
+    """Calcula el siguiente código anual consultando los códigos ya guardados.
+
+    La restricción UNIQUE de la columna codigo en Supabase es la protección
+    definitiva frente a duplicados concurrentes; crear_* reintenta si dos
+    usuarios intentan guardar al mismo tiempo.
+    """
+    import re
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    anio = datetime.now(ZoneInfo("America/La_Paz")).year
+    base = f"{prefijo}-{anio}-"
+    res = sb.table(tabla).select("codigo").like("codigo", f"{base}%").execute()
+    patron = re.compile(rf"^{re.escape(prefijo)}-{anio}-(\d+)$")
+    mayor = 0
+    for fila in (res.data or []):
+        coincidencia = patron.match(str(fila.get("codigo") or ""))
+        if coincidencia:
+            mayor = max(mayor, int(coincidencia.group(1)))
+    return f"{base}{mayor + 1:03d}"
+
+def _insertar_con_codigo_unico(tabla, prefijo, payload):
+    """Genera el código y guarda el registro; reintenta colisiones concurrentes."""
+    sb = get_client()
+    for intento in range(5):
+        codigo = _generar_codigo_financiero(sb, tabla, prefijo)
+        datos = {**payload, "codigo": codigo}
+        try:
+            resultado = sb.table(tabla).insert(datos).execute()
+            if getattr(resultado, "data", None):
+                return resultado
+            # Algunas configuraciones de PostgREST usan retorno mínimo en INSERT.
+            # Consultamos el código recién asignado para devolverlo a la interfaz.
+            return sb.table(tabla).select("*").eq("codigo", codigo).single().execute()
+        except Exception as exc:
+            mensaje = str(exc).lower()
+            es_duplicado = (
+                "23505" in mensaje
+                or "duplicate key" in mensaje
+                or "unique constraint" in mensaje
+                or "already exists" in mensaje
+            )
+            if not es_duplicado or intento == 4:
+                raise
+    raise RuntimeError("No se pudo asignar un código único. Intenta nuevamente.")
+
 def listar_obligaciones_financieras():
     sb = get_client()
     res = sb.table("obligaciones_financieras").select("*").order("fecha_origen", desc=True).execute()
     return res.data or []
 
 def crear_obligacion_financiera(payload):
-    sb = get_client()
-    return sb.table("obligaciones_financieras").insert(payload).execute()
+    # El código nunca se recibe del formulario: lo asigna la capa de datos.
+    datos = {k: v for k, v in dict(payload).items() if k != "codigo"}
+    return _insertar_con_codigo_unico("obligaciones_financieras", "OBL", datos)
 
 def listar_movimientos_obligaciones():
     sb = get_client()
@@ -936,8 +984,9 @@ def listar_cuentas_por_cobrar():
     return res.data or []
 
 def crear_cuenta_por_cobrar(payload):
-    sb = get_client()
-    return sb.table("cuentas_por_cobrar").insert(payload).execute()
+    # El código CXC también se asigna automáticamente para evitar duplicados.
+    datos = {k: v for k, v in dict(payload).items() if k != "codigo"}
+    return _insertar_con_codigo_unico("cuentas_por_cobrar", "CXC", datos)
 
 def actualizar_saldo_apertura_cuenta_por_cobrar(cuenta_id, saldo_apertura):
     """Actualiza el saldo inicial de una cuenta por cobrar existente.
