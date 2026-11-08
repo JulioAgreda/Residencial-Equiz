@@ -1,24 +1,46 @@
-EQUISE — Gestión de cobros: lecturas editables para periodos existentes
+EQUISE — Adaptación de interfaz para móviles
 
-CAMBIO
-- En Electricidad y Agua aparece siempre el expander «Consultar o modificar lectura».
-- Si el periodo no existe, precarga la lectura anterior desde el último periodo y permite crear el periodo.
-- Si el periodo existe, precarga las lecturas guardadas y permite corregirlas.
-- Al corregir se actualiza el mismo periodo mediante actualizar_periodo_servicio; no se crea un duplicado.
-- Los pagos existentes se conservan. Si existen pagos, la pantalla advierte que cambiará el saldo y exige confirmación explícita.
-- El formulario de pagos continúa disponible cuando existe el periodo.
-- Se mantienen reglas de anticrético, historial y navegación.
+CAMBIOS
+1. CSS responsivo para teléfonos:
+   - Menos márgenes laterales y títulos ajustados.
+   - Botones y campos más cómodos para tocar.
+   - Columnas se apilan en pantallas estrechas.
+   - Tablas mantienen desplazamiento horizontal.
+2. Menú lateral:
+   - Después de seleccionar un módulo y del rerender de Streamlit, intenta cerrar
+     automáticamente el sidebar en pantallas de hasta 768 px.
+   - En escritorio no aplica el cierre automático.
+   - El acceso al menú sigue disponible mediante el control estándar de Streamlit.
+3. Protección de salida:
+   - Añade la advertencia nativa del navegador al recargar, cerrar la pestaña o
+     abandonar la página.
+   - Cambiar de módulo dentro de la aplicación no debe activar esa advertencia,
+     porque Streamlit realiza un rerun interno y no una descarga de la página.
+
+LIMITACIONES IMPORTANTES
+- Los navegadores modernos deciden el texto de la advertencia; no permiten mostrar
+  un mensaje personalizado.
+- Algunos navegadores móviles (especialmente Safari/iOS) pueden no mostrar el aviso
+  en todos los casos o al cerrar la app desde el selector de aplicaciones.
+- El cierre automático del menú depende de los selectores internos del sidebar de
+  Streamlit. Si la versión del framework cambia esos selectores, la app sigue
+  funcionando, pero podría no cerrarse automáticamente. Debe probarse en el móvil.
+- La advertencia no sustituye el guardado de datos. Completa y envía formularios
+  antes de salir de una pantalla.
 
 INSTALACIÓN
-1. Respaldar el app.py desplegado.
-2. Extraer el ZIP y reemplazar únicamente app.py en GitHub.
+1. Respaldar el app.py actualmente desplegado.
+2. Extraer el ZIP y reemplazar únicamente app.py.
 3. No reemplazar db.py ni ejecutar SQL.
-4. Desplegar y probar PB-03 en Electricidad: abrir «Consultar o modificar lectura», revisar lecturas precargadas, corregir solo si corresponde y guardar.
-5. Confirmar que el total esperado se actualice, que los pagos sigan visibles y que el saldo se recalcule.
-6. Probar un periodo nuevo para verificar que permita crear su periodo.
-
-SEGURIDAD DE DATOS
-La corrección actualiza las columnas de lectura/tarifa/monto_esperado del mismo periodo. No elimina ni modifica filas de pagos. Si ya hay pagos, exige una casilla de confirmación antes de guardar.
+4. Desplegar y probar en un teléfono:
+   a) abrir el menú y seleccionar Gestión de cobros;
+   b) confirmar que el menú se cierre;
+   c) abrir menú y seleccionar otra sección;
+   d) recargar desde el navegador y confirmar que aparezca la advertencia;
+   e) cancelar la recarga y verificar que la pantalla siga abierta;
+   f) confirmar que el menú y los formularios sigan utilizables.
+5. Revisar también en escritorio que el menú continúe funcionando normalmente.
 
 VALIDACIÓN
-El archivo pasó análisis sintáctico y compilación de Python. No se ha probado en el entorno desplegado ni contra Supabase real.
+El archivo pasó análisis sintáctico y compilación de Python. No se ha probado en el
+navegador móvil ni en el Streamlit desplegado.

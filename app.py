@@ -29,7 +29,123 @@ import reportes
 import deudas
 import deudores
 
-st.set_page_config(page_title="Residencial EQUIZ", page_icon="🏢", layout="wide")
+st.set_page_config(page_title="Residencial EQUIZ", page_icon="🏢", layout="wide", initial_sidebar_state="expanded")
+
+
+# ------------------------------------------------------------------
+# Adaptación móvil: estilos responsivos, cierre del menú y protección
+# frente a recargas/cierres accidentales del navegador.
+# ------------------------------------------------------------------
+st.markdown(
+    """
+    <style>
+    /* Áreas táctiles cómodas y mejor aprovechamiento del ancho. */
+    @media (max-width: 768px) {
+        .block-container {
+            padding-left: 0.85rem !important;
+            padding-right: 0.85rem !important;
+            padding-top: 1rem !important;
+            padding-bottom: 4.5rem !important;
+        }
+        h1 { font-size: 1.65rem !important; line-height: 1.2 !important; }
+        h2 { font-size: 1.35rem !important; }
+        h3 { font-size: 1.15rem !important; }
+        div[data-testid="stMetricValue"] { font-size: 1.65rem !important; }
+        div[data-testid="stButton"] > button,
+        div[data-testid="stFormSubmitButton"] > button {
+            min-height: 2.8rem !important;
+            width: 100%;
+            white-space: normal !important;
+        }
+        div[data-testid="stTextInput"] input,
+        div[data-testid="stNumberInput"] input,
+        div[data-testid="stDateInput"] input,
+        div[data-testid="stSelectbox"] div[role="combobox"] {
+            min-height: 2.7rem !important;
+        }
+        div[data-testid="stDataFrame"],
+        div[data-testid="stTable"] {
+            overflow-x: auto !important;
+            max-width: 100% !important;
+        }
+        div[data-testid="stHorizontalBlock"] {
+            flex-wrap: wrap !important;
+            gap: 0.65rem !important;
+        }
+        div[data-testid="column"] {
+            min-width: min(100%, 280px) !important;
+            flex: 1 1 100% !important;
+        }
+        section[data-testid="stSidebar"] {
+            z-index: 1000000 !important;
+        }
+        section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+            gap: 0.55rem;
+        }
+        /* Evita que etiquetas largas rompan el ancho del teléfono. */
+        label, p, span, div {
+            overflow-wrap: anywhere;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# El iframe ejecuta el pequeño puente de interfaz en el documento principal.
+# Se limita a móvil: tras elegir una opción, Streamlit vuelve a renderizar y
+# este código cierra el panel lateral si quedó abierto.
+st.components.v1.html(
+    """
+    <script>
+    (function () {
+      try {
+        const host = window.parent;
+        if (!host || !host.document) return;
+
+        // Advertencia nativa del navegador al recargar/cerrar/salir de la página.
+        // No se activa al cambiar de módulo dentro de Streamlit (rerun normal).
+        if (!host.__equizBeforeUnloadBound) {
+          host.__equizBeforeUnloadBound = true;
+          host.addEventListener("beforeunload", function (event) {
+            event.preventDefault();
+            event.returnValue = "";
+            return "";
+          });
+        }
+
+        // Al volver a renderizar después de seleccionar una opción, cerrar
+        // automáticamente el menú lateral en pantallas pequeñas.
+        const closeSidebarOnMobile = function () {
+          if (host.innerWidth > 768) return;
+          const sidebar = host.document.querySelector(
+            'section[data-testid="stSidebar"]'
+          );
+          if (!sidebar) return;
+
+          const isOpen = sidebar.getAttribute("aria-expanded") !== "false" &&
+                         sidebar.offsetWidth > 0;
+          if (!isOpen) return;
+
+          const closeButton =
+            sidebar.querySelector('button[data-testid="stSidebarCollapseButton"]') ||
+            sidebar.querySelector('button[aria-label*="Collapse"]') ||
+            sidebar.querySelector('button[aria-label*="Cerrar"]');
+
+          if (closeButton) closeButton.click();
+        };
+
+        host.setTimeout(closeSidebarOnMobile, 250);
+        host.setTimeout(closeSidebarOnMobile, 650);
+      } catch (e) {
+        // La app sigue funcionando aunque el navegador limite el acceso al DOM.
+      }
+    })();
+    </script>
+    """,
+    height=0,
+    scrolling=False,
+)
 
 MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
          "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
