@@ -2234,7 +2234,8 @@ elif pagina == "🏠 Apartamentos":
                         payload["aire_acondicionado"] = bool(tiene_aire)
                     if apt_con_propiedad:
                         payload["aire_acondicionado_propiedad"] = aire_acondicionado.propiedad_a_guardar(tiene_aire, propiedad_aire)
-                    error_aire = aire_acondicionado.validar(tiene_aire, propiedad_aire) if apt_con_propiedad else None
+                    error_aire = (aire_acondicionado.validar(tiene_aire, propiedad_aire if tiene_aire else None)
+                                  if apt_con_propiedad else None)
                     if error_aire:
                         st.error(error_aire)
                     else:
@@ -2846,7 +2847,8 @@ elif pagina == "🏠 Apartamentos":
                     if apt_con_propiedad:
                         payload["aire_acondicionado_propiedad"] = aire_acondicionado.propiedad_a_guardar(
                             tiene_aire_nuevo, propiedad_aire_nuevo)
-                    error_aire = (aire_acondicionado.validar(tiene_aire_nuevo, propiedad_aire_nuevo)
+                    error_aire = (aire_acondicionado.validar(
+                                      tiene_aire_nuevo, propiedad_aire_nuevo if tiene_aire_nuevo else None)
                                   if apt_con_propiedad else None)
                     if error_aire:
                         st.error(error_aire)
