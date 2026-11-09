@@ -981,14 +981,31 @@ def obtener_conciliacion_bancaria(conciliacion_id):
 
 # ---------- Entregas parciales del capital anticrético ----------
 def listar_entregas_anticretico(apartamento_id, incluir_anuladas=True):
+    """Lista todas las entregas del apartamento, sin perder filas por el límite de PostgREST.
+
+    apartamento_id es BIGINT en Supabase; se normaliza a entero para evitar que un
+    identificador recibido como texto provoque una consulta sin coincidencias.
+    """
     sb = get_client()
-    q = (sb.table("entregas_anticretico").select("*")
-         .eq("apartamento_id", apartamento_id)
-         .order("fecha_entrega", desc=False).order("created_at", desc=False))
-    if not incluir_anuladas:
-        q = q.eq("estado", "vigente")
-    res = q.execute()
-    return res.data or []
+    try:
+        apartamento_id = int(apartamento_id)
+    except (TypeError, ValueError):
+        raise ValueError(f"Identificador de apartamento no válido: {apartamento_id!r}")
+
+    filas, inicio, tam = [], 0, 500
+    while True:
+        q = (sb.table("entregas_anticretico").select("*")
+             .eq("apartamento_id", apartamento_id)
+             .order("fecha_entrega", desc=False).order("created_at", desc=False)
+             .range(inicio, inicio + tam - 1))
+        if not incluir_anuladas:
+            q = q.eq("estado", "vigente")
+        res = q.execute()
+        datos = res.data or []
+        filas.extend(datos)
+        if len(datos) < tam:
+            return filas
+        inicio += tam
 
 
 def registrar_entrega_anticretico(payload):

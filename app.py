@@ -2404,8 +2404,9 @@ elif pagina == "🏠 Apartamentos":
                                 except Exception as exc:
                                     st.error(f"No se pudo registrar la entrega: {exc}")
 
+                st.divider()
+                st.markdown("**📋 Historial de entregas y recibos**")
                 if entregas_ac:
-                    st.markdown("**Historial de entregas y recibos**")
                     filas_entregas_ac = []
                     for x in entregas_ac:
                         filas_entregas_ac.append({
@@ -2413,11 +2414,14 @@ elif pagina == "🏠 Apartamentos":
                             "Fecha real": parse_fecha(x.get("fecha_entrega")),
                             "Etapa": "Antes de firma" if x.get("etapa") == "antes_firma" else "Después de firma",
                             "Entregante": x.get("entregante") or "—",
+                            "Concepto": x.get("concepto") or "—",
                             "Monto": f'{x.get("moneda") or moneda_ac} {float(x.get("monto") or 0):,.2f}',
                             "Medio": x.get("medio_pago") or "—",
+                            "Referencia": x.get("referencia") or "—",
                             "Estado": "VIGENTE" if (x.get("estado") or "vigente") == "vigente" else "ANULADO",
                         })
                     st.dataframe(pd.DataFrame(filas_entregas_ac), use_container_width=True, hide_index=True)
+                    st.caption(f"{len(entregas_ac)} recibo(s): {len(entregas_vigentes_ac)} vigente(s) y {len(entregas_ac) - len(entregas_vigentes_ac)} anulado(s).")
                     datos_estado_ac = {
                         "apartamento": recibo.formatear_apartamento(apt),
                         "titular": apt.get("inquilino_nombre") or "—",
@@ -2482,6 +2486,8 @@ elif pagina == "🏠 Apartamentos":
                                             st.error(f"No se pudo anular el recibo: {exc}")
                             if estado_x == "anulado":
                                 st.error(f"ANULADO · Motivo: {x.get('motivo_anulacion') or 'No especificado'} · Por: {x.get('anulado_por') or '—'}")
+                else:
+                    st.info("Todavía no hay entregas registradas para este apartamento. Cuando registres una, aparecerá aquí su recibo y detalle.")
 
     with tab_salida:
         st.markdown("**Registrar que un inquilino se fue**")

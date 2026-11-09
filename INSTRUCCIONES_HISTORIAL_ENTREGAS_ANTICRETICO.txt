@@ -1,0 +1,21 @@
+EQUIZ — Ajuste del historial de entregas del capital anticrético
+
+ARCHIVOS INCLUIDOS
+- app.py: muestra el historial debajo del formulario, aun cuando no existan entregas; incorpora concepto y referencia en la tabla y conserva descarga/anulación de recibos.
+- db.py: normaliza apartamento_id a entero (la columna en Supabase es BIGINT) y consulta las entregas por páginas.
+
+INSTALACIÓN
+1. Haz una copia de seguridad de los archivos actuales app.py y db.py.
+2. Reemplaza app.py y db.py por los incluidos en este paquete.
+3. No ejecutes SQL ni vuelvas a registrar los recibos existentes: este ajuste es de consulta y presentación; no inserta, modifica ni elimina movimientos.
+4. Reinicia o vuelve a desplegar la aplicación Streamlit.
+5. Abre el apartamento correspondiente y revisa Entregas del capital anticrético.
+
+VALIDACIÓN ESPERADA PARA EL APARTAMENTO ID 7 (según el CSV compartido)
+- AC-000001 — 29/07/2026 — Bs 61.020,00 — vigente.
+- AC-000002 — 30/10/2026 — Bs 58.980,00 — vigente.
+- Total recibido: Bs 120.000,00.
+- Saldo por recibir: Bs 0,00, siempre que el capital acordado en la ficha sea Bs 120.000,00 y la moneda contractual sea BOB.
+
+NOTA
+Se verificó la sintaxis Python con py_compile. No se dispone de conexión a la instancia Supabase ni al despliegue Streamlit desde este entorno; por ello, la visualización real debe confirmarse después de reemplazar los archivos. Si la consulta sigue devolviendo cero, revisar que la app desplegada esté conectada al mismo proyecto Supabase del CSV y que el apartamento seleccionado tenga ID 7.
