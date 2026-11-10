@@ -1,0 +1,23 @@
+EQUISE — AJUSTE DE FONDO CON MAYOR REALCE
+
+Cambios:
+- Se aumentó el brillo y contraste de la fotografía arquitectónica de fondo.
+- Se redujo la intensidad de las capas oscuras superpuestas, tanto en escritorio como en móvil.
+- Se mantuvieron la tarjeta blanca, el escudo, el título, los campos y el botón sin cambios de diseño.
+- Se conserva una capa de contraste para que el texto blanco del encabezado y pie siga siendo legible.
+
+Archivos:
+- app.py actualizado.
+- assets/fondo_login_equise.jpg actualizado.
+- assets/escudo_equise.png sin cambios.
+- Vistas previas PNG para escritorio y móvil.
+- HTML de vista previa.
+
+Instalación:
+1. Respaldar el app.py publicado.
+2. Reemplazar app.py por el incluido.
+3. Reemplazar la carpeta assets completa por la del paquete (importante: el fondo fue actualizado).
+4. Reiniciar/redeploy Streamlit.
+5. Revisar en computadora y celular.
+
+No modifica autenticación, roles, pagos, datos ni Supabase. No requiere migración SQL.

@@ -225,100 +225,175 @@ def check_login():
     if st.session_state.get("usuario"):
         return True
 
-    # Login institucional: fondo arquitectónico, logo centrado y tarjeta clara.
+    # Login institucional responsive. El escudo se muestra sin el texto del logo
+    # para evitar repetir "Edificio Residencial Equise" en la misma cabecera.
     import base64
     login_dir = os.path.dirname(os.path.abspath(__file__))
     bg_path = os.path.join(login_dir, "assets", "fondo_login_equise.jpg")
-    logo_path = os.path.join(login_dir, "assets", "logo_equise_horizontal.png")
+    crest_path = os.path.join(login_dir, "assets", "escudo_equise.png")
+
     bg64 = ""
+    crest64 = ""
     if os.path.exists(bg_path):
         with open(bg_path, "rb") as f:
             bg64 = base64.b64encode(f.read()).decode("ascii")
+    if os.path.exists(crest_path):
+        with open(crest_path, "rb") as f:
+            crest64 = base64.b64encode(f.read()).decode("ascii")
 
     st.markdown(
         f"""
         <style>
         [data-testid="stAppViewContainer"] {{
-            background-color: #07172D;
-            background-image: linear-gradient(rgba(5,18,38,.22), rgba(5,18,38,.38)), url("data:image/jpeg;base64,{bg64}");
+            background-color: #071A31;
+            background-image:
+                linear-gradient(90deg, rgba(4,19,39,.52) 0%, rgba(6,27,52,.32) 52%, rgba(5,21,42,.12) 100%),
+                url("data:image/jpeg;base64,{bg64}");
             background-size: cover;
-            background-position: center center;
+            background-position: center;
             background-attachment: fixed;
         }}
-        [data-testid="stHeader"] {{ background: transparent; }}
-        [data-testid="stMain"] {{ background: transparent; }}
+        [data-testid="stHeader"], [data-testid="stMain"] {{ background: transparent; }}
         .block-container {{
-            max-width: 700px !important;
-            padding-top: clamp(.7rem, 3vh, 2rem) !important;
-            padding-bottom: 1.2rem !important;
+            max-width: 720px !important;
+            padding-top: clamp(.7rem, 3vh, 1.8rem) !important;
+            padding-bottom: 1rem !important;
         }}
-        div[data-testid="stImage"] {{
-            display: flex; justify-content: center; align-items: center;
-            margin: 0 auto .5rem auto;
+        .equise-login-brand {{
+            text-align: center;
+            margin: 0 auto .35rem auto;
         }}
-        div[data-testid="stImage"] img {{
-            display: block; margin: 0 auto; max-width: min(300px, 78vw); height: auto;
-            filter: drop-shadow(0 5px 15px rgba(0,0,0,.18));
+        .equise-login-crest {{
+            width: 76px;
+            height: 82px;
+            object-fit: contain;
+            display: block;
+            margin: 0 auto .3rem auto;
+            filter: drop-shadow(0 4px 12px rgba(0,0,0,.30));
         }}
-        .login-heading {{ text-align: center; margin: .35rem auto 1.05rem auto; }}
-        .login-secure {{
-            display: inline-block; padding: .32rem .8rem; border-radius: 999px;
-            color: #0B3764; background: #E4EEF8; border: 1px solid #D2E0EF;
-            font-size: .73rem; font-weight: 800; letter-spacing: .055em;
+        .equise-login-brand h1 {{
+            color: #FFFFFF !important;
+            font-size: clamp(1.55rem, 3.7vw, 2.05rem) !important;
+            line-height: 1.16 !important;
+            letter-spacing: -.025em;
+            font-weight: 750;
+            margin: .15rem 0 .35rem 0 !important;
+            text-shadow: 0 2px 10px rgba(0,0,0,.35);
+            text-align: center;
         }}
-        .login-heading h1 {{
-            color: #142F50 !important; font-size: clamp(1.35rem, 3.4vw, 1.85rem);
-            line-height: 1.2; margin: .55rem 0 .28rem 0; letter-spacing: -.02em;
+        .equise-login-brand p {{
+            color: #E1EAF4 !important;
+            font-size: .94rem;
+            margin: 0 auto;
+            text-align: center;
+            text-shadow: 0 1px 5px rgba(0,0,0,.4);
         }}
-        .login-heading p {{ color: #52657C !important; margin: 0; font-size: .9rem; }}
-        .login-gold-line {{ width: 64px; height: 3px; border-radius: 3px; background: #D6A33F; margin: .8rem auto 0 auto; }}
+        .equise-login-rule {{
+            width: 74px; height: 3px; border-radius: 3px;
+            background: #D8AE58; margin: .85rem auto 1.05rem auto;
+        }}
         div[data-testid="stForm"] {{
-            max-width: 570px; margin: 0 auto !important; padding: clamp(1rem, 3vw, 1.55rem) !important;
-            background: rgba(255,255,255,.98) !important; border: 1px solid #DCE5EF !important;
-            border-radius: 18px !important; box-shadow: 0 18px 48px rgba(0,0,0,.24);
+            max-width: 510px;
+            margin: 0 auto !important;
+            padding: clamp(1rem, 3vw, 1.65rem) !important;
+            background: rgba(255,255,255,.985) !important;
+            border: 1px solid rgba(224,232,241,.95) !important;
+            border-radius: 18px !important;
+            box-shadow: 0 20px 54px rgba(0,0,0,.30);
         }}
         div[data-testid="stForm"] label,
-        div[data-testid="stForm"] [data-testid="stWidgetLabel"] p {{ color: #173654 !important; font-weight: 600; }}
+        div[data-testid="stForm"] [data-testid="stWidgetLabel"] p {{
+            color: #173653 !important;
+            font-weight: 650 !important;
+        }}
         div[data-testid="stForm"] input {{
-            min-height: 2.85rem; background: #F7F9FC !important; color: #172F4B !important;
-            border: 1px solid #B9C8D9 !important; border-radius: 9px !important;
+            min-height: 2.9rem !important;
+            background: #F7F9FC !important;
+            color: #172F49 !important;
+            border: 1px solid #B9C8D9 !important;
+            border-radius: 9px !important;
         }}
-        div[data-testid="stForm"] input::placeholder {{ color: #7C8998 !important; }}
+        div[data-testid="stForm"] input::placeholder {{ color: #748398 !important; }}
         div[data-testid="stForm"] button {{
-            min-height: 2.95rem; width: 100%; font-weight: 750 !important;
-            color: #FFFFFF !important; background: #073B78 !important;
-            border: 1px solid #073B78 !important; border-radius: 9px !important;
+            min-height: 3rem !important;
+            width: 100% !important;
+            color: #FFFFFF !important;
+            background: #0B3768 !important;
+            border: 1px solid #0B3768 !important;
+            border-radius: 9px !important;
+            font-weight: 750 !important;
         }}
-        div[data-testid="stForm"] button:hover {{ background: #052D5D !important; border-color: #052D5D !important; }}
+        div[data-testid="stForm"] button:hover {{
+            background: #082B52 !important;
+            border-color: #082B52 !important;
+        }}
         div[data-testid="stExpander"] {{
-            max-width: 570px; margin: .75rem auto 0 auto; color: #173654 !important;
-            background: rgba(245,248,252,.96); border: 1px solid #D4DFEA; border-radius: 10px;
+            max-width: 510px;
+            margin: .75rem auto 0 auto;
+            color: #173653 !important;
+            background: rgba(247,250,253,.97);
+            border: 1px solid #D5DFE9;
+            border-radius: 10px;
         }}
-        div[data-testid="stExpander"] summary, div[data-testid="stExpander"] summary p {{ color: #173654 !important; }}
-        .login-authorized {{ text-align: center; color: #E5EDF6 !important; text-shadow: 0 1px 4px #07172D; font-size: .76rem; margin-top: 1rem; }}
+        div[data-testid="stExpander"] summary,
+        div[data-testid="stExpander"] summary p {{ color: #173653 !important; }}
+        .equise-login-footer {{
+            color: #E8EEF6 !important;
+            text-align: center;
+            font-size: .78rem;
+            margin: .9rem auto 0 auto;
+            text-shadow: 0 1px 5px rgba(0,0,0,.6);
+        }}
         @media (max-width: 600px) {{
-            [data-testid="stAppViewContainer"] {{ background-position: 68% center; background-attachment: scroll; }}
-            .block-container {{ padding-left: .8rem !important; padding-right: .8rem !important; padding-top: .6rem !important; }}
-            div[data-testid="stImage"] img {{ max-width: min(255px, 72vw); }}
-            .login-heading {{ margin-bottom: .8rem; }}
-            div[data-testid="stForm"] {{ width: 100%; padding: 1rem !important; border-radius: 15px !important; }}
+            [data-testid="stAppViewContainer"] {{
+                background-position: 66% center;
+                background-attachment: scroll;
+                background-image:
+                    linear-gradient(180deg, rgba(4,20,40,.46) 0%, rgba(5,22,43,.34) 42%, rgba(4,18,36,.60) 100%),
+                    url("data:image/jpeg;base64,{bg64}");
+            }}
+            .block-container {{
+                padding-left: .85rem !important;
+                padding-right: .85rem !important;
+                padding-top: .65rem !important;
+                padding-bottom: .8rem !important;
+            }}
+            .equise-login-crest {{ width: 60px; height: 65px; margin-bottom: .15rem; }}
+            .equise-login-brand h1 {{ font-size: 1.42rem !important; margin-top: .1rem !important; }}
+            .equise-login-brand p {{ font-size: .82rem; max-width: 310px; }}
+            .equise-login-rule {{ margin: .65rem auto .8rem auto; }}
+            div[data-testid="stForm"] {{
+                width: 100%;
+                padding: 1rem !important;
+                border-radius: 15px !important;
+            }}
+            div[data-testid="stForm"] input {{ min-height: 2.8rem !important; }}
+            div[data-testid="stForm"] button {{ min-height: 3rem !important; }}
             div[data-testid="stExpander"] {{ width: 100%; }}
+            .equise-login-footer {{ font-size: .72rem; margin-top: .75rem; }}
+        }}
+        @media (max-width: 360px) {{
+            .equise-login-crest {{ width: 52px; height: 56px; }}
+            .equise-login-brand h1 {{ font-size: 1.28rem !important; }}
+            div[data-testid="stForm"] {{ padding: .85rem !important; }}
         }}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    if os.path.exists(logo_path):
-        st.image(logo_path, width=285)
+    if crest64:
+        st.markdown(
+            f'<div class="equise-login-brand"><img class="equise-login-crest" src="data:image/png;base64,{crest64}" alt="Escudo Equise"></div>',
+            unsafe_allow_html=True,
+        )
 
     st.markdown(
         """
-        <div class="login-heading">
-          <span class="login-secure">🔒 &nbsp; ACCESO SEGURO</span>
+        <div class="equise-login-brand">
           <h1>Edificio Residencial Equise</h1>
-          <p>Sistema de administración y control residencial</p>
-          <div class="login-gold-line"></div>
+          <p>Portal de administración residencial</p>
+          <div class="equise-login-rule"></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -357,7 +432,7 @@ def check_login():
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al crear el usuario: {e}")
-        st.markdown('<div class="login-authorized">Acceso exclusivo para personal autorizado · Residencial Equise</div>', unsafe_allow_html=True)
+        st.markdown('<div class="equise-login-footer">Acceso exclusivo para personal autorizado</div>', unsafe_allow_html=True)
         return False
 
     with st.form("form_login", clear_on_submit=False):
@@ -390,7 +465,7 @@ def check_login():
                     st.error("Clave incorrecta.")
 
     st.markdown(
-        '<div class="login-authorized">Acceso exclusivo para personal autorizado · Residencial Equise</div>',
+        '<div class="equise-login-footer">Acceso exclusivo para personal autorizado</div>',
         unsafe_allow_html=True,
     )
     return False
