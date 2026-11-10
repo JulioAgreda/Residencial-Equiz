@@ -224,23 +224,119 @@ def check_login():
     if st.session_state.get("usuario"):
         return True
 
-    st.title("🏢 Residencial EQUIZ")
-    st.caption("Sistema de control de apartamentos y alquileres")
+    # Pantalla de acceso: identidad institucional limpia y adaptable.
+    st.markdown(
+        """
+        <style>
+        /* El login usa un lienzo más compacto que el resto del sistema. */
+        .block-container {
+            max-width: 900px !important;
+            padding-top: clamp(1.2rem, 5vh, 3.5rem) !important;
+            padding-bottom: 2rem !important;
+        }
+        .login-brand {
+            text-align: center;
+            margin: 0 auto 1.25rem auto;
+        }
+        .login-brand h1 {
+            font-size: clamp(1.55rem, 4vw, 2.15rem);
+            line-height: 1.15;
+            margin: .25rem 0 .35rem 0;
+            letter-spacing: -.025em;
+        }
+        .login-brand p {
+            color: #A8B3C2;
+            margin: 0;
+            font-size: .96rem;
+        }
+        .login-tag {
+            display: inline-block;
+            color: #D8B15A;
+            border: 1px solid rgba(216,177,90,.38);
+            border-radius: 999px;
+            padding: .25rem .75rem;
+            font-size: .76rem;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            margin-bottom: .55rem;
+        }
+        /* Centra y limita el formulario en escritorio; en móvil ocupa el ancho útil. */
+        div[data-testid="stForm"] {
+            max-width: 490px;
+            margin: 0 auto !important;
+            padding: clamp(1rem, 3vw, 1.55rem) !important;
+            border: 1px solid rgba(216,177,90,.30) !important;
+            border-radius: 16px !important;
+            background: rgba(255,255,255,.025);
+        }
+        div[data-testid="stForm"] input {
+            min-height: 2.9rem;
+        }
+        div[data-testid="stForm"] button {
+            min-height: 2.9rem;
+            width: 100%;
+            font-weight: 650;
+        }
+        div[data-testid="stExpander"] {
+            max-width: 490px;
+            margin: .75rem auto 0 auto;
+        }
+        .login-foot {
+            text-align: center;
+            color: #8792A1;
+            font-size: .78rem;
+            margin-top: 1.4rem;
+        }
+        @media (max-width: 600px) {
+            .block-container {
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+                padding-top: 1.25rem !important;
+            }
+            .login-brand { margin-bottom: 1rem; }
+        div[data-testid="stImage"] img { display:block; margin-left:auto; margin-right:auto; max-width:100%; height:auto; }
+            .login-brand p { font-size: .88rem; }
+            div[data-testid="stForm"] {
+                width: 100%;
+                padding: 1rem !important;
+                border-radius: 13px !important;
+            }
+            div[data-testid="stExpander"] { width: 100%; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    logo_login = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_equise_horizontal.png")
+    if os.path.exists(logo_login):
+        st.image(logo_login, width=260)
+
+    st.markdown(
+        """
+        <div class="login-brand">
+            <span class="login-tag">Acceso seguro</span>
+            <h1>Edificio Residencial Equise</h1>
+            <p>Sistema de administración y control residencial</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     try:
         usuarios_existentes = db.listar_usuarios()
     except Exception as e:
         st.error(f"No se pudo conectar con la base de usuarios: {e}")
-        st.info("¿Ya ejecutaste migracion_usuarios.sql en Supabase?")
+        st.info("Verifica la conexión con Supabase y que esté instalada la migración de usuarios.")
         return False
 
     if not usuarios_existentes:
-        st.info("Aún no hay usuarios creados. Crea la cuenta del **Administrador principal**:")
+        st.info("Configuración inicial: crea la cuenta del Administrador principal.")
         with st.form("form_primer_admin"):
-            username = st.text_input("Usuario (para iniciar sesión)")
-            nombre = st.text_input("Nombre completo")
-            pwd1 = st.text_input("Contraseña", type="password")
-            pwd2 = st.text_input("Repetir contraseña", type="password")
+            username = st.text_input("Usuario", placeholder="Crea tu nombre de usuario")
+            nombre = st.text_input("Nombre completo", placeholder="Nombre del administrador")
+            pwd1 = st.text_input("Contraseña", type="password", placeholder="Crea una contraseña segura")
+            pwd2 = st.text_input("Confirmar contraseña", type="password", placeholder="Repite la contraseña")
             crear = st.form_submit_button("Crear administrador")
             if crear:
                 if not username or not pwd1:
@@ -260,27 +356,48 @@ def check_login():
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al crear el usuario: {e}")
+        st.markdown('<div class="login-foot">Residencial Equise · Administración residencial</div>', unsafe_allow_html=True)
         return False
 
-    username = st.text_input("Usuario")
-    pwd = st.text_input("Contraseña", type="password")
-    if st.button("Ingresar"):
-        usuario = db.obtener_usuario_por_username(username.strip().lower())
-        if usuario and usuario.get("activo") and verificar_password(pwd, usuario["password_hash"]):
-            st.session_state["usuario"] = usuario
-            st.rerun()
-        else:
-            st.error("Usuario o contraseña incorrectos, o el usuario está desactivado.")
-
-    with st.expander("¿Problemas para entrar? Usar clave general de administrador"):
-        pwd_general = st.text_input("Clave general", type="password", key="pwd_general")
-        if st.button("Ingresar con clave general"):
-            if pwd_general and pwd_general == st.secrets.get("APP_PASSWORD", ""):
-                st.session_state["usuario"] = {"username": "admin", "nombre": "Administrador",
-                                                "rol": "Administrador"}
-                st.rerun()
+    with st.form("form_login", clear_on_submit=False):
+        username = st.text_input(
+            "Usuario", placeholder="Ingresa tu usuario",
+            autocomplete="username"
+        )
+        pwd = st.text_input(
+            "Contraseña", type="password", placeholder="Ingresa tu contraseña",
+            autocomplete="current-password"
+        )
+        ingresar = st.form_submit_button("Ingresar al sistema", use_container_width=True)
+        if ingresar:
+            if not username.strip() or not pwd:
+                st.warning("Ingresa tu usuario y contraseña.")
             else:
-                st.error("Clave incorrecta.")
+                usuario = db.obtener_usuario_por_username(username.strip().lower())
+                if usuario and usuario.get("activo") and verificar_password(pwd, usuario["password_hash"]):
+                    st.session_state["usuario"] = usuario
+                    st.rerun()
+                else:
+                    st.error("Usuario o contraseña incorrectos, o el usuario está desactivado.")
+
+    with st.expander("¿Problemas para ingresar?"):
+        st.caption("Usa esta opción únicamente si eres administrador y tienes la clave general.")
+        with st.form("form_login_general"):
+            pwd_general = st.text_input("Clave general de administrador", type="password")
+            ingresar_general = st.form_submit_button("Ingresar como administrador", use_container_width=True)
+            if ingresar_general:
+                if pwd_general and pwd_general == st.secrets.get("APP_PASSWORD", ""):
+                    st.session_state["usuario"] = {
+                        "username": "admin", "nombre": "Administrador", "rol": "Administrador"
+                    }
+                    st.rerun()
+                else:
+                    st.error("Clave incorrecta.")
+
+    st.markdown(
+        '<div class="login-foot">Acceso exclusivo para personal autorizado · Residencial Equise</div>',
+        unsafe_allow_html=True,
+    )
     return False
 
 
