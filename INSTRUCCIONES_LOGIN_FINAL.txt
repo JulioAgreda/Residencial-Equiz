@@ -1,0 +1,9 @@
+EQUISE - LOGIN FINAL BASADO EN LA REFERENCIA VISUAL APROBADA
+
+Incluye app.py, logo institucional y fondo arquitectónico.
+
+Diseño: fondo azul oscuro con fachada residencial, logo centrado, tarjeta de acceso blanca, tipografía azul marino y botón azul con alto contraste. En celular se adapta a una sola columna y ajusta el fondo.
+
+Se conserva autenticación, creación inicial del administrador, clave general, roles, conexión Supabase y fechas operativas Bolivia mediante recibo.hoy_bolivia().
+
+Instalación: respaldar app.py; reemplazarlo por el incluido; copiar la carpeta assets completa; reiniciar/redeploy Streamlit. No requiere migraciones SQL.

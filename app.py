@@ -225,345 +225,174 @@ def check_login():
     if st.session_state.get("usuario"):
         return True
 
-    # Login de administración inmobiliaria moderna: panel de funciones + acceso.
+    # Login institucional: fondo arquitectónico, logo centrado y tarjeta clara.
+    import base64
+    login_dir = os.path.dirname(os.path.abspath(__file__))
+    bg_path = os.path.join(login_dir, "assets", "fondo_login_equise.jpg")
+    logo_path = os.path.join(login_dir, "assets", "logo_equise_horizontal.png")
+    bg64 = ""
+    if os.path.exists(bg_path):
+        with open(bg_path, "rb") as f:
+            bg64 = base64.b64encode(f.read()).decode("ascii")
+
     st.markdown(
-        """
+        f"""
         <style>
-        .block-container {
-            max-width: 1280px !important;
-            padding-top: clamp(1rem, 4vh, 2.6rem) !important;
-            padding-bottom: 1.5rem !important;
-        }
-        .login-sidepanel {
-            box-sizing: border-box;
-            min-height: 620px;
-            height: 100%;
-            padding: clamp(1.5rem, 3vw, 2.5rem);
-            border-radius: 22px;
-            color: #F4F8FA;
-            background:
-              radial-gradient(circle at 10% 90%, rgba(28,130,151,.28), transparent 32%),
-              linear-gradient(155deg, #073D4B 0%, #062F3D 56%, #082B38 100%);
-            border: 1px solid rgba(215,173,83,.45);
-            box-shadow: 0 18px 45px rgba(0,0,0,.18);
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            overflow: hidden;
-            position: relative;
-        }
-        .login-sidepanel:after {
-            content: "";
-            position: absolute;
-            width: 260px;
-            height: 260px;
-            right: -125px;
-            bottom: -135px;
-            border: 1px solid rgba(220,178,91,.38);
-            border-radius: 50%;
-            box-shadow: 0 0 0 22px rgba(220,178,91,.035), 0 0 0 48px rgba(220,178,91,.025);
-            pointer-events: none;
-        }
-        .login-side-kicker {
-            color: #E0B85E;
-            font-size: .76rem;
-            letter-spacing: .13em;
-            text-transform: uppercase;
-            font-weight: 700;
-            margin-bottom: .8rem;
-        }
-        .login-sidepanel h2 {
-            color: #FFFFFF;
-            font-size: clamp(1.5rem, 2.4vw, 2.1rem);
-            line-height: 1.2;
-            margin: 0 0 .75rem 0;
-            font-weight: 750;
-        }
-        .login-sidepanel .side-intro {
-            color: #D0E0E5;
-            font-size: .96rem;
-            line-height: 1.55;
-            margin-bottom: 1.6rem;
-            max-width: 390px;
-        }
-        .login-feature {
-            display: flex;
-            align-items: center;
-            gap: .95rem;
-            padding: .9rem 0;
-            border-bottom: 1px solid rgba(225,239,242,.16);
-            position: relative;
-            z-index: 1;
-        }
-        .login-feature-icon {
-            width: 42px;
-            height: 42px;
-            flex: 0 0 42px;
-            border: 1px solid rgba(225,184,95,.55);
-            border-radius: 12px;
-            display: grid;
-            place-items: center;
-            color: #E7BE68;
-            font-size: 1.25rem;
-            background: rgba(255,255,255,.045);
-        }
-        .login-feature strong {
-            display: block;
-            color: #FFFFFF;
-            font-size: .98rem;
-            font-weight: 650;
-        }
-        .login-feature span:last-child {
-            display: block;
-            color: #BFD2D8;
-            font-size: .82rem;
-            margin-top: .12rem;
-        }
-        .login-side-foot {
-            color: #B7CCD2;
-            font-size: .78rem;
-            padding-top: 1.5rem;
-            position: relative;
-            z-index: 1;
-        }
-        .login-main {
-            max-width: 620px;
-            margin: 0 auto;
-            padding: clamp(.2rem, 2vw, 1.5rem);
-        }
-        .login-heading {
-            text-align: center;
-            margin: .4rem auto 1.6rem auto;
-        }
-        .login-heading h1 {
-            color: #173B59;
-            font-size: clamp(1.55rem, 3vw, 2.15rem);
-            line-height: 1.16;
-            margin: .7rem 0 .45rem 0;
-            letter-spacing: -.025em;
-        }
-        .login-heading p {
-            color: #718096;
-            font-size: .95rem;
-            margin: 0;
-        }
-        .login-secure {
-            display: inline-block;
-            color: #0B5265;
-            background: #E8F1F4;
-            border: 1px solid #D6E4E9;
-            border-radius: 999px;
-            padding: .35rem .85rem;
-            font-size: .75rem;
-            font-weight: 750;
-            letter-spacing: .08em;
-        }
-        div[data-testid="stForm"] {
-            max-width: 540px;
-            margin: 0 auto !important;
-            padding: clamp(1rem, 3vw, 1.55rem) !important;
-            border: 1px solid #DCE4E9 !important;
-            border-radius: 17px !important;
-            background: #FFFFFF !important;
-            box-shadow: 0 12px 32px rgba(16,42,67,.08);
-        }
+        [data-testid="stAppViewContainer"] {{
+            background-color: #07172D;
+            background-image: linear-gradient(rgba(5,18,38,.22), rgba(5,18,38,.38)), url("data:image/jpeg;base64,{bg64}");
+            background-size: cover;
+            background-position: center center;
+            background-attachment: fixed;
+        }}
+        [data-testid="stHeader"] {{ background: transparent; }}
+        [data-testid="stMain"] {{ background: transparent; }}
+        .block-container {{
+            max-width: 700px !important;
+            padding-top: clamp(.7rem, 3vh, 2rem) !important;
+            padding-bottom: 1.2rem !important;
+        }}
+        div[data-testid="stImage"] {{
+            display: flex; justify-content: center; align-items: center;
+            margin: 0 auto .5rem auto;
+        }}
+        div[data-testid="stImage"] img {{
+            display: block; margin: 0 auto; max-width: min(300px, 78vw); height: auto;
+            filter: drop-shadow(0 5px 15px rgba(0,0,0,.18));
+        }}
+        .login-heading {{ text-align: center; margin: .35rem auto 1.05rem auto; }}
+        .login-secure {{
+            display: inline-block; padding: .32rem .8rem; border-radius: 999px;
+            color: #0B3764; background: #E4EEF8; border: 1px solid #D2E0EF;
+            font-size: .73rem; font-weight: 800; letter-spacing: .055em;
+        }}
+        .login-heading h1 {{
+            color: #142F50 !important; font-size: clamp(1.35rem, 3.4vw, 1.85rem);
+            line-height: 1.2; margin: .55rem 0 .28rem 0; letter-spacing: -.02em;
+        }}
+        .login-heading p {{ color: #52657C !important; margin: 0; font-size: .9rem; }}
+        .login-gold-line {{ width: 64px; height: 3px; border-radius: 3px; background: #D6A33F; margin: .8rem auto 0 auto; }}
+        div[data-testid="stForm"] {{
+            max-width: 570px; margin: 0 auto !important; padding: clamp(1rem, 3vw, 1.55rem) !important;
+            background: rgba(255,255,255,.98) !important; border: 1px solid #DCE5EF !important;
+            border-radius: 18px !important; box-shadow: 0 18px 48px rgba(0,0,0,.24);
+        }}
         div[data-testid="stForm"] label,
-        div[data-testid="stForm"] p {
-            color: #243B53 !important;
-        }
-        div[data-testid="stForm"] input {
-            min-height: 2.9rem;
-        }
-        div[data-testid="stForm"] button {
-            min-height: 3rem;
-            width: 100%;
-            font-weight: 700;
-            background: #07506A;
-            border-color: #07506A;
-            color: white;
-        }
-        div[data-testid="stForm"] button:hover {
-            background: #063D53;
-            border-color: #063D53;
-            color: white;
-        }
-        div[data-testid="stExpander"] {
-            max-width: 540px;
-            margin: .8rem auto 0 auto;
-            border-radius: 12px;
-        }
-        .login-authorized {
-            text-align: center;
-            color: #718096;
-            font-size: .78rem;
-            margin-top: 1.3rem;
-        }
-        @media (max-width: 800px) {
-            .block-container {
-                padding-left: .85rem !important;
-                padding-right: .85rem !important;
-                padding-top: .85rem !important;
-            }
-            .login-sidepanel {
-                min-height: auto;
-                padding: 1.25rem 1.35rem;
-                border-radius: 17px;
-                margin-bottom: .4rem;
-            }
-            .login-sidepanel h2 { font-size: 1.35rem; }
-            .login-sidepanel .side-intro { margin-bottom: .55rem; font-size: .88rem; }
-            .login-feature {
-                display: inline-flex;
-                width: 49%;
-                vertical-align: top;
-                padding: .55rem 0;
-                border-bottom: 0;
-                gap: .55rem;
-            }
-            .login-feature-icon {
-                width: 34px;
-                height: 34px;
-                flex-basis: 34px;
-                border-radius: 9px;
-                font-size: 1rem;
-            }
-            .login-feature strong { font-size: .83rem; }
-            .login-feature span:last-child { font-size: .72rem; }
-            .login-side-foot { padding-top: .7rem; }
-            .login-main { padding: .25rem 0; }
-            .login-heading { margin: .4rem auto 1rem auto; }
-            div[data-testid="stForm"] { width: 100%; padding: 1rem !important; }
-            div[data-testid="stExpander"] { width: 100%; }
-        }
-        @media (max-width: 430px) {
-            .login-feature { width: 100%; padding: .38rem 0; }
-            .login-feature span:last-child { display: none; }
-            .login-sidepanel .side-intro { margin-bottom: .3rem; }
-        }
+        div[data-testid="stForm"] [data-testid="stWidgetLabel"] p {{ color: #173654 !important; font-weight: 600; }}
+        div[data-testid="stForm"] input {{
+            min-height: 2.85rem; background: #F7F9FC !important; color: #172F4B !important;
+            border: 1px solid #B9C8D9 !important; border-radius: 9px !important;
+        }}
+        div[data-testid="stForm"] input::placeholder {{ color: #7C8998 !important; }}
+        div[data-testid="stForm"] button {{
+            min-height: 2.95rem; width: 100%; font-weight: 750 !important;
+            color: #FFFFFF !important; background: #073B78 !important;
+            border: 1px solid #073B78 !important; border-radius: 9px !important;
+        }}
+        div[data-testid="stForm"] button:hover {{ background: #052D5D !important; border-color: #052D5D !important; }}
+        div[data-testid="stExpander"] {{
+            max-width: 570px; margin: .75rem auto 0 auto; color: #173654 !important;
+            background: rgba(245,248,252,.96); border: 1px solid #D4DFEA; border-radius: 10px;
+        }}
+        div[data-testid="stExpander"] summary, div[data-testid="stExpander"] summary p {{ color: #173654 !important; }}
+        .login-authorized {{ text-align: center; color: #E5EDF6 !important; text-shadow: 0 1px 4px #07172D; font-size: .76rem; margin-top: 1rem; }}
+        @media (max-width: 600px) {{
+            [data-testid="stAppViewContainer"] {{ background-position: 68% center; background-attachment: scroll; }}
+            .block-container {{ padding-left: .8rem !important; padding-right: .8rem !important; padding-top: .6rem !important; }}
+            div[data-testid="stImage"] img {{ max-width: min(255px, 72vw); }}
+            .login-heading {{ margin-bottom: .8rem; }}
+            div[data-testid="stForm"] {{ width: 100%; padding: 1rem !important; border-radius: 15px !important; }}
+            div[data-testid="stExpander"] {{ width: 100%; }}
+        }}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    col_panel, col_login = st.columns([0.82, 1.18], gap="large")
+    if os.path.exists(logo_path):
+        st.image(logo_path, width=285)
 
-    with col_panel:
-        st.markdown(
-            """
-            <section class="login-sidepanel">
-              <div>
-                <div class="login-side-kicker">Administración residencial</div>
-                <h2>Todo el edificio,<br>en un solo lugar.</h2>
-                <p class="side-intro">Herramientas para organizar la gestión diaria de Edificio Residencial Equise con información clara y centralizada.</p>
-                <div class="login-feature">
-                  <div class="login-feature-icon">▥</div>
-                  <div><strong>Gestión de apartamentos</strong><span>Ocupación, inquilinos y contratos</span></div>
-                </div>
-                <div class="login-feature">
-                  <div class="login-feature-icon">▣</div>
-                  <div><strong>Control de alquileres</strong><span>Pagos, saldos y compromisos</span></div>
-                </div>
-                <div class="login-feature">
-                  <div class="login-feature-icon">◈</div>
-                  <div><strong>Servicios básicos</strong><span>Electricidad, agua y consumos</span></div>
-                </div>
-                <div class="login-feature">
-                  <div class="login-feature-icon">▤</div>
-                  <div><strong>Reportes e historial</strong><span>Consultas y seguimiento administrativo</span></div>
-                </div>
-              </div>
-              <div class="login-side-foot">EQUISE · Gestión y administración residencial</div>
-            </section>
-            """,
-            unsafe_allow_html=True,
-        )
+    st.markdown(
+        """
+        <div class="login-heading">
+          <span class="login-secure">🔒 &nbsp; ACCESO SEGURO</span>
+          <h1>Edificio Residencial Equise</h1>
+          <p>Sistema de administración y control residencial</p>
+          <div class="login-gold-line"></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    with col_login:
-        st.markdown('<div class="login-main">', unsafe_allow_html=True)
-        logo_login = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_equise_horizontal.png")
-        if os.path.exists(logo_login):
-            st.image(logo_login, width=285)
-        st.markdown(
-            """
-            <div class="login-heading">
-              <span class="login-secure">⌑ &nbsp; ACCESO SEGURO</span>
-              <h1>Edificio Residencial Equise</h1>
-              <p>Sistema de administración y control residencial</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    try:
+        usuarios_existentes = db.listar_usuarios()
+    except Exception as e:
+        st.error(f"No se pudo conectar con la base de usuarios: {e}")
+        st.info("Verifica la conexión con Supabase y que esté instalada la migración de usuarios.")
+        return False
 
-        try:
-            usuarios_existentes = db.listar_usuarios()
-        except Exception as e:
-            st.error(f"No se pudo conectar con la base de usuarios: {e}")
-            st.info("Verifica la conexión con Supabase y que esté instalada la migración de usuarios.")
-            st.markdown("</div>", unsafe_allow_html=True)
-            return False
-
-        if not usuarios_existentes:
-            st.info("Configuración inicial: crea la cuenta del Administrador principal.")
-            with st.form("form_primer_admin"):
-                username = st.text_input("Usuario", placeholder="Crea tu nombre de usuario")
-                nombre = st.text_input("Nombre completo", placeholder="Nombre del administrador")
-                pwd1 = st.text_input("Contraseña", type="password", placeholder="Crea una contraseña segura")
-                pwd2 = st.text_input("Confirmar contraseña", type="password", placeholder="Repite la contraseña")
-                crear = st.form_submit_button("Crear administrador")
-                if crear:
-                    if not username or not pwd1:
-                        st.error("Usuario y contraseña son obligatorios.")
-                    elif pwd1 != pwd2:
-                        st.error("Las contraseñas no coinciden.")
-                    else:
-                        try:
-                            db.crear_usuario({
-                                "username": username.strip().lower(),
-                                "nombre": nombre or None,
-                                "password_hash": hash_password(pwd1),
-                                "rol": "Administrador",
-                                "activo": True,
-                            })
-                            st.success("Administrador creado. Ahora inicia sesión.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al crear el usuario: {e}")
-            st.markdown('<div class="login-authorized">Acceso exclusivo para personal autorizado.</div></div>', unsafe_allow_html=True)
-            return False
-
-        with st.form("form_login", clear_on_submit=False):
+    if not usuarios_existentes:
+        st.info("Configuración inicial: crea la cuenta del Administrador principal.")
+        with st.form("form_primer_admin"):
             username = st.text_input("Usuario", placeholder="Ingrese su usuario")
-            pwd = st.text_input("Contraseña", type="password", placeholder="Ingrese su contraseña")
-            ingresar = st.form_submit_button("Ingresar al sistema", use_container_width=True)
-            if ingresar:
-                if not username.strip() or not pwd:
-                    st.warning("Ingresa tu usuario y contraseña.")
+            nombre = st.text_input("Nombre completo", placeholder="Nombre del administrador")
+            pwd1 = st.text_input("Contraseña", type="password", placeholder="Cree una contraseña segura")
+            pwd2 = st.text_input("Confirmar contraseña", type="password", placeholder="Repita la contraseña")
+            crear = st.form_submit_button("Crear administrador")
+            if crear:
+                if not username or not pwd1:
+                    st.error("Usuario y contraseña son obligatorios.")
+                elif pwd1 != pwd2:
+                    st.error("Las contraseñas no coinciden.")
                 else:
-                    usuario = db.obtener_usuario_por_username(username.strip().lower())
-                    if usuario and usuario.get("activo") and verificar_password(pwd, usuario["password_hash"]):
-                        st.session_state["usuario"] = usuario
+                    try:
+                        db.crear_usuario({
+                            "username": username.strip().lower(),
+                            "nombre": nombre or None,
+                            "password_hash": hash_password(pwd1),
+                            "rol": "Administrador",
+                            "activo": True,
+                        })
+                        st.success("Administrador creado. Ahora inicia sesión.")
                         st.rerun()
-                    else:
-                        st.error("Usuario o contraseña incorrectos, o el usuario está desactivado.")
+                    except Exception as e:
+                        st.error(f"Error al crear el usuario: {e}")
+        st.markdown('<div class="login-authorized">Acceso exclusivo para personal autorizado · Residencial Equise</div>', unsafe_allow_html=True)
+        return False
 
-        with st.expander("¿Problemas para ingresar?"):
-            st.caption("Usa esta opción únicamente si eres administrador y tienes la clave general.")
-            with st.form("form_login_general"):
-                pwd_general = st.text_input("Clave general de administrador", type="password")
-                ingresar_general = st.form_submit_button("Ingresar como administrador", use_container_width=True)
-                if ingresar_general:
-                    if pwd_general and pwd_general == st.secrets.get("APP_PASSWORD", ""):
-                        st.session_state["usuario"] = {
-                            "username": "admin", "nombre": "Administrador", "rol": "Administrador"
-                        }
-                        st.rerun()
-                    else:
-                        st.error("Clave incorrecta.")
+    with st.form("form_login", clear_on_submit=False):
+        username = st.text_input("Usuario", placeholder="Ingrese su usuario")
+        pwd = st.text_input("Contraseña", type="password", placeholder="Ingrese su contraseña")
+        ingresar = st.form_submit_button("➜  Ingresar al sistema", use_container_width=True)
+        if ingresar:
+            if not username.strip() or not pwd:
+                st.warning("Ingresa tu usuario y contraseña.")
+            else:
+                usuario = db.obtener_usuario_por_username(username.strip().lower())
+                if usuario and usuario.get("activo") and verificar_password(pwd, usuario["password_hash"]):
+                    st.session_state["usuario"] = usuario
+                    st.rerun()
+                else:
+                    st.error("Usuario o contraseña incorrectos, o el usuario está desactivado.")
 
-        st.markdown(
-            '<div class="login-authorized">Acceso exclusivo para personal autorizado · Residencial Equise</div></div>',
-            unsafe_allow_html=True,
-        )
+    with st.expander("¿Problemas para ingresar?"):
+        st.caption("Usa esta opción únicamente si eres administrador y tienes la clave general.")
+        with st.form("form_login_general"):
+            pwd_general = st.text_input("Clave general de administrador", type="password")
+            ingresar_general = st.form_submit_button("Ingresar como administrador", use_container_width=True)
+            if ingresar_general:
+                if pwd_general and pwd_general == st.secrets.get("APP_PASSWORD", ""):
+                    st.session_state["usuario"] = {
+                        "username": "admin", "nombre": "Administrador", "rol": "Administrador"
+                    }
+                    st.rerun()
+                else:
+                    st.error("Clave incorrecta.")
+
+    st.markdown(
+        '<div class="login-authorized">Acceso exclusivo para personal autorizado · Residencial Equise</div>',
+        unsafe_allow_html=True,
+    )
     return False
 
 
