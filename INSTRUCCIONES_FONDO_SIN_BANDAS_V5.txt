@@ -1,0 +1,19 @@
+EQUISE — FONDO V5 SIN BLOQUE NI CORTE VERTICAL
+
+Se corrigió el origen del defecto: el área azul izquierda estaba incorporada en la propia fotografía de fondo y no dependía solamente del degradado CSS.
+
+Cambios:
+- Se reconstruyó el área izquierda con una textura azul marino atmosférica muy sutil.
+- Se aplicó una transición progresiva y amplia hacia la fotografía de la fachada.
+- Se evitó una división vertical o un panel azul de borde definido.
+- Se conservaron el diseño del formulario, escudo, textos, campos y botones.
+- Se actualizó la vista previa HTML, escritorio y móvil.
+
+Instalación:
+1. Respaldar el app.py y la carpeta assets actuales.
+2. Reemplazar app.py por el incluido.
+3. Reemplazar assets/fondo_login_equise.jpg por el incluido.
+4. Mantener assets/escudo_equise.png.
+5. Reiniciar/redeploy Streamlit y realizar recarga completa del navegador.
+
+No modifica autenticación, usuarios, roles, datos ni Supabase. No requiere migración SQL.

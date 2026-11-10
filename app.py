@@ -247,7 +247,7 @@ def check_login():
         [data-testid="stAppViewContainer"] {{
             background-color: #071A31;
             background-image:
-                linear-gradient(90deg, rgba(4,19,39,.52) 0%, rgba(6,27,52,.32) 52%, rgba(5,21,42,.12) 100%),
+                linear-gradient(rgba(5,24,46,.22), rgba(5,24,46,.22)),
                 url("data:image/jpeg;base64,{bg64}");
             background-size: cover;
             background-position: center;
@@ -349,7 +349,7 @@ def check_login():
                 background-position: 66% center;
                 background-attachment: scroll;
                 background-image:
-                    linear-gradient(180deg, rgba(4,20,40,.46) 0%, rgba(5,22,43,.34) 42%, rgba(4,18,36,.60) 100%),
+                    linear-gradient(rgba(5,24,46,.30), rgba(5,24,46,.30)),
                     url("data:image/jpeg;base64,{bg64}");
             }}
             .block-container {{
