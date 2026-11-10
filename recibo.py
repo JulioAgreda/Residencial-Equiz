@@ -404,12 +404,12 @@ MAX_FILAS_REPORTE = 12   # filas por tabla; las deudas siempre se muestran compl
 
 @lru_cache(maxsize=1)
 def _logo_liviano_bytes():
-    """Prepara el isotipo institucional en alta resolución para incrustarlo en PDF.
-    Se limita a 600 px (suficiente para impresión nítida) sin degradar el archivo maestro."""
+    """Logo reducido a 200 px (el original pesa ~190 KB y se incrustaría completo en cada PDF).
+    Se guardan los bytes y no un ImageReader: reportlab (Platypus) solo acepta ruta o archivo."""
     logo = Image.open(LOGO_PATH).convert("RGBA")
-    logo.thumbnail((600, 600), Image.Resampling.LANCZOS)
+    logo.thumbnail((200, 200))
     buf = io.BytesIO()
-    logo.save(buf, format="PNG", optimize=True)
+    logo.save(buf, format="PNG")
     return buf.getvalue()
 
 _COLOR_DEUDA = (183, 28, 28)          # rojo (RGB, PNG)
@@ -505,7 +505,7 @@ def generar_reporte_inquilino_pdf(datos: dict) -> bytes:
     logo = ""
     if os.path.exists(LOGO_PATH):
         try:
-            logo = RLImage(io.BytesIO(_logo_liviano_bytes()), width=16 * mm, height=16 * mm, kind="proportional")
+            logo = RLImage(io.BytesIO(_logo_liviano_bytes()), width=16 * mm, height=16 * mm)
         except Exception:
             logo = ""
     cab = Table([[logo, [Paragraph(NOMBRE_RESIDENCIAL, st_titulo),
@@ -630,9 +630,7 @@ def generar_reporte_inquilino_png(datos: dict) -> bytes:
     if os.path.exists(LOGO_PATH):
         try:
             logo = Image.open(LOGO_PATH).convert("RGBA")
-            # El PNG final se imprime a 820 px de ancho; 120 px de logo evita
-            # el aspecto borroso del thumbnail anterior de solo 92 px.
-            logo.thumbnail((120, 120), Image.Resampling.LANCZOS)
+            logo.thumbnail((92, 92))
             img.paste(logo, (margen, y), logo)
             texto_x, logo_alto = margen + logo.width + 18, logo.height
         except Exception:
@@ -732,3 +730,141 @@ def hoy_bolivia():
     las 20:00 y las 24:00 de Bolivia date.today() ya marcaría el día siguiente, lo que adelantaría
     un día los vencimientos de alquiler."""
     return datetime.now(_ZONA_BOLIVIA).date()
+
+
+def generar_recibo_anticretico_pdf(datos: dict) -> bytes:
+    """Genera comprobante individual de recepción de capital anticrético."""
+    buffer = io.BytesIO()
+    ancho, alto = A5
+    c = pdfcanvas.Canvas(buffer, pagesize=A5)
+    margen = 12 * mm
+    y = alto - margen
+    if os.path.exists(LOGO_PATH):
+        try:
+            c.drawImage(LOGO_PATH, margen, y - 17 * mm, width=17 * mm, height=17 * mm,
+                        preserveAspectRatio=True, mask="auto")
+        except Exception:
+            pass
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(margen + 21 * mm, y - 6 * mm, NOMBRE_RESIDENCIAL)
+    c.setFont("Helvetica", 9)
+    c.drawString(margen + 21 * mm, y - 12 * mm, "Constancia de recepción de capital anticrético")
+    y -= 24 * mm
+    c.setLineWidth(0.7)
+    c.line(margen, y, ancho - margen, y)
+    y -= 9 * mm
+    c.setFont("Helvetica-Bold", 12)
+    c.drawCentredString(ancho / 2, y, "RECIBO DE ENTREGA DE CAPITAL ANTICRÉTICO")
+    y -= 7 * mm
+    if datos.get("estado_recibo") == "anulado":
+        c.setFillColor(colors.red)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawCentredString(ancho / 2, y, "RECIBO ANULADO - SIN VALIDEZ COMO CONSTANCIA DE PAGO")
+        c.setFillColor(colors.black)
+        y -= 8 * mm
+    else:
+        y -= 3 * mm
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(margen, y, f'Recibo N.º: {datos.get("numero_recibo", "—")}')
+    y -= 8 * mm
+    filas = [
+        ("Fecha real de recepción", datos.get("fecha_entrega", "—")),
+        ("Apartamento", datos.get("apartamento", "—")),
+        ("Anticresista / quien entrega", datos.get("entregante", "—")),
+        ("Recibido por", datos.get("recibido_por", "—")),
+        ("Monto recibido", datos.get("monto_texto", "—")),
+        ("Moneda", datos.get("moneda", "BOB")),
+        ("Etapa", datos.get("etapa_texto", "—")),
+        ("Medio de pago", datos.get("medio_pago", "—")),
+        ("Referencia / comprobante", datos.get("referencia", "—")),
+        ("Saldo pendiente después de esta entrega", datos.get("saldo_posterior", "—")),
+    ]
+    for etiqueta, valor in filas:
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawString(margen, y, str(etiqueta)[:48])
+        c.setFont("Helvetica", 8.5)
+        c.drawRightString(ancho - margen, y, str(valor)[:65])
+        y -= 7 * mm
+    y -= 2 * mm
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(margen, y, "Concepto:")
+    y -= 6 * mm
+    c.setFont("Helvetica", 8.5)
+    concepto = str(datos.get("concepto") or "Entrega a cuenta del capital anticrético acordado.")
+    for linea in [concepto[i:i+82] for i in range(0, len(concepto), 82)][:4]:
+        c.drawString(margen, y, linea)
+        y -= 5 * mm
+    if datos.get("observacion"):
+        y -= 2 * mm
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawString(margen, y, "Observación:")
+        y -= 5 * mm
+        c.setFont("Helvetica", 8)
+        for linea in [str(datos["observacion"])[i:i+90] for i in range(0, len(str(datos["observacion"])), 90)][:3]:
+            c.drawString(margen, y, linea)
+            y -= 4.5 * mm
+    y -= 10 * mm
+    c.line(margen, y, margen + 55 * mm, y)
+    c.line(ancho - margen - 55 * mm, y, ancho - margen, y)
+    y -= 5 * mm
+    c.setFont("Helvetica", 7.5)
+    c.drawCentredString(margen + 27.5 * mm, y, "Firma de quien entrega")
+    c.drawCentredString(ancho - margen - 27.5 * mm, y, "Firma de quien recibe")
+    y -= 9 * mm
+    c.setFont("Helvetica-Oblique", 7)
+    c.drawString(margen, y, "Este recibo acredita únicamente la recepción del importe indicado; no sustituye el contrato.")
+    c.save()
+    return buffer.getvalue()
+
+
+def generar_estado_cuenta_anticretico_pdf(datos: dict) -> bytes:
+    """Estado de cuenta consolidado de entregas de capital anticrético."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=14*mm, leftMargin=14*mm,
+                            topMargin=14*mm, bottomMargin=14*mm)
+    estilos = getSampleStyleSheet()
+    elementos = [
+        Paragraph(NOMBRE_RESIDENCIAL, estilos["Title"]),
+        Paragraph("Estado de cuenta del capital anticrético", estilos["Heading2"]),
+        Spacer(1, 5*mm),
+        Paragraph(f"<b>Apartamento:</b> {datos.get('apartamento', '—')}", estilos["BodyText"]),
+        Paragraph(f"<b>Anticresista:</b> {datos.get('titular', '—')}", estilos["BodyText"]),
+        Paragraph(f"<b>Moneda:</b> {datos.get('moneda', 'BOB')}", estilos["BodyText"]),
+        Spacer(1, 4*mm),
+    ]
+    moneda = datos.get("moneda", "BOB")
+    elementos.append(Table([
+        ["Capital acordado", "Total recibido", "Saldo pendiente"],
+        [f"{moneda} {float(datos.get('capital') or 0):,.2f}",
+         f"{moneda} {float(datos.get('recibido') or 0):,.2f}",
+         f"{moneda} {float(datos.get('saldo') or 0):,.2f}"],
+    ], colWidths=[58*mm, 58*mm, 58*mm], style=TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#E8EEF5")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.HexColor("#203040")),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
+        ("ALIGN", (0,0), (-1,-1), "CENTER"),
+        ("PADDING", (0,0), (-1,-1), 7),
+    ])))
+    elementos.append(Spacer(1, 6*mm))
+    filas = [["Recibo", "Fecha real", "Etapa", "Entregante", "Monto", "Estado"]]
+    for x in datos.get("entregas") or []:
+        etapa = "Antes de firma" if x.get("etapa") == "antes_firma" else "Después de firma"
+        filas.append([x.get("numero_recibo") or "—", str(x.get("fecha_entrega") or "—"), etapa,
+                      str(x.get("entregante") or "—")[:28],
+                      f"{x.get('moneda') or moneda} {float(x.get('monto') or 0):,.2f}",
+                      (x.get("estado") or "vigente").upper()])
+    tabla = Table(filas, repeatRows=1, colWidths=[25*mm, 22*mm, 29*mm, 43*mm, 35*mm, 20*mm])
+    tabla.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#E8EEF5")),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTSIZE", (0,0), (-1,-1), 7),
+        ("GRID", (0,0), (-1,-1), 0.35, colors.grey),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("PADDING", (0,0), (-1,-1), 5),
+    ]))
+    elementos.append(tabla)
+    elementos.append(Spacer(1, 6*mm))
+    elementos.append(Paragraph("Este documento consolida los registros de entrega del capital anticrético. Los recibos anulados se muestran para mantener trazabilidad y no se computan en el total recibido.", estilos["Italic"]))
+    doc.build(elementos)
+    return buffer.getvalue()
