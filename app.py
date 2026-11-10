@@ -225,180 +225,345 @@ def check_login():
     if st.session_state.get("usuario"):
         return True
 
-    # Pantalla de acceso: identidad institucional limpia y adaptable.
+    # Login de administración inmobiliaria moderna: panel de funciones + acceso.
     st.markdown(
         """
         <style>
-        /* El login usa un lienzo más compacto que el resto del sistema. */
         .block-container {
-            max-width: 900px !important;
-            padding-top: clamp(1.2rem, 5vh, 3.5rem) !important;
-            padding-bottom: 2rem !important;
+            max-width: 1280px !important;
+            padding-top: clamp(1rem, 4vh, 2.6rem) !important;
+            padding-bottom: 1.5rem !important;
         }
-        .login-brand {
+        .login-sidepanel {
+            box-sizing: border-box;
+            min-height: 620px;
+            height: 100%;
+            padding: clamp(1.5rem, 3vw, 2.5rem);
+            border-radius: 22px;
+            color: #F4F8FA;
+            background:
+              radial-gradient(circle at 10% 90%, rgba(28,130,151,.28), transparent 32%),
+              linear-gradient(155deg, #073D4B 0%, #062F3D 56%, #082B38 100%);
+            border: 1px solid rgba(215,173,83,.45);
+            box-shadow: 0 18px 45px rgba(0,0,0,.18);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            overflow: hidden;
+            position: relative;
+        }
+        .login-sidepanel:after {
+            content: "";
+            position: absolute;
+            width: 260px;
+            height: 260px;
+            right: -125px;
+            bottom: -135px;
+            border: 1px solid rgba(220,178,91,.38);
+            border-radius: 50%;
+            box-shadow: 0 0 0 22px rgba(220,178,91,.035), 0 0 0 48px rgba(220,178,91,.025);
+            pointer-events: none;
+        }
+        .login-side-kicker {
+            color: #E0B85E;
+            font-size: .76rem;
+            letter-spacing: .13em;
+            text-transform: uppercase;
+            font-weight: 700;
+            margin-bottom: .8rem;
+        }
+        .login-sidepanel h2 {
+            color: #FFFFFF;
+            font-size: clamp(1.5rem, 2.4vw, 2.1rem);
+            line-height: 1.2;
+            margin: 0 0 .75rem 0;
+            font-weight: 750;
+        }
+        .login-sidepanel .side-intro {
+            color: #D0E0E5;
+            font-size: .96rem;
+            line-height: 1.55;
+            margin-bottom: 1.6rem;
+            max-width: 390px;
+        }
+        .login-feature {
+            display: flex;
+            align-items: center;
+            gap: .95rem;
+            padding: .9rem 0;
+            border-bottom: 1px solid rgba(225,239,242,.16);
+            position: relative;
+            z-index: 1;
+        }
+        .login-feature-icon {
+            width: 42px;
+            height: 42px;
+            flex: 0 0 42px;
+            border: 1px solid rgba(225,184,95,.55);
+            border-radius: 12px;
+            display: grid;
+            place-items: center;
+            color: #E7BE68;
+            font-size: 1.25rem;
+            background: rgba(255,255,255,.045);
+        }
+        .login-feature strong {
+            display: block;
+            color: #FFFFFF;
+            font-size: .98rem;
+            font-weight: 650;
+        }
+        .login-feature span:last-child {
+            display: block;
+            color: #BFD2D8;
+            font-size: .82rem;
+            margin-top: .12rem;
+        }
+        .login-side-foot {
+            color: #B7CCD2;
+            font-size: .78rem;
+            padding-top: 1.5rem;
+            position: relative;
+            z-index: 1;
+        }
+        .login-main {
+            max-width: 620px;
+            margin: 0 auto;
+            padding: clamp(.2rem, 2vw, 1.5rem);
+        }
+        .login-heading {
             text-align: center;
-            margin: 0 auto 1.25rem auto;
+            margin: .4rem auto 1.6rem auto;
         }
-        .login-brand h1 {
-            font-size: clamp(1.55rem, 4vw, 2.15rem);
-            line-height: 1.15;
-            margin: .25rem 0 .35rem 0;
+        .login-heading h1 {
+            color: #173B59;
+            font-size: clamp(1.55rem, 3vw, 2.15rem);
+            line-height: 1.16;
+            margin: .7rem 0 .45rem 0;
             letter-spacing: -.025em;
         }
-        .login-brand p {
-            color: #A8B3C2;
+        .login-heading p {
+            color: #718096;
+            font-size: .95rem;
             margin: 0;
-            font-size: .96rem;
         }
-        .login-tag {
+        .login-secure {
             display: inline-block;
-            color: #D8B15A;
-            border: 1px solid rgba(216,177,90,.38);
+            color: #0B5265;
+            background: #E8F1F4;
+            border: 1px solid #D6E4E9;
             border-radius: 999px;
-            padding: .25rem .75rem;
-            font-size: .76rem;
+            padding: .35rem .85rem;
+            font-size: .75rem;
+            font-weight: 750;
             letter-spacing: .08em;
-            text-transform: uppercase;
-            margin-bottom: .55rem;
         }
-        /* Centra y limita el formulario en escritorio; en móvil ocupa el ancho útil. */
         div[data-testid="stForm"] {
-            max-width: 490px;
+            max-width: 540px;
             margin: 0 auto !important;
             padding: clamp(1rem, 3vw, 1.55rem) !important;
-            border: 1px solid rgba(216,177,90,.30) !important;
-            border-radius: 16px !important;
-            background: rgba(255,255,255,.025);
+            border: 1px solid #DCE4E9 !important;
+            border-radius: 17px !important;
+            background: #FFFFFF !important;
+            box-shadow: 0 12px 32px rgba(16,42,67,.08);
+        }
+        div[data-testid="stForm"] label,
+        div[data-testid="stForm"] p {
+            color: #243B53 !important;
         }
         div[data-testid="stForm"] input {
             min-height: 2.9rem;
         }
         div[data-testid="stForm"] button {
-            min-height: 2.9rem;
+            min-height: 3rem;
             width: 100%;
-            font-weight: 650;
+            font-weight: 700;
+            background: #07506A;
+            border-color: #07506A;
+            color: white;
+        }
+        div[data-testid="stForm"] button:hover {
+            background: #063D53;
+            border-color: #063D53;
+            color: white;
         }
         div[data-testid="stExpander"] {
-            max-width: 490px;
-            margin: .75rem auto 0 auto;
+            max-width: 540px;
+            margin: .8rem auto 0 auto;
+            border-radius: 12px;
         }
-        .login-foot {
+        .login-authorized {
             text-align: center;
-            color: #8792A1;
+            color: #718096;
             font-size: .78rem;
-            margin-top: 1.4rem;
+            margin-top: 1.3rem;
         }
-        @media (max-width: 600px) {
+        @media (max-width: 800px) {
             .block-container {
-                padding-left: 1rem !important;
-                padding-right: 1rem !important;
-                padding-top: 1.25rem !important;
+                padding-left: .85rem !important;
+                padding-right: .85rem !important;
+                padding-top: .85rem !important;
             }
-            .login-brand { margin-bottom: 1rem; }
-        div[data-testid="stImage"] img { display:block; margin-left:auto; margin-right:auto; max-width:100%; height:auto; }
-            .login-brand p { font-size: .88rem; }
-            div[data-testid="stForm"] {
-                width: 100%;
-                padding: 1rem !important;
-                border-radius: 13px !important;
+            .login-sidepanel {
+                min-height: auto;
+                padding: 1.25rem 1.35rem;
+                border-radius: 17px;
+                margin-bottom: .4rem;
             }
+            .login-sidepanel h2 { font-size: 1.35rem; }
+            .login-sidepanel .side-intro { margin-bottom: .55rem; font-size: .88rem; }
+            .login-feature {
+                display: inline-flex;
+                width: 49%;
+                vertical-align: top;
+                padding: .55rem 0;
+                border-bottom: 0;
+                gap: .55rem;
+            }
+            .login-feature-icon {
+                width: 34px;
+                height: 34px;
+                flex-basis: 34px;
+                border-radius: 9px;
+                font-size: 1rem;
+            }
+            .login-feature strong { font-size: .83rem; }
+            .login-feature span:last-child { font-size: .72rem; }
+            .login-side-foot { padding-top: .7rem; }
+            .login-main { padding: .25rem 0; }
+            .login-heading { margin: .4rem auto 1rem auto; }
+            div[data-testid="stForm"] { width: 100%; padding: 1rem !important; }
             div[data-testid="stExpander"] { width: 100%; }
+        }
+        @media (max-width: 430px) {
+            .login-feature { width: 100%; padding: .38rem 0; }
+            .login-feature span:last-child { display: none; }
+            .login-sidepanel .side-intro { margin-bottom: .3rem; }
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    logo_login = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_equise_horizontal.png")
-    if os.path.exists(logo_login):
-        st.image(logo_login, width=260)
+    col_panel, col_login = st.columns([0.82, 1.18], gap="large")
 
-    st.markdown(
-        """
-        <div class="login-brand">
-            <span class="login-tag">Acceso seguro</span>
-            <h1>Edificio Residencial Equise</h1>
-            <p>Sistema de administración y control residencial</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with col_panel:
+        st.markdown(
+            """
+            <section class="login-sidepanel">
+              <div>
+                <div class="login-side-kicker">Administración residencial</div>
+                <h2>Todo el edificio,<br>en un solo lugar.</h2>
+                <p class="side-intro">Herramientas para organizar la gestión diaria de Edificio Residencial Equise con información clara y centralizada.</p>
+                <div class="login-feature">
+                  <div class="login-feature-icon">▥</div>
+                  <div><strong>Gestión de apartamentos</strong><span>Ocupación, inquilinos y contratos</span></div>
+                </div>
+                <div class="login-feature">
+                  <div class="login-feature-icon">▣</div>
+                  <div><strong>Control de alquileres</strong><span>Pagos, saldos y compromisos</span></div>
+                </div>
+                <div class="login-feature">
+                  <div class="login-feature-icon">◈</div>
+                  <div><strong>Servicios básicos</strong><span>Electricidad, agua y consumos</span></div>
+                </div>
+                <div class="login-feature">
+                  <div class="login-feature-icon">▤</div>
+                  <div><strong>Reportes e historial</strong><span>Consultas y seguimiento administrativo</span></div>
+                </div>
+              </div>
+              <div class="login-side-foot">EQUISE · Gestión y administración residencial</div>
+            </section>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    try:
-        usuarios_existentes = db.listar_usuarios()
-    except Exception as e:
-        st.error(f"No se pudo conectar con la base de usuarios: {e}")
-        st.info("Verifica la conexión con Supabase y que esté instalada la migración de usuarios.")
-        return False
+    with col_login:
+        st.markdown('<div class="login-main">', unsafe_allow_html=True)
+        logo_login = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo_equise_horizontal.png")
+        if os.path.exists(logo_login):
+            st.image(logo_login, width=285)
+        st.markdown(
+            """
+            <div class="login-heading">
+              <span class="login-secure">⌑ &nbsp; ACCESO SEGURO</span>
+              <h1>Edificio Residencial Equise</h1>
+              <p>Sistema de administración y control residencial</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    if not usuarios_existentes:
-        st.info("Configuración inicial: crea la cuenta del Administrador principal.")
-        with st.form("form_primer_admin"):
-            username = st.text_input("Usuario", placeholder="Crea tu nombre de usuario")
-            nombre = st.text_input("Nombre completo", placeholder="Nombre del administrador")
-            pwd1 = st.text_input("Contraseña", type="password", placeholder="Crea una contraseña segura")
-            pwd2 = st.text_input("Confirmar contraseña", type="password", placeholder="Repite la contraseña")
-            crear = st.form_submit_button("Crear administrador")
-            if crear:
-                if not username or not pwd1:
-                    st.error("Usuario y contraseña son obligatorios.")
-                elif pwd1 != pwd2:
-                    st.error("Las contraseñas no coinciden.")
+        try:
+            usuarios_existentes = db.listar_usuarios()
+        except Exception as e:
+            st.error(f"No se pudo conectar con la base de usuarios: {e}")
+            st.info("Verifica la conexión con Supabase y que esté instalada la migración de usuarios.")
+            st.markdown("</div>", unsafe_allow_html=True)
+            return False
+
+        if not usuarios_existentes:
+            st.info("Configuración inicial: crea la cuenta del Administrador principal.")
+            with st.form("form_primer_admin"):
+                username = st.text_input("Usuario", placeholder="Crea tu nombre de usuario")
+                nombre = st.text_input("Nombre completo", placeholder="Nombre del administrador")
+                pwd1 = st.text_input("Contraseña", type="password", placeholder="Crea una contraseña segura")
+                pwd2 = st.text_input("Confirmar contraseña", type="password", placeholder="Repite la contraseña")
+                crear = st.form_submit_button("Crear administrador")
+                if crear:
+                    if not username or not pwd1:
+                        st.error("Usuario y contraseña son obligatorios.")
+                    elif pwd1 != pwd2:
+                        st.error("Las contraseñas no coinciden.")
+                    else:
+                        try:
+                            db.crear_usuario({
+                                "username": username.strip().lower(),
+                                "nombre": nombre or None,
+                                "password_hash": hash_password(pwd1),
+                                "rol": "Administrador",
+                                "activo": True,
+                            })
+                            st.success("Administrador creado. Ahora inicia sesión.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al crear el usuario: {e}")
+            st.markdown('<div class="login-authorized">Acceso exclusivo para personal autorizado.</div></div>', unsafe_allow_html=True)
+            return False
+
+        with st.form("form_login", clear_on_submit=False):
+            username = st.text_input("Usuario", placeholder="Ingrese su usuario")
+            pwd = st.text_input("Contraseña", type="password", placeholder="Ingrese su contraseña")
+            ingresar = st.form_submit_button("Ingresar al sistema", use_container_width=True)
+            if ingresar:
+                if not username.strip() or not pwd:
+                    st.warning("Ingresa tu usuario y contraseña.")
                 else:
-                    try:
-                        db.crear_usuario({
-                            "username": username.strip().lower(),
-                            "nombre": nombre or None,
-                            "password_hash": hash_password(pwd1),
-                            "rol": "Administrador",
-                            "activo": True,
-                        })
-                        st.success("Administrador creado. Ahora inicia sesión.")
+                    usuario = db.obtener_usuario_por_username(username.strip().lower())
+                    if usuario and usuario.get("activo") and verificar_password(pwd, usuario["password_hash"]):
+                        st.session_state["usuario"] = usuario
                         st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al crear el usuario: {e}")
-        st.markdown('<div class="login-foot">Residencial Equise · Administración residencial</div>', unsafe_allow_html=True)
-        return False
+                    else:
+                        st.error("Usuario o contraseña incorrectos, o el usuario está desactivado.")
 
-    with st.form("form_login", clear_on_submit=False):
-        username = st.text_input(
-            "Usuario", placeholder="Ingresa tu usuario",
-            autocomplete="username"
+        with st.expander("¿Problemas para ingresar?"):
+            st.caption("Usa esta opción únicamente si eres administrador y tienes la clave general.")
+            with st.form("form_login_general"):
+                pwd_general = st.text_input("Clave general de administrador", type="password")
+                ingresar_general = st.form_submit_button("Ingresar como administrador", use_container_width=True)
+                if ingresar_general:
+                    if pwd_general and pwd_general == st.secrets.get("APP_PASSWORD", ""):
+                        st.session_state["usuario"] = {
+                            "username": "admin", "nombre": "Administrador", "rol": "Administrador"
+                        }
+                        st.rerun()
+                    else:
+                        st.error("Clave incorrecta.")
+
+        st.markdown(
+            '<div class="login-authorized">Acceso exclusivo para personal autorizado · Residencial Equise</div></div>',
+            unsafe_allow_html=True,
         )
-        pwd = st.text_input(
-            "Contraseña", type="password", placeholder="Ingresa tu contraseña",
-            autocomplete="current-password"
-        )
-        ingresar = st.form_submit_button("Ingresar al sistema", use_container_width=True)
-        if ingresar:
-            if not username.strip() or not pwd:
-                st.warning("Ingresa tu usuario y contraseña.")
-            else:
-                usuario = db.obtener_usuario_por_username(username.strip().lower())
-                if usuario and usuario.get("activo") and verificar_password(pwd, usuario["password_hash"]):
-                    st.session_state["usuario"] = usuario
-                    st.rerun()
-                else:
-                    st.error("Usuario o contraseña incorrectos, o el usuario está desactivado.")
-
-    with st.expander("¿Problemas para ingresar?"):
-        st.caption("Usa esta opción únicamente si eres administrador y tienes la clave general.")
-        with st.form("form_login_general"):
-            pwd_general = st.text_input("Clave general de administrador", type="password")
-            ingresar_general = st.form_submit_button("Ingresar como administrador", use_container_width=True)
-            if ingresar_general:
-                if pwd_general and pwd_general == st.secrets.get("APP_PASSWORD", ""):
-                    st.session_state["usuario"] = {
-                        "username": "admin", "nombre": "Administrador", "rol": "Administrador"
-                    }
-                    st.rerun()
-                else:
-                    st.error("Clave incorrecta.")
-
-    st.markdown(
-        '<div class="login-foot">Acceso exclusivo para personal autorizado · Residencial Equise</div>',
-        unsafe_allow_html=True,
-    )
     return False
 
 

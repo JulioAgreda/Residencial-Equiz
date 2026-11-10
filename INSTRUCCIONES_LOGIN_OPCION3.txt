@@ -1,0 +1,27 @@
+EQUISE - LOGIN OPCION 3: ADMINISTRACION INMOBILIARIA MODERNA
+
+Archivos:
+- app.py actualizado.
+- assets/logo_equise_horizontal.png (logo institucional).
+
+Diseño:
+- Panel lateral azul petróleo con funciones principales del sistema.
+- Zona de acceso clara con logo, nombre institucional y formulario.
+- Paleta azul petróleo, azul marino, blanco y acentos dorados.
+- Diseño adaptable: en pantallas pequeñas el panel se compacta y el formulario ocupa el ancho disponible.
+
+Se conserva:
+- Autenticación por usuario y contraseña.
+- Creación inicial del administrador si no existen usuarios.
+- Acceso de administrador con clave general.
+- Roles y conexión a Supabase.
+- Corrección de fechas operativas con hora de Bolivia mediante recibo.hoy_bolivia().
+
+Instalación:
+1. Respaldar el app.py actual.
+2. Reemplazarlo por el app.py incluido.
+3. Incorporar la carpeta assets manteniendo la ruta assets/logo_equise_horizontal.png.
+4. Reiniciar o volver a desplegar Streamlit.
+5. Probar en computadora y celular.
+
+No requiere migraciones SQL ni cambios en Supabase.
