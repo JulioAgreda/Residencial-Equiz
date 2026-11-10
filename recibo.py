@@ -274,8 +274,10 @@ def generar_recibo_png(datos: dict) -> bytes:
 
     # Cabecera institucional con corte diagonal azul y filete dorado.
     d.rectangle((0, 0, W, 300), fill="white")
-    d.polygon([(650, 0), (W, 0), (W, 300), (430, 300)], fill=navy)
-    d.polygon([(650, 0), (668, 0), (448, 300), (430, 300)], fill=gold)
+    # Mantener una zona blanca suficiente para el logo horizontal completo.
+    # La diagonal comienza y termina a la derecha del logotipo; no lo atraviesa.
+    d.polygon([(830, 0), (W, 0), (W, 300), (690, 300)], fill=navy)
+    d.polygon([(812, 0), (830, 0), (708, 300), (690, 300)], fill=gold)
     logo = _logo_horizontal()
     if logo:
         logo.thumbnail((535, 205), Image.Resampling.LANCZOS)
@@ -293,11 +295,11 @@ def generar_recibo_png(datos: dict) -> bytes:
     else:
         titulo = "ALQUILER"
     # Título blanco en bloque derecho, centrado.
-    d.text((760, 86), "RECIBO DE PAGO", font=f_kicker, fill="white", anchor="mm")
-    title_lines = _texto_envuelto(d, titulo, f_title, 365)
+    d.text((950, 86), "RECIBO DE PAGO", font=f_kicker, fill="white", anchor="mm")
+    title_lines = _texto_envuelto(d, titulo, f_title, 280)
     yy = 142
     for line in title_lines[:2]:
-        d.text((815, yy), line, font=f_title, fill="white", anchor="mm")
+        d.text((950, yy), line, font=f_title, fill="white", anchor="mm")
         yy += 49
     d.line((margin, 299, W-margin, 299), fill=gold, width=4)
 
@@ -322,9 +324,9 @@ def generar_recibo_png(datos: dict) -> bytes:
         yy += 78
 
     # Datos del pago.
-    y = 700
+    y = 680
     d.line((margin, y, W-margin, y), fill=_GRIS, width=3)
-    y += 34
+    y += 26
     pagos = [("FECHA DE PAGO", datos.get("fecha_pago", "—")),
              ("MÉTODO DE PAGO", datos.get("metodo_pago", "—")),
              ("RECIBIDO POR", datos.get("recibido_por", "—"))]
@@ -335,7 +337,7 @@ def generar_recibo_png(datos: dict) -> bytes:
         lines = _texto_envuelto(d, value, f_value, 590)
         for j, line in enumerate(lines[:2]):
             d.text((margin+440, y+j*31), line, font=f_value, fill=ink)
-        y += max(68, len(lines[:2])*34+24)
+        y += max(60, len(lines[:2])*34+18)
     d.line((margin, y, W-margin, y), fill=_GRIS, width=3)
     y += 30
 
@@ -374,13 +376,16 @@ def generar_recibo_png(datos: dict) -> bytes:
             y += 27
 
     # Pie de página institucional.
-    footer_y = H-105
+    footer_y = y + 22
     d.line((margin, footer_y, W-margin, footer_y), fill=gold, width=3)
     d.text((margin+12, footer_y+25), str(datos.get("recibido_por", "Administración")), font=f_small, fill=ink)
     d.text((W//2, footer_y+25), "ADMINISTRACIÓN", font=f_small_b, fill=navy, anchor="mm")
     d.text((W-margin-10, footer_y+25), str(datos.get("fecha_emision", "")), font=f_small, fill=ink, anchor="ra")
-    d.text((W//2, H-42), "¡Gracias por su pago!", font=_fuente(25, cursiva=True), fill=navy, anchor="mm")
+    d.text((W//2, footer_y+68), "¡Gracias por su pago!", font=_fuente(25, cursiva=True), fill=navy, anchor="mm")
 
+    # Recortar el lienzo al contenido real para evitar espacios blancos innecesarios.
+    alto_final = min(H, footer_y + 105)
+    img = img.crop((0, 0, W, alto_final))
     buffer = io.BytesIO()
     img.save(buffer, format="PNG", optimize=True)
     buffer.seek(0)

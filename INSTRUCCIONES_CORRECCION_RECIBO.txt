@@ -1,0 +1,21 @@
+CORRECCIÓN DE DISEÑO DE RECIBOS EQUISE
+
+Archivos incluidos:
+- recibo.py
+- assets/logo_equise_horizontal.png
+
+Instalación:
+1. Realizar una copia de respaldo del recibo.py actual.
+2. Reemplazar recibo.py por el incluido en este paquete.
+3. Mantener el logo horizontal en assets/logo_equise_horizontal.png.
+4. Reiniciar Streamlit.
+
+Correcciones:
+- La diagonal azul/dorada se desplazó a la derecha para no cortar el logo horizontal.
+- El título RECIBO DE PAGO / ALQUILER quedó dentro del panel azul.
+- Se redujeron espacios verticales innecesarios entre identificación, datos del pago y monto.
+- El pie se posiciona después del contenido real y el PNG se recorta al contenido, evitando un vacío excesivo.
+- Se conserva el estilo institucional azul marino, dorado y celeste.
+- Se mantiene el módulo de estado de cuenta incorporado en recibo.py.
+
+No se modifican datos ni tablas de Supabase. No requiere migración SQL.
