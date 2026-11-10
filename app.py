@@ -24,6 +24,7 @@ import inventario_reportes
 import moras
 import servicios_basicos
 import recibo
+# Las fechas operativas deben usar recibo.hoy_bolivia() (UTC-4), no date.today() del servidor.
 import rendicion
 import reportes
 import deudas
@@ -842,7 +843,7 @@ def parse_fecha(valor):
 
 def estado_contrato_alerta(apt):
     """Devuelve (nivel, texto) para contratos vencidos o por vencer en los próximos 30 días. None si no aplica."""
-    hoy = date.today()
+    hoy = recibo.hoy_bolivia()
     fecha_fin = parse_fecha(apt.get("contrato_fecha_fin"))
     estado = apt.get("estado_contrato") or "Sin Contrato"
 
@@ -859,7 +860,7 @@ def estado_contrato_alerta(apt):
 
 def ultimos_n_meses(n=12):
     """Lista de (anio, mes_num) de los últimos n meses, terminando en el mes actual, en orden cronológico."""
-    hoy = date.today()
+    hoy = recibo.hoy_bolivia()
     resultado = []
     for i in range(n - 1, -1, -1):
         offset = hoy.month - 1 - i
@@ -982,9 +983,9 @@ def pagina_consumo(servicio):
 
         col1, col2 = st.columns(2)
         with col1:
-            mes = st.selectbox("Mes", MESES, index=date.today().month - 1, key=f"{k}_mes")
+            mes = st.selectbox("Mes", MESES, index=recibo.hoy_bolivia().month - 1, key=f"{k}_mes")
         with col2:
-            anio = st.number_input("Año", min_value=2000, max_value=2100, value=date.today().year, step=1,
+            anio = st.number_input("Año", min_value=2000, max_value=2100, value=recibo.hoy_bolivia().year, step=1,
                                    key=f"{k}_anio")
 
         periodo = db.obtener_periodo_servicio(servicio, apt["id"], mes, int(anio))
@@ -1104,7 +1105,7 @@ def pagina_consumo(servicio):
             st.subheader("➕ Registrar un nuevo abono")
             with st.form(f"form_pago_{k}", clear_on_submit=True):
                 monto_pago = st.number_input("Monto abonado (Bs)", min_value=0.0, step=10.0)
-                fecha_pago = st.date_input("Fecha del abono", value=date.today(), format="DD/MM/YYYY")
+                fecha_pago = st.date_input("Fecha del abono", value=recibo.hoy_bolivia(), format="DD/MM/YYYY")
                 metodo_pago = st.selectbox("Método de pago", METODOS_ABONO, key=f"metodo_{k}")
                 observacion = st.text_input("Observación (opcional)", key=f"obs_{k}")
 
@@ -1146,7 +1147,7 @@ def pagina_consumo(servicio):
             )
         with col2:
             filtro_anio = st.selectbox("Filtrar por año",
-                                       ["Todos"] + list(range(date.today().year - 2, date.today().year + 2)),
+                                       ["Todos"] + list(range(recibo.hoy_bolivia().year - 2, recibo.hoy_bolivia().year + 2)),
                                        key=f"{k}_hist_anio")
         with col3:
             filtro_mes = st.selectbox("Filtrar por mes", ["Todos"] + MESES, key=f"{k}_hist_mes")
@@ -1909,10 +1910,10 @@ if pagina == "📊 Dashboard":
 
     col1, col2 = st.columns(2)
     with col1:
-        anio_sel = st.selectbox("Año", options=list(range(date.today().year - 2, date.today().year + 2)),
+        anio_sel = st.selectbox("Año", options=list(range(recibo.hoy_bolivia().year - 2, recibo.hoy_bolivia().year + 2)),
                                  index=2)
     with col2:
-        mes_sel = st.selectbox("Mes", options=MESES, index=date.today().month - 1)
+        mes_sel = st.selectbox("Mes", options=MESES, index=recibo.hoy_bolivia().month - 1)
 
     periodos = cargar_periodos(anio=anio_sel, mes=mes_sel)
 
@@ -1952,10 +1953,10 @@ if pagina == "📊 Dashboard":
     st.subheader("🔝 Mayor consumo (Top 5)")
     colsel1, colsel2 = st.columns(2)
     with colsel1:
-        anio_consumo = st.selectbox("Año ", options=list(range(date.today().year - 2, date.today().year + 2)),
+        anio_consumo = st.selectbox("Año ", options=list(range(recibo.hoy_bolivia().year - 2, recibo.hoy_bolivia().year + 2)),
                                      index=2, key="anio_consumo")
     with colsel2:
-        mes_consumo = st.selectbox("Mes ", options=MESES, index=date.today().month - 1, key="mes_consumo")
+        mes_consumo = st.selectbox("Mes ", options=MESES, index=recibo.hoy_bolivia().month - 1, key="mes_consumo")
 
     periodos_elec_sel = cargar_periodos_electricidad(anio=anio_consumo, mes=mes_consumo)
     periodos_agua_sel = cargar_periodos_agua(anio=anio_consumo, mes=mes_consumo)
@@ -2234,8 +2235,7 @@ elif pagina == "🏠 Apartamentos":
                         payload["aire_acondicionado"] = bool(tiene_aire)
                     if apt_con_propiedad:
                         payload["aire_acondicionado_propiedad"] = aire_acondicionado.propiedad_a_guardar(tiene_aire, propiedad_aire)
-                    error_aire = (aire_acondicionado.validar(tiene_aire, propiedad_aire if tiene_aire else None)
-                                  if apt_con_propiedad else None)
+                    error_aire = aire_acondicionado.validar(tiene_aire, propiedad_aire) if apt_con_propiedad else None
                     if error_aire:
                         st.error(error_aire)
                     else:
@@ -2274,10 +2274,10 @@ elif pagina == "🏠 Apartamentos":
                 if fecha_pactada:
                     fpd = parse_fecha(fecha_pactada)
                     if fpd and saldo > 0:
-                        if date.today() > fpd:
+                        if recibo.hoy_bolivia() > fpd:
                             st.error(f"El plazo pactado de devolución venció el {fpd.strftime('%d/%m/%Y')}. Saldo pendiente: {simbolo} {saldo:,.2f}.")
-                        elif (fpd - date.today()).days <= 30:
-                            st.warning(f"La devolución está prevista para el {fpd.strftime('%d/%m/%Y')}; faltan {(fpd-date.today()).days} días.")
+                        elif (fpd - recibo.hoy_bolivia()).days <= 30:
+                            st.warning(f"La devolución está prevista para el {fpd.strftime('%d/%m/%Y')}; faltan {(fpd-recibo.hoy_bolivia()).days} días.")
                         else:
                             st.info(f"Fecha pactada de devolución: {fpd.strftime('%d/%m/%Y')}.")
                 if apt.get("anticretico_condiciones"):
@@ -2296,7 +2296,7 @@ elif pagina == "🏠 Apartamentos":
                         st.markdown("**Registrar devolución de capital**")
                         rd1, rd2 = st.columns(2)
                         with rd1:
-                            fecha_dev = st.date_input("Fecha de devolución", value=date.today(), format="DD/MM/YYYY")
+                            fecha_dev = st.date_input("Fecha de devolución", value=recibo.hoy_bolivia(), format="DD/MM/YYYY")
                             monto_dev = st.number_input("Monto devuelto", min_value=0.01, max_value=float(saldo),
                                                         value=min(float(saldo), 100.0), step=100.0)
                         with rd2:
@@ -2359,7 +2359,7 @@ elif pagina == "🏠 Apartamentos":
                         with st.form(f"form_entrega_anticretico_{apt['id']}"):
                             ea1, ea2 = st.columns(2)
                             with ea1:
-                                fecha_entrega_ac = st.date_input("Fecha real de recepción del dinero", value=date.today(), format="DD/MM/YYYY", key=f"fecha_entrega_ac_{apt['id']}")
+                                fecha_entrega_ac = st.date_input("Fecha real de recepción del dinero", value=recibo.hoy_bolivia(), format="DD/MM/YYYY", key=f"fecha_entrega_ac_{apt['id']}")
                                 monto_entrega_ac = st.number_input("Monto recibido", min_value=0.01, max_value=float(saldo_recibir_ac), value=min(float(saldo_recibir_ac), 100.0), step=100.0, key=f"monto_entrega_ac_{apt['id']}")
                                 etapa_entrega_ac = st.selectbox("Momento respecto a la firma", ["Antes de firmar el contrato", "Después de firmar el contrato"], key=f"etapa_entrega_ac_{apt['id']}")
                             with ea2:
@@ -2405,9 +2405,8 @@ elif pagina == "🏠 Apartamentos":
                                 except Exception as exc:
                                     st.error(f"No se pudo registrar la entrega: {exc}")
 
-                st.divider()
-                st.markdown("**📋 Historial de entregas y recibos**")
                 if entregas_ac:
+                    st.markdown("**Historial de entregas y recibos**")
                     filas_entregas_ac = []
                     for x in entregas_ac:
                         filas_entregas_ac.append({
@@ -2415,14 +2414,11 @@ elif pagina == "🏠 Apartamentos":
                             "Fecha real": parse_fecha(x.get("fecha_entrega")),
                             "Etapa": "Antes de firma" if x.get("etapa") == "antes_firma" else "Después de firma",
                             "Entregante": x.get("entregante") or "—",
-                            "Concepto": x.get("concepto") or "—",
                             "Monto": f'{x.get("moneda") or moneda_ac} {float(x.get("monto") or 0):,.2f}',
                             "Medio": x.get("medio_pago") or "—",
-                            "Referencia": x.get("referencia") or "—",
                             "Estado": "VIGENTE" if (x.get("estado") or "vigente") == "vigente" else "ANULADO",
                         })
                     st.dataframe(pd.DataFrame(filas_entregas_ac), use_container_width=True, hide_index=True)
-                    st.caption(f"{len(entregas_ac)} recibo(s): {len(entregas_vigentes_ac)} vigente(s) y {len(entregas_ac) - len(entregas_vigentes_ac)} anulado(s).")
                     datos_estado_ac = {
                         "apartamento": recibo.formatear_apartamento(apt),
                         "titular": apt.get("inquilino_nombre") or "—",
@@ -2487,8 +2483,6 @@ elif pagina == "🏠 Apartamentos":
                                             st.error(f"No se pudo anular el recibo: {exc}")
                             if estado_x == "anulado":
                                 st.error(f"ANULADO · Motivo: {x.get('motivo_anulacion') or 'No especificado'} · Por: {x.get('anulado_por') or '—'}")
-                else:
-                    st.info("Todavía no hay entregas registradas para este apartamento. Cuando registres una, aparecerá aquí su recibo y detalle.")
 
     with tab_salida:
         st.markdown("**Registrar que un inquilino se fue**")
@@ -2576,7 +2570,7 @@ elif pagina == "🏠 Apartamentos":
                     with g1:
                         monto_g = st.number_input("Monto de garantía recibido (Bs)", min_value=0.01,
                             value=max(monto_sugerido, 0.01), step=50.0)
-                        fecha_g = st.date_input("Fecha de recepción", value=date.today(), format="DD/MM/YYYY")
+                        fecha_g = st.date_input("Fecha de recepción", value=recibo.hoy_bolivia(), format="DD/MM/YYYY")
                     with g2:
                         medio_g = st.selectbox("Medio de recepción", ["Efectivo", "Transferencia bancaria", "QR", "Depósito", "Otro"])
                         recibo_g = st.text_input("N.º de recibo o comprobante")
@@ -2668,7 +2662,7 @@ elif pagina == "🏠 Apartamentos":
                                 st.markdown("**Registrar desperfecto o daño**")
                                 dg1, dg2 = st.columns(2)
                                 with dg1:
-                                    fecha_dano = st.date_input("Fecha de inspección/cotización", value=date.today(), format="DD/MM/YYYY", key=f"fd_{g['id']}")
+                                    fecha_dano = st.date_input("Fecha de inspección/cotización", value=recibo.hoy_bolivia(), format="DD/MM/YYYY", key=f"fd_{g['id']}")
                                     descripcion_dano = st.text_input("Descripción del daño", key=f"dd_{g['id']}")
                                     proveedor_dano = st.text_input("Proveedor o responsable de cotización", key=f"pd_{g['id']}")
                                 with dg2:
@@ -2699,7 +2693,7 @@ elif pagina == "🏠 Apartamentos":
                                         st.rerun()
                             if g.get("estado") == "Vigente":
                                 if st.button("Marcar inquilino retirado e iniciar liquidación", key=f"retirar_g_{g['id']}"):
-                                    db.actualizar_garantia_alquiler(g["id"], {"estado":"Pendiente de liquidación", "fecha_salida":str(date.today())})
+                                    db.actualizar_garantia_alquiler(g["id"], {"estado":"Pendiente de liquidación", "fecha_salida":str(recibo.hoy_bolivia())})
                                     st.rerun()
                         if g.get("estado") == "Pendiente de liquidación" and saldo <= 0.001 and total_devuelto <= 0.001:
                             if st.button("Cerrar liquidación: garantía retenida por daños documentados", key=f"cerrar_garantia_danos_{g['id']}"):
@@ -2711,7 +2705,7 @@ elif pagina == "🏠 Apartamentos":
                                 st.markdown("**Registrar devolución de garantía**")
                                 dv1, dv2 = st.columns(2)
                                 with dv1:
-                                    fecha_devol_g = st.date_input("Fecha de devolución", value=date.today(), format="DD/MM/YYYY", key=f"fdevg_{g['id']}")
+                                    fecha_devol_g = st.date_input("Fecha de devolución", value=recibo.hoy_bolivia(), format="DD/MM/YYYY", key=f"fdevg_{g['id']}")
                                     monto_devol_g = st.number_input("Monto a devolver (Bs)", min_value=0.01, max_value=float(saldo),
                                         value=float(saldo), step=50.0, key=f"mdevg_{g['id']}")
                                 with dv2:
@@ -2847,8 +2841,7 @@ elif pagina == "🏠 Apartamentos":
                     if apt_con_propiedad:
                         payload["aire_acondicionado_propiedad"] = aire_acondicionado.propiedad_a_guardar(
                             tiene_aire_nuevo, propiedad_aire_nuevo)
-                    error_aire = (aire_acondicionado.validar(
-                                      tiene_aire_nuevo, propiedad_aire_nuevo if tiene_aire_nuevo else None)
+                    error_aire = (aire_acondicionado.validar(tiene_aire_nuevo, propiedad_aire_nuevo)
                                   if apt_con_propiedad else None)
                     if error_aire:
                         st.error(error_aire)
@@ -2946,9 +2939,9 @@ elif pagina == "💳 Gestión de cobros":
             format_func=lambda i: codigos_cobros[i], key="cobros_apartamento_idx"
         )
     with c_periodo:
-        mes_cobros = st.selectbox("Mes", MESES, index=date.today().month - 1, key="cobros_mes")
+        mes_cobros = st.selectbox("Mes", MESES, index=recibo.hoy_bolivia().month - 1, key="cobros_mes")
         anio_cobros = st.number_input(
-            "Año", min_value=2000, max_value=2100, value=date.today().year,
+            "Año", min_value=2000, max_value=2100, value=recibo.hoy_bolivia().year,
             step=1, key="cobros_anio"
         )
     with c_nav:
@@ -3089,8 +3082,8 @@ elif pagina == "💳 Gestión de cobros":
                         key=f"cobros_alq_monto_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
                     )
                     fecha_alq_nuevo = st.date_input(
-                        "Fecha de pago", value=date.today(), format="DD/MM/YYYY",
-                        key=f"cobros_alq_fecha_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                        "Fecha de pago", value=recibo.hoy_bolivia(), format="DD/MM/YYYY",
+                        key=f"cobros_alq_fecha_bo_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
                     )
                 with c2:
                     metodo_alq_nuevo = st.selectbox(
@@ -3279,8 +3272,8 @@ elif pagina == "💳 Gestión de cobros":
                     key=f"cobros_{servicio}_monto_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
                 )
                 fecha_serv_nuevo = st.date_input(
-                    "Fecha de pago", value=date.today(), format="DD/MM/YYYY",
-                    key=f"cobros_{servicio}_fecha_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
+                    "Fecha de pago", value=recibo.hoy_bolivia(), format="DD/MM/YYYY",
+                    key=f"cobros_{servicio}_fecha_bo_{apt_cobros['id']}_{mes_cobros}_{anio_cobros}"
                 )
             with c2:
                 metodo_serv_nuevo = st.selectbox(
@@ -3328,7 +3321,7 @@ elif pagina == "💳 Gestión de cobros":
         hcol1, hcol2 = st.columns(2)
         with hcol1:
             filtro_hist_anio = st.selectbox(
-                "Año del historial", ["Todos"] + list(range(date.today().year - 5, date.today().year + 2)),
+                "Año del historial", ["Todos"] + list(range(recibo.hoy_bolivia().year - 5, recibo.hoy_bolivia().year + 2)),
                 key=f"cobros_hist_anio_{apt_cobros['id']}"
             )
         with hcol2:
@@ -3406,9 +3399,9 @@ elif pagina == "💵 Pagos de Alquiler":
 
         col1, col2 = st.columns(2)
         with col1:
-            mes = st.selectbox("Mes", MESES, index=date.today().month - 1)
+            mes = st.selectbox("Mes", MESES, index=recibo.hoy_bolivia().month - 1)
         with col2:
-            anio = st.number_input("Año", min_value=2000, max_value=2100, value=date.today().year, step=1)
+            anio = st.number_input("Año", min_value=2000, max_value=2100, value=recibo.hoy_bolivia().year, step=1)
 
         # obtiene (o prepara) el periodo de este apartamento/mes/año, con sus abonos ya hechos
         periodo = db.obtener_periodo(apt["id"], mes, int(anio))
@@ -3444,7 +3437,7 @@ elif pagina == "💵 Pagos de Alquiler":
         st.subheader("➕ Registrar un nuevo abono")
         with st.form("form_pago", clear_on_submit=True):
             monto_pago = st.number_input("Monto abonado (Bs)", min_value=0.0, step=50.0)
-            fecha_pago = st.date_input("Fecha del abono", value=date.today(), format="DD/MM/YYYY")
+            fecha_pago = st.date_input("Fecha del abono", value=recibo.hoy_bolivia(), format="DD/MM/YYYY")
             metodo_pago = st.selectbox("Método de pago", ["Efectivo", "Transferencia", "QR", "Otro"])
             observacion = st.text_input("Observación (opcional)")
 
@@ -3532,7 +3525,7 @@ elif pagina == "💵 Pagos de Alquiler":
             )
         with col2:
             filtro_anio = st.selectbox("Filtrar por año",
-                                        ["Todos"] + list(range(date.today().year - 2, date.today().year + 2)))
+                                        ["Todos"] + list(range(recibo.hoy_bolivia().year - 2, recibo.hoy_bolivia().year + 2)))
         with col3:
             filtro_mes = st.selectbox("Filtrar por mes", ["Todos"] + MESES)
 
@@ -5955,7 +5948,7 @@ elif pagina == "✅ Pendientes":
                 vencida = False
                 if p.get("fecha_limite") and p["estado"] != "Terminado":
                     fl = parse_fecha(p["fecha_limite"])
-                    vencida = bool(fl and fl < date.today())
+                    vencida = bool(fl and fl < recibo.hoy_bolivia())
 
                 titulo_linea = (f'{COLOR_PRIORIDAD.get(p["prioridad"], "")} **{p["titulo"]}**  '
                                  f'{ICONO_ESTADO.get(p["estado"], "")} _{p["estado"]}_'
@@ -6107,7 +6100,7 @@ elif pagina == "🗒️ Reuniones":
 
         with tab_nueva:
             with st.form("form_nueva_reunion", clear_on_submit=True):
-                fecha_reunion = st.date_input("Fecha de la reunión", value=date.today(), format="DD/MM/YYYY")
+                fecha_reunion = st.date_input("Fecha de la reunión", value=recibo.hoy_bolivia(), format="DD/MM/YYYY")
                 puntos_tratados = st.text_area(
                     "Puntos tratados", height=120,
                     placeholder="Ej.\n- Estado de cobranza del mes\n- Mantenimiento del ascensor\n- Otros temas")
@@ -6388,7 +6381,7 @@ elif pagina == "💸 Egresos":
                 categorias,
                 key=f"v13_categoria_egreso_{clave_categoria}",
             )
-            fecha = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
+            fecha = st.date_input("Fecha", value=recibo.hoy_bolivia(), format="DD/MM/YYYY")
             monto = st.number_input("Monto (Bs)", min_value=0.0, step=10.0, format="%.2f")
             col1, col2 = st.columns(2)
             with col1:
@@ -6418,8 +6411,8 @@ elif pagina == "💸 Egresos":
                     except Exception as e:
                         st.error(f"No se pudo registrar el egreso: {e}")
     with tab_hist:
-        desde = st.date_input("Desde", value=date.today().replace(day=1), format="DD/MM/YYYY", key="v13_eg_desde")
-        hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY", key="v13_eg_hasta")
+        desde = st.date_input("Desde", value=recibo.hoy_bolivia().replace(day=1), format="DD/MM/YYYY", key="v13_eg_desde")
+        hasta = st.date_input("Hasta", value=recibo.hoy_bolivia(), format="DD/MM/YYYY", key="v13_eg_hasta")
         compras = db.listar_compras(fecha_desde=str(desde), fecha_hasta=str(hasta))
         pagos = db.listar_pagos_generales(fecha_desde=str(desde), fecha_hasta=str(hasta))
         filas = ([{"Fecha":x.get("fecha_compra"),"Tipo":"Compra","Categoría":x.get("categoria"),
@@ -6458,7 +6451,7 @@ elif pagina == "🧾 Compras":
         with st.form("form_nueva_compra", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                fecha_compra = st.date_input("Fecha de compra", value=date.today(), format="DD/MM/YYYY")
+                fecha_compra = st.date_input("Fecha de compra", value=recibo.hoy_bolivia(), format="DD/MM/YYYY")
                 categoria_sel = st.selectbox("Categoría / Rubro", CATEGORIAS_GASTO)
                 categoria_otro = st.text_input("Especificar categoría") if categoria_sel == "Otro" else ""
                 monto_total = st.number_input("Monto total (Bs)", min_value=0.0, step=10.0)
@@ -6511,10 +6504,10 @@ elif pagina == "🧾 Compras":
     with tab_historial:
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            filtro_desde = st.date_input("Desde", value=date.today().replace(day=1), format="DD/MM/YYYY",
+            filtro_desde = st.date_input("Desde", value=recibo.hoy_bolivia().replace(day=1), format="DD/MM/YYYY",
                                           key="compras_desde")
         with col2:
-            filtro_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY", key="compras_hasta")
+            filtro_hasta = st.date_input("Hasta", value=recibo.hoy_bolivia(), format="DD/MM/YYYY", key="compras_hasta")
         with col3:
             filtro_categoria = st.selectbox("Categoría", ["Todas"] + CATEGORIAS_GASTO, key="compras_cat")
         with col4:
@@ -6637,7 +6630,7 @@ elif pagina == "💳 Pagos":
         with st.form("form_nuevo_pago_general", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                fecha_pago = st.date_input("Fecha de pago", value=date.today(), format="DD/MM/YYYY")
+                fecha_pago = st.date_input("Fecha de pago", value=recibo.hoy_bolivia(), format="DD/MM/YYYY")
                 categoria_sel = st.selectbox("Categoría / Concepto", CATEGORIAS_PAGO)
                 categoria_otro = st.text_input("Especificar categoría") if categoria_sel == "Otro" else ""
                 monto = st.number_input("Monto pagado (Bs)", min_value=0.0, step=10.0)
@@ -6688,10 +6681,10 @@ elif pagina == "💳 Pagos":
     with tab_historial:
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            filtro_desde = st.date_input("Desde", value=date.today().replace(day=1), format="DD/MM/YYYY",
+            filtro_desde = st.date_input("Desde", value=recibo.hoy_bolivia().replace(day=1), format="DD/MM/YYYY",
                                           key="pagos_gen_desde")
         with col2:
-            filtro_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY", key="pagos_gen_hasta")
+            filtro_hasta = st.date_input("Hasta", value=recibo.hoy_bolivia(), format="DD/MM/YYYY", key="pagos_gen_hasta")
         with col3:
             filtro_categoria = st.selectbox("Categoría", ["Todas"] + CATEGORIAS_PAGO, key="pagos_gen_cat")
         with col4:
@@ -6806,7 +6799,7 @@ elif pagina == "💸 Ventas":
         with st.form("form_nueva_venta", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                fecha_venta = st.date_input("Fecha de venta", value=date.today(), format="DD/MM/YYYY")
+                fecha_venta = st.date_input("Fecha de venta", value=recibo.hoy_bolivia(), format="DD/MM/YYYY")
                 concepto_sel = st.selectbox("Concepto de ingreso", CONCEPTOS_VENTA)
                 concepto_otro = st.text_input("Especificar concepto") if concepto_sel == "Otro" else ""
                 monto = st.number_input("Monto recibido (Bs)", min_value=0.0, step=10.0)
@@ -6851,10 +6844,10 @@ elif pagina == "💸 Ventas":
     with tab_historial:
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            filtro_desde = st.date_input("Desde", value=date.today().replace(day=1), format="DD/MM/YYYY",
+            filtro_desde = st.date_input("Desde", value=recibo.hoy_bolivia().replace(day=1), format="DD/MM/YYYY",
                                           key="ventas_desde")
         with col2:
-            filtro_hasta = st.date_input("Hasta", value=date.today(), format="DD/MM/YYYY", key="ventas_hasta")
+            filtro_hasta = st.date_input("Hasta", value=recibo.hoy_bolivia(), format="DD/MM/YYYY", key="ventas_hasta")
         with col3:
             filtro_concepto = st.selectbox("Concepto", ["Todos"] + CONCEPTOS_VENTA, key="ventas_concepto")
         with col4:
