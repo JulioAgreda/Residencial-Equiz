@@ -1,47 +1,34 @@
-EQUISE — INTEGRACIÓN DEL MÓDULO ANTICRÉTICO Y RESTAURACIÓN DE DEVOLUCIONES
+EQUISE — FIX DEFINITIVO: FINANZAS / HISTORIAL DE COBROS
 
-OBJETIVO
-Corregir el error:
-  module 'db' has no attribute 'listar_devoluciones_anticretico'
+DIAGNÓSTICO DE LA PERSISTENCIA
+La captura nueva sigue mostrando el AttributeError en la llamada:
+recibo.construir_datos_recibo_cuenta_cobrar(...)
 
-Esta actualización integra las funciones de entregas parciales del capital anticrético
-con las funciones anteriores de garantías y devoluciones que ya utiliza la aplicación.
+Se comparó el módulo recibo.py original disponible en el proyecto con el módulo corregido:
+- El recibo.py original NO contiene construir_datos_recibo_cuenta_cobrar.
+- El recibo.py corregido SÍ contiene esa función y la prueba local genera PDF y PNG correctamente.
+Esto indica que Streamlit Cloud continúa ejecutando/publicando la versión antigua de recibo.py, o que el archivo corregido no fue reemplazado en la raíz del repositorio que despliega la app.
 
-ARCHIVOS DEL PAQUETE
-- app.py: aplicación con el módulo de entregas parciales.
-- db.py: capa de datos integrada. Conserva las funciones nuevas y restaura las funciones
-  anteriores de garantías, devoluciones de garantías y devoluciones de capital anticrético.
-- recibo.py: generador de recibos del módulo anticrético.
+ARCHIVO QUE SE DEBE ACTUALIZAR
+Reemplazar el archivo `recibo.py` de la RAÍZ del repositorio `residencial-equiz`, en el mismo nivel que `app.py`.
+No colocar el archivo dentro de una carpeta secundaria (por ejemplo `equise_cxc_fix/`).
 
-INSTALACIÓN
-1. Descarga una copia de seguridad de los archivos actuales del repositorio.
-2. Reemplaza app.py por el app.py de este paquete.
-3. Reemplaza db.py por el db.py de este paquete.
-4. Reemplaza recibo.py por el recibo.py de este paquete.
-5. Conserva los demás módulos y archivos actuales del proyecto; no los elimines ni reemplaces.
-6. Reinicia la aplicación en Streamlit.
+PASOS
+1. Abrir el repositorio GitHub conectado a Streamlit Cloud: `residencial-equiz`.
+2. En la raíz, abrir `recibo.py`.
+3. Reemplazar TODO su contenido por el `recibo.py` incluido en este paquete.
+4. Guardar y confirmar el cambio (commit) en la rama que Streamlit Cloud despliega.
+5. En Streamlit Cloud, abrir Manage app > Reboot app. Si el repositorio/commit no se actualizó, comprobar la rama configurada y hacer push del commit correcto.
+6. En los logs de arranque, confirmar que no hay error de importación. Abrir Finanzas > Historial de cobros y seleccionar el cobro.
 
-IMPORTANTE SOBRE SUPABASE
-- Esta actualización corrige la capa Python que ocasiona el error mostrado.
-- No requiere volver a ejecutar la migración SQL si la tabla entregas_anticretico y sus funciones RPC
-  ya fueron creadas correctamente en Supabase.
-- No elimina ni modifica registros de devoluciones existentes.
-- Las funciones de devoluciones siguen consultando la tabla devoluciones_anticretico y registrando
-  devoluciones en esa misma tabla, como en la versión anterior.
-- Las entregas recibidas del capital se mantienen en entregas_anticretico; no se mezclan con
-  devoluciones ni con alquileres.
+VERIFICACIÓN TÉCNICA
+La función requerida está definida en el archivo corregido. Ejecutar `python test_recibo_cxc.py` en un entorno con las dependencias del proyecto para validar el recibo de ejemplo.
 
-VALIDACIONES REALIZADAS
-- Compilación sintáctica de app.py, db.py y recibo.py: correcta.
-- Comprobación estática: todas las llamadas db.<función> realizadas por app.py tienen
-  una función correspondiente en db.py.
-- No se ha ejecutado una prueba contra el proyecto real de Supabase ni contra Streamlit Cloud.
+NO MODIFICAR
+- No modificar ni volver a registrar el cobro de Bs 1.000.
+- No ejecutar SQL.
+- No cambiar registros de Supabase.
+- No cambiar app.py: su llamada a la función es correcta y coincide con el nombre añadido en recibo.py.
 
-DESPUÉS DE ACTUALIZAR
-Abrir un apartamento con contrato anticrético y comprobar:
-1. Que carga el historial de devoluciones sin el error de atributo.
-2. Que muestra el capital devuelto y el saldo pendiente.
-3. Que permite registrar una devolución de prueba controlada (sin confirmar si no corresponde).
-4. Que la sección de entregas parciales carga su historial.
-
-No registrar movimientos ficticios en apartamentos reales para probar.
+IMPORTANTE
+Un archivo descargado o copiado a la carpeta local no cambia automáticamente el repositorio desplegado. El reemplazo debe quedar confirmado en GitHub en la raíz y en la rama que usa Streamlit Cloud.
