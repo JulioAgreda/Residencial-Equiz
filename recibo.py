@@ -278,7 +278,7 @@ def _lineas_titulo_encabezado(datos):
         return ["COBRO DE", "CUENTA"]
     titulo = titulo.replace("Recibo de Pago de ", "").replace("Recibo de pago de ", "")
     titulo = titulo.replace("Recibo de cobro de ", "").replace("Recibo de Cobro de ", "")
-    titulo = titulo.replace("Recibo de Pago", "PAGO").replace("Recibo de pago", "PAGO")
+    titulo = titulo.replace("Recibo de Pago", "PAGO").replace("Recibo de pago", "ALQUILER")
     titulo = titulo.strip().upper() or "PAGO"
     palabras = titulo.split()
     lineas, actual = [], ""
