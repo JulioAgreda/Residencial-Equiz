@@ -20,6 +20,7 @@ from reportlab.lib.pagesizes import A5, letter
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdfcanvas
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
 from PIL import Image, ImageDraw, ImageFont
 
@@ -28,7 +29,12 @@ from PIL import Image, ImageDraw, ImageFont
 _ZONA_BOLIVIA = timezone(timedelta(hours=-4))
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
-LOGO_PATH = os.path.join(_DIR, "assets", "logo_equise.png")
+LOGO_PATH = os.path.join(_DIR, "assets", "logo_equise_horizontal.png")
+LOGO_FALLBACK_PATH = os.path.join(_DIR, "assets", "logo_equise.png")
+_AZUL = "#102F50"
+_DORADO = "#C99A3B"
+_AZUL_CLARO = "#EDF3F8"
+_GRIS = "#D6E0E8"
 NOMBRE_RESIDENCIAL = "Residencial Equise"
 
 _COLOR_ACENTO = (46, 125, 50)      # verde, para PNG (RGB)
@@ -481,13 +487,14 @@ MAX_FILAS_REPORTE = 12   # filas por tabla; las deudas siempre se muestran compl
 
 @lru_cache(maxsize=1)
 def _logo_liviano_bytes():
-    """Logo reducido a 200 px (el original pesa ~190 KB y se incrustaría completo en cada PDF).
-    Se guardan los bytes y no un ImageReader: reportlab (Platypus) solo acepta ruta o archivo."""
-    logo = Image.open(LOGO_PATH).convert("RGBA")
-    logo.thumbnail((200, 200))
+    """Carga el logo horizontal institucional y lo reduce para incrustarlo en PDF."""
+    ruta = LOGO_PATH if os.path.exists(LOGO_PATH) else LOGO_FALLBACK_PATH
+    logo = Image.open(ruta).convert("RGBA")
+    logo.thumbnail((900, 300), Image.Resampling.LANCZOS)
     buf = io.BytesIO()
     logo.save(buf, format="PNG")
     return buf.getvalue()
+
 
 _COLOR_DEUDA = (183, 28, 28)          # rojo (RGB, PNG)
 _COLOR_DEUDA_PDF = "#B71C1C"
@@ -569,8 +576,8 @@ def generar_reporte_inquilino_pdf(datos: dict) -> bytes:
     n_total = len(datos["filas_alquiler"]) + len(datos["filas_electricidad"])
     pad_fila, tam_fila = (3, 8.5) if n_total <= 14 else ((1.8, 8) if n_total <= 19 else (1.0, 7.5))
     base = getSampleStyleSheet()["Normal"]
-    st_titulo = ParagraphStyle("t", parent=base, fontName="Helvetica-Bold", fontSize=15, leading=18)
-    st_sub = ParagraphStyle("s", parent=base, fontSize=9, leading=12, textColor=colors.Color(.33, .33, .33))
+    st_titulo = ParagraphStyle("t", parent=base, fontName="Helvetica-Bold", fontSize=14, leading=17, textColor=colors.white)
+    st_sub = ParagraphStyle("s", parent=base, fontSize=8.5, leading=11, textColor=colors.white)
     st_chico = ParagraphStyle("c", parent=base, fontSize=8, leading=10)
     st_nota = ParagraphStyle("n", parent=base, fontName="Helvetica-Oblique", fontSize=7.5, leading=10,
                               textColor=colors.Color(.33, .33, .33))
@@ -578,18 +585,30 @@ def generar_reporte_inquilino_pdf(datos: dict) -> bytes:
                                  spaceBefore=8 if n_total <= 19 else 3, spaceAfter=4 if n_total <= 19 else 2)
     story = []
 
-    # ---------- Encabezado: logo y título lado a lado, como el recibo ----------
+    # ---------- Encabezado institucional aprobado: logo horizontal + bloque azul y línea dorada ----------
     logo = ""
-    if os.path.exists(LOGO_PATH):
+    ruta_logo = LOGO_PATH if os.path.exists(LOGO_PATH) else LOGO_FALLBACK_PATH
+    if os.path.exists(ruta_logo):
         try:
-            logo = RLImage(io.BytesIO(_logo_liviano_bytes()), width=16 * mm, height=16 * mm)
+            logo = RLImage(io.BytesIO(_logo_liviano_bytes()), width=55 * mm, height=18.3 * mm)
         except Exception:
             logo = ""
-    cab = Table([[logo, [Paragraph(NOMBRE_RESIDENCIAL, st_titulo),
-                         Paragraph("Estado de Cuenta del Inquilino", st_sub)]]],
-                colWidths=[20 * mm, ancho_util - 20 * mm])
-    cab.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
-    story += [cab, Spacer(1, 3), HRFlowable(width="100%", thickness=0.6, color=colors.black), Spacer(1, 4)]
+    bloque_titulo = Table([[Paragraph("ESTADO DE CUENTA", st_titulo),
+                            Paragraph("RESUMEN DE CUENTA DEL INQUILINO", st_sub)]],
+                          colWidths=[ancho_util - 59 * mm])
+    bloque_titulo.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(_AZUL)),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10), ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 8), ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    cab = Table([[logo, bloque_titulo]], colWidths=[59 * mm, ancho_util - 59 * mm], rowHeights=[22 * mm])
+    cab.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0), ("LINEBELOW", (0, 0), (-1, -1), 2, colors.HexColor(_DORADO)),
+    ]))
+    story += [cab, Spacer(1, 7)]
 
     fechas = Table([[Paragraph(f'Fecha de corte: {datos["fecha_corte"]}', st_chico),
                      Paragraph(f'<para align="right">Emitido: {datos["fecha_emision"]}</para>', st_chico)]],
@@ -625,7 +644,7 @@ def generar_reporte_inquilino_pdf(datos: dict) -> bytes:
         t = Table(datos_t, repeatRows=1, hAlign="LEFT",
                   colWidths=[ancho_util * w for w in (0.27, 0.19, 0.19, 0.19, 0.16)])
         estilo = [
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2E4057")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_AZUL)),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, -1), tam_fila),
@@ -702,21 +721,20 @@ def generar_reporte_inquilino_png(datos: dict) -> bytes:
     def derecha(texto, fuente, x_der, yy, color="black"):
         draw.text((x_der - ancho_texto(texto, fuente), yy), texto, font=fuente, fill=color)
 
-    # ---------- Encabezado ----------
-    texto_x, logo_alto = margen, 0
-    if os.path.exists(LOGO_PATH):
+    # ---------- Encabezado institucional aprobado ----------
+    draw.rectangle((margen, y, ancho-margen, y+142), fill=_AZUL)
+    ruta_logo = LOGO_PATH if os.path.exists(LOGO_PATH) else LOGO_FALLBACK_PATH
+    if os.path.exists(ruta_logo):
         try:
-            logo = Image.open(LOGO_PATH).convert("RGBA")
-            logo.thumbnail((92, 92))
-            img.paste(logo, (margen, y), logo)
-            texto_x, logo_alto = margen + logo.width + 18, logo.height
+            logo = Image.open(ruta_logo).convert("RGBA")
+            logo.thumbnail((400, 132), Image.Resampling.LANCZOS)
+            img.paste(logo, (margen+12, y+5), logo)
         except Exception:
-            pass
-    draw.text((texto_x, y + 6), NOMBRE_RESIDENCIAL, font=f_titulo, fill="black")
-    draw.text((texto_x, y + 42), "Estado de Cuenta del Inquilino", font=f_sub, fill="#555555")
-    y += max(logo_alto, 70) + 14
-    draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
-    y += 20
+            draw.text((margen+15, y+40), "EQUISE", font=f_titulo, fill=_DORADO)
+    draw.text((ancho-margen-18, y+45), "ESTADO DE CUENTA", font=_fuente(19, negrita=True), fill="white", anchor="ra")
+    draw.text((ancho-margen-18, y+82), "RESUMEN DE CUENTA DEL INQUILINO", font=_fuente(10), fill="white", anchor="ra")
+    draw.rectangle((margen, y+138, ancho-margen, y+144), fill=_DORADO)
+    y += 165
 
     draw.text((margen, y), f'Fecha de corte: {datos["fecha_corte"]}', font=f_chico, fill="black")
     derecha(f'Emitido: {datos["fecha_emision"]}', f_chico, ancho - margen, y)
