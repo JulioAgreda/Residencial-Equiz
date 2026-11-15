@@ -269,223 +269,283 @@ def construir_datos_recibo_servicio(servicio, pago, periodo, apartamento, total_
     return datos
 
 
+
+def _lineas_titulo_encabezado(datos):
+    """Devuelve un título corto y legible para el panel azul del recibo."""
+    titulo = str((datos or {}).get("titulo") or "PAGO").strip()
+    normalizado = titulo.lower()
+    if "cuenta por cobrar" in normalizado or "cobro de cuenta" in normalizado:
+        return ["COBRO DE", "CUENTA"]
+    titulo = titulo.replace("Recibo de Pago de ", "").replace("Recibo de pago de ", "")
+    titulo = titulo.replace("Recibo de cobro de ", "").replace("Recibo de Cobro de ", "")
+    titulo = titulo.replace("Recibo de Pago", "PAGO").replace("Recibo de pago", "PAGO")
+    titulo = titulo.strip().upper() or "PAGO"
+    palabras = titulo.split()
+    lineas, actual = [], ""
+    for palabra in palabras:
+        candidato = f"{actual} {palabra}".strip()
+        if len(candidato) <= 14 or not actual:
+            actual = candidato
+        else:
+            lineas.append(actual)
+            actual = palabra
+    if actual:
+        lineas.append(actual)
+    if len(lineas) > 2:
+        # En paneles pequeños prioriza el nombre del concepto y evita desbordes.
+        lineas = [lineas[0], " ".join(lineas[1:])]
+    return lineas[:2]
+
+
 # ============================================================
 # PDF — formato compacto, tipo comprobante
 # ============================================================
 
 def generar_recibo_pdf(datos: dict) -> bytes:
+    """Genera recibos con el diseño institucional aprobado: logo horizontal,
+    panel azul marino con diagonal dorada, ficha celeste y resumen de pago."""
     buffer = io.BytesIO()
-    ancho, alto_pagina = A5
+    ancho, alto = A5
     c = pdfcanvas.Canvas(buffer, pagesize=A5)
+    margen = 8 * mm
+    azul = colors.HexColor("#123456")
+    dorado = colors.HexColor("#C99A3B")
+    azul_claro = colors.HexColor("#EDF3F8")
+    gris = colors.HexColor("#D5E0E9")
+    gris_texto = colors.HexColor("#647991")
+    verde = colors.HexColor("#2E7D32")
 
-    margen = 11 * mm
-    y = alto_pagina - margen
+    # Encabezado: sin marco exterior; logo a la izquierda y panel azul a la derecha.
+    x0, y_top = margen, alto - margen
+    header_h = 32 * mm
+    header_bottom = y_top - header_h
+    panel_x = x0 + (ancho - 2*margen) * 0.66
+    # Diagonal dorada y panel azul.
+    p = c.beginPath()
+    p.moveTo(panel_x + 5*mm, y_top)
+    p.lineTo(ancho-margen, y_top)
+    p.lineTo(ancho-margen, header_bottom)
+    p.lineTo(panel_x - 5*mm, header_bottom)
+    p.close()
+    c.setFillColor(azul); c.drawPath(p, fill=1, stroke=0)
+    p2 = c.beginPath()
+    p2.moveTo(panel_x, y_top); p2.lineTo(panel_x+2.2*mm, y_top)
+    p2.lineTo(panel_x-7.8*mm, header_bottom); p2.lineTo(panel_x-10*mm, header_bottom)
+    p2.close()
+    c.setFillColor(dorado); c.drawPath(p2, fill=1, stroke=0)
 
-    # ---------- Encabezado: logo y título lado a lado (más compacto que apilados) ----------
-    logo_w = logo_h = 16 * mm
-    texto_x = margen
-    if os.path.exists(LOGO_PATH):
+    logo_path = LOGO_PATH if os.path.exists(LOGO_PATH) else LOGO_FALLBACK_PATH
+    if os.path.exists(logo_path):
         try:
-            c.drawImage(LOGO_PATH, margen, y - logo_h, width=logo_w, height=logo_h,
-                        preserveAspectRatio=True, mask="auto")
-            texto_x = margen + logo_w + 4 * mm
+            c.drawImage(logo_path, x0+2*mm, header_bottom+3*mm,
+                        width=(panel_x-x0-12*mm), height=header_h-6*mm,
+                        preserveAspectRatio=True, anchor="c", mask="auto")
         except Exception:
             pass
 
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(texto_x, y - 6 * mm, NOMBRE_RESIDENCIAL)
-    c.setFont("Helvetica", 8.5)
-    c.setFillColor(colors.Color(0.33, 0.33, 0.33))
-    c.drawString(texto_x, y - 11.5 * mm, datos.get("titulo", "Recibo de Pago de Alquiler"))
-    c.setFillColor(colors.black)
-    y -= logo_h + 3 * mm
-
-    c.setLineWidth(0.6)
-    c.line(margen, y, ancho - margen, y)
-    y -= 5.5 * mm
-
-    c.setFont("Helvetica", 8)
-    c.drawString(margen, y, f'Recibo N°: {datos["numero_recibo"]}')
-    c.drawRightString(ancho - margen, y, f'Emitido: {datos["fecha_emision"]}')
-    y -= 7 * mm
-
-    def fila(etiqueta, valor, negrita_valor=False, tam=9.5, fuente_valor=None):
-        nonlocal y
-        c.setFont("Helvetica-Bold", tam)
-        c.drawString(margen, y, etiqueta)
-        c.setFont(fuente_valor or ("Helvetica-Bold" if negrita_valor else "Helvetica"), tam)
-        c.drawRightString(ancho - margen, y, str(valor))
-        y -= 6 * mm
-
-    fila(datos.get("etiqueta_apartamento", "Apartamento:"), datos["apartamento_texto"])
-    fila(datos.get("etiqueta_inquilino", "Inquilino:"), datos["inquilino_nombre"])
-    fila(datos.get("etiqueta_periodo", "Periodo:"), datos["periodo"])
-    fila(datos.get("etiqueta_fecha_pago", "Fecha de pago:"), datos["fecha_pago"])
-    fila(datos.get("etiqueta_metodo_pago", "Método de pago:"), datos["metodo_pago"])
-
-    y -= 1 * mm
-    c.line(margen, y, ancho - margen, y)
-    y -= 6 * mm
-
-    if datos.get("detalle"):          # p. ej. lecturas del medidor en los recibos de luz y agua
-        necesita_unicode = any("³" in str(v) for _e, v in datos["detalle"])
-        for etiqueta, valor in datos["detalle"]:
-            fila(etiqueta, valor, fuente_valor=_fuente_pdf_unicode() if necesita_unicode else None)
-        y -= 1 * mm
-        c.line(margen, y, ancho - margen, y)
-        y -= 6 * mm
-
-    fila(datos.get("etiqueta_monto_esperado", "Monto esperado del mes:"), _fmt_bs(datos["monto_esperado"]))
-    fila(datos.get("etiqueta_total_pagado", "Total pagado a la fecha:"), _fmt_bs(datos["total_pagado_periodo"]))
-    saldo = datos["saldo_pendiente"]
-    fila(datos.get("etiqueta_saldo", "Saldo pendiente:") if saldo > 0.009 else "Estado:",
-         _fmt_bs(saldo) if saldo > 0.009 else "PAGADO COMPLETO", negrita_valor=True)
-    y -= 2 * mm
-
-    # ---------- Caja resaltada con el monto de este abono ----------
-    caja_alto = 13 * mm
-    y -= caja_alto
-    c.setFillColor(colors.HexColor(_COLOR_ACENTO_PDF))
-    c.roundRect(margen, y, ancho - 2 * margen, caja_alto, 2 * mm, fill=1, stroke=0)
+    lineas_titulo = _lineas_titulo_encabezado(datos)
+    centro_panel = (panel_x+ancho-margen)/2 + 1*mm
+    ancho_panel_pt = (ancho-margen) - (panel_x-2*mm)
     c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(margen + 4 * mm, y + caja_alto / 2 - 1.5 * mm, datos.get("etiqueta_monto_abono", "MONTO DE ESTE ABONO"))
-    c.setFont("Helvetica-Bold", 15)
-    c.drawRightString(ancho - margen - 4 * mm, y + caja_alto / 2 - 2.2 * mm, _fmt_bs(datos["monto_pagado"]))
-    c.setFillColor(colors.black)
-    y -= 6 * mm
+    c.setFont("Helvetica", 7.2)
+    c.drawCentredString(centro_panel, y_top-10*mm, "RECIBO DE PAGO")
+    tam_titulo = 10.2 if len(lineas_titulo) > 1 else 11.2
+    while tam_titulo > 8 and any(c.stringWidth(linea, "Helvetica-Bold", tam_titulo) > ancho_panel_pt for linea in lineas_titulo):
+        tam_titulo -= 0.4
+    c.setFont("Helvetica-Bold", tam_titulo)
+    if len(lineas_titulo) == 1:
+        c.drawCentredString(centro_panel, y_top-18*mm, lineas_titulo[0])
+    else:
+        c.drawCentredString(centro_panel, y_top-17*mm, lineas_titulo[0])
+        c.drawCentredString(centro_panel, y_top-22*mm, lineas_titulo[1])
+    c.setStrokeColor(dorado); c.setLineWidth(1.4)
+    c.line(x0, header_bottom, ancho-margen, header_bottom)
+
+    y = header_bottom - 5*mm
+    c.setFillColor(gris_texto); c.setFont("Helvetica", 7)
+    c.drawString(x0, y, "RECIBO N.º")
+    c.setFillColor(azul); c.setFont("Helvetica-Bold", 7.4)
+    c.drawString(x0+19*mm, y, str(datos.get("numero_recibo", "—")))
+    c.setFillColor(gris_texto); c.setFont("Helvetica", 7)
+    c.drawRightString(ancho-margen-23*mm, y, "Emisión:")
+    c.setFillColor(azul); c.setFont("Helvetica", 7)
+    c.drawRightString(ancho-margen, y, str(datos.get("fecha_emision", "—")))
+
+    # Tarjeta de identificación.
+    y -= 5*mm
+    card_h = 25*mm
+    c.setFillColor(azul_claro); c.roundRect(x0, y-card_h+2*mm, ancho-2*margen, card_h, 3*mm, fill=1, stroke=0)
+    xx_label, xx_val = x0+4*mm, x0+39*mm
+    cy = y-4.5*mm
+    for label, value in [
+        ("APARTAMENTO", datos.get("apartamento_texto","—")),
+        ("INQUILINO", datos.get("inquilino_nombre","—")),
+        ("PERIODO / CONCEPTO", datos.get("periodo","—")),
+    ]:
+        c.setFillColor(azul); c.setFont("Helvetica-Bold", 6.6); c.drawString(xx_label, cy, label)
+        c.setFillColor(azul); c.setFont("Helvetica", 8.1); c.drawString(xx_val, cy-0.2*mm, str(value)[:48])
+        cy -= 7*mm
+
+    y -= card_h + 4*mm
+    # Datos y lecturas, en filas compactas.
+    c.setStrokeColor(gris); c.setLineWidth(0.6); c.line(x0, y, ancho-margen, y)
+    y -= 5.5*mm
+    def fila(label, value, bold=False, small=False):
+        nonlocal y
+        c.setFillColor(gris_texto if small else azul)
+        c.setFont("Helvetica-Bold", 6.8 if small else 7.8)
+        c.drawString(x0+3*mm, y, str(label).upper() if small else str(label))
+        c.setFillColor(azul); c.setFont("Helvetica-Bold" if bold else "Helvetica", 8 if not small else 7.8)
+        c.drawString(x0+58*mm, y, str(value)[:45])
+        y -= 6.2*mm if not small else 5.4*mm
+
+    fila(datos.get("etiqueta_fecha_pago","FECHA DE PAGO"), datos.get("fecha_pago","—"), small=True)
+    fila(datos.get("etiqueta_metodo_pago","MÉTODO DE PAGO"), datos.get("metodo_pago","—"), small=True)
+    fila("RECIBIDO POR", datos.get("recibido_por","—"), small=True)
+    if datos.get("detalle"):
+        for label, value in datos["detalle"]:
+            fila(label, value, small=True)
+    c.setStrokeColor(gris); c.line(x0, y+1.5*mm, ancho-margen, y+1.5*mm)
+    y -= 4*mm
+
+    # Resumen del periodo.
+    fila(datos.get("etiqueta_monto_esperado","Monto esperado:"), _fmt_bs(datos.get("monto_esperado",0)))
+    fila(datos.get("etiqueta_total_pagado","Total pagado a la fecha:"), _fmt_bs(datos.get("total_pagado_periodo",0)))
+    saldo = float(datos.get("saldo_pendiente",0) or 0)
+    fila("Estado:", "PAGADO COMPLETO" if saldo <= 0.009 else f"Saldo pendiente: {_fmt_bs(saldo)}", bold=True)
+
+    # Monto del abono en tarjeta azul claro, sin exagerar el color de alerta.
+    y -= 1.5*mm
+    caja_h = 18*mm
+    c.setFillColor(azul_claro); c.setStrokeColor(azul); c.setLineWidth(1)
+    c.roundRect(x0, y-caja_h, ancho-2*margen, caja_h, 3*mm, fill=1, stroke=1)
+    c.setFillColor(azul); c.circle(x0+10*mm, y-caja_h/2, 6.5*mm, fill=1, stroke=0)
+    c.setFillColor(dorado); c.setFont("Helvetica-Bold", 8); c.drawCentredString(x0+10*mm, y-caja_h/2-1*mm, "Bs")
+    c.setFillColor(azul); c.setFont("Helvetica-Bold", 8.5)
+    c.drawString(x0+22*mm, y-6.5*mm, datos.get("etiqueta_monto_abono","MONTO RECIBIDO").upper())
+    c.setFont("Helvetica-Bold", 17)
+    c.drawString(x0+22*mm, y-14*mm, _fmt_bs(datos.get("monto_pagado",0)))
+    y -= caja_h + 4*mm
+
+    # Estado resumido en panel claro.
+    c.setFillColor(azul_claro); c.roundRect(x0, y-14*mm, ancho-2*margen, 14*mm, 2.5*mm, fill=1, stroke=0)
+    c.setFillColor(azul); c.setFont("Helvetica", 7)
+    c.drawString(x0+3*mm, y-4.5*mm, "Monto esperado:")
+    c.drawRightString(ancho-margen-3*mm, y-4.5*mm, _fmt_bs(datos.get("monto_esperado",0)))
+    c.setStrokeColor(gris); c.line(x0+3*mm, y-7*mm, ancho-margen-3*mm, y-7*mm)
+    c.drawString(x0+3*mm, y-11.5*mm, "Estado:")
+    c.setFont("Helvetica-Bold", 7)
+    c.drawRightString(ancho-margen-3*mm, y-11.5*mm, "PAGADO COMPLETO" if saldo <= 0.009 else f"SALDO: {_fmt_bs(saldo)}")
+    y -= 20*mm
 
     if datos.get("observacion"):
-        c.setFont("Helvetica-Oblique", 7.5)
-        c.drawString(margen, y, f'Observación: {datos["observacion"]}')
-        y -= 6 * mm
+        c.setFillColor(gris_texto); c.setFont("Helvetica-Oblique", 7)
+        c.drawString(x0+3*mm, y, f'Observación: {str(datos["observacion"])[:90]}')
+        y -= 5*mm
+    c.setStrokeColor(dorado); c.setLineWidth(1); c.line(x0, y, ancho-margen, y)
+    y -= 5*mm
+    c.setFillColor(azul); c.setFont("Helvetica-Bold", 7)
+    c.drawCentredString(ancho/2, y, f'REGISTRADO POR: {datos.get("recibido_por","—")}')
+    y -= 4*mm
+    c.setFont("Helvetica-Oblique", 8); c.drawCentredString(ancho/2, y, "¡Gracias por su pago!")
 
-    y -= 3 * mm
-    c.line(margen, y, ancho - margen, y)
-    y -= 4.5 * mm
-    c.setFont("Helvetica", 7.5)
-    c.drawString(margen, y, f'Recibido por: {datos["recibido_por"]}')
-
-    c.showPage()
-    c.save()
-    buffer.seek(0)
+    c.showPage(); c.save(); buffer.seek(0)
     return buffer.getvalue()
 
-
-# ============================================================
-# PNG — mismo diseño compacto, recortado a su contenido real
-# ============================================================
 
 def generar_recibo_png(datos: dict) -> bytes:
-    ancho, alto_max = 820, 1100
-    img = Image.new("RGB", (ancho, alto_max), "white")
-    draw = ImageDraw.Draw(img)
-
-    f_titulo = _fuente(26, negrita=True)
-    f_sub = _fuente(14)
-    f_label = _fuente(14, negrita=True)
-    f_valor = _fuente(14)
-    f_chico = _fuente(12)
-    f_chico_i = _fuente(12, cursiva=True)
-    f_caja_label = _fuente(14, negrita=True)
-    f_caja_monto = _fuente(24, negrita=True)
-
-    margen = 48
-    y = 28
-
-    # ---------- Encabezado: logo y título lado a lado ----------
-    texto_x = margen
-    logo_alto = 0
-    if os.path.exists(LOGO_PATH):
+    """PNG con la misma identidad gráfica que el PDF: logo horizontal y panel azul/dorado."""
+    ancho, alto = 820, 1160
+    img = Image.new("RGB", (ancho, alto), "white")
+    d = ImageDraw.Draw(img)
+    azul="#123456"; dorado="#C99A3B"; claro="#EDF3F8"; gris="#D5E0E9"; gris_texto="#647991"
+    margen=46; top=24; header_h=170; bottom=top+header_h
+    panel_x=margen+(ancho-2*margen)*0.66
+    d.polygon([(panel_x+28,top),(ancho-margen,top),(ancho-margen,bottom),(panel_x-28,bottom)],fill=azul)
+    d.polygon([(panel_x,top),(panel_x+12,top),(panel_x-44,bottom),(panel_x-56,bottom)],fill=dorado)
+    logo_path=LOGO_PATH if os.path.exists(LOGO_PATH) else LOGO_FALLBACK_PATH
+    if os.path.exists(logo_path):
         try:
-            logo = Image.open(LOGO_PATH).convert("RGBA")
-            logo.thumbnail((92, 92))
-            img.paste(logo, (margen, y), logo)
-            texto_x = margen + logo.width + 18
-            logo_alto = logo.height
+            logo=Image.open(logo_path).convert("RGBA")
+            logo.thumbnail((int(panel_x-margen-80),header_h-42),Image.Resampling.LANCZOS)
+            img.paste(logo,(margen+10,top+(header_h-logo.height)//2),logo)
         except Exception:
             pass
-
-    draw.text((texto_x, y + 6), NOMBRE_RESIDENCIAL, font=f_titulo, fill="black")
-    draw.text((texto_x, y + 42), datos.get("titulo", "Recibo de Pago de Alquiler"), font=f_sub, fill="#555555")
-    y += max(logo_alto, 70) + 14
-
-    draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
-    y += 20
-
-    draw.text((margen, y), f'Recibo N°: {datos["numero_recibo"]}', font=f_chico, fill="black")
-    texto_emitido = f'Emitido: {datos["fecha_emision"]}'
-    bbox = draw.textbbox((0, 0), texto_emitido, font=f_chico)
-    draw.text((ancho - margen - (bbox[2] - bbox[0]), y), texto_emitido, font=f_chico, fill="black")
-    y += 32
-
-    def fila(etiqueta, valor, yy, negrita_valor=False):
-        draw.text((margen, yy), etiqueta, font=f_label, fill="black")
-        fuente_valor = f_label if negrita_valor else f_valor
-        texto = str(valor)
-        bbox = draw.textbbox((0, 0), texto, font=fuente_valor)
-        draw.text((ancho - margen - (bbox[2] - bbox[0]), yy), texto, font=fuente_valor, fill="black")
-        return yy + 31
-
-    y = fila(datos.get("etiqueta_apartamento", "Apartamento:"), datos["apartamento_texto"], y)
-    y = fila(datos.get("etiqueta_inquilino", "Inquilino:"), datos["inquilino_nombre"], y)
-    y = fila(datos.get("etiqueta_periodo", "Periodo:"), datos["periodo"], y)
-    y = fila(datos.get("etiqueta_fecha_pago", "Fecha de pago:"), datos["fecha_pago"], y)
-    y = fila(datos.get("etiqueta_metodo_pago", "Método de pago:"), datos["metodo_pago"], y)
-
-    y += 6
-    draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
-    y += 20
-
-    if datos.get("detalle"):          # p. ej. lecturas del medidor en los recibos de luz y agua
-        for etiqueta, valor in datos["detalle"]:
-            y = fila(etiqueta, valor, y)
-        y += 6
-        draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
-        y += 20
-
-    y = fila(datos.get("etiqueta_monto_esperado", "Monto esperado del mes:"), _fmt_bs(datos["monto_esperado"]), y)
-    y = fila(datos.get("etiqueta_total_pagado", "Total pagado a la fecha:"), _fmt_bs(datos["total_pagado_periodo"]), y)
-    saldo = datos["saldo_pendiente"]
-    y = fila(datos.get("etiqueta_saldo", "Saldo pendiente:") if saldo > 0.009 else "Estado:",
-             _fmt_bs(saldo) if saldo > 0.009 else "PAGADO COMPLETO", y, negrita_valor=True)
-    y += 10
-
-    # ---------- Caja resaltada con el monto de este abono ----------
-    caja_alto = 64
-    draw.rounded_rectangle([(margen, y), (ancho - margen, y + caja_alto)], radius=10, fill=_COLOR_ACENTO)
-    draw.text((margen + 18, y + caja_alto / 2 - 10), datos.get("etiqueta_monto_abono", "MONTO DE ESTE ABONO"), font=f_caja_label, fill="white")
-    texto_monto = _fmt_bs(datos["monto_pagado"])
-    bbox = draw.textbbox((0, 0), texto_monto, font=f_caja_monto)
-    draw.text((ancho - margen - 18 - (bbox[2] - bbox[0]), y + caja_alto / 2 - 16), texto_monto,
-              font=f_caja_monto, fill="white")
-    y += caja_alto + 22
-
+    f_small=_fuente(14); f_head=_fuente(22,negrita=True); f_label=_fuente(13,negrita=True)
+    f_val=_fuente(15); f_bold=_fuente(16,negrita=True); f_amount=_fuente(31,negrita=True)
+    cx=(panel_x+ancho-margen)/2+5
+    d.text((cx,top+52),"RECIBO DE PAGO",font=f_small,fill="white",anchor="mm")
+    lineas_titulo = _lineas_titulo_encabezado(datos)
+    tam_titulo = 20 if len(lineas_titulo) == 1 else 18
+    f_titulo = _fuente(tam_titulo, negrita=True)
+    ancho_panel_px = (ancho-margen) - (panel_x-8)
+    while tam_titulo > 14 and any(d.textbbox((0,0), linea, font=f_titulo)[2] > ancho_panel_px for linea in lineas_titulo):
+        tam_titulo -= 1
+        f_titulo = _fuente(tam_titulo, negrita=True)
+    if len(lineas_titulo) == 1:
+        d.text((cx,top+94),lineas_titulo[0],font=f_titulo,fill="white",anchor="mm")
+    else:
+        d.text((cx,top+82),lineas_titulo[0],font=f_titulo,fill="white",anchor="mm")
+        d.text((cx,top+108),lineas_titulo[1],font=f_titulo,fill="white",anchor="mm")
+    d.line((margen,bottom,ancho-margen,bottom),fill=dorado,width=4)
+    y=bottom+22
+    d.text((margen,y),"RECIBO N.º",font=f_small,fill=gris_texto)
+    d.text((margen+100,y),str(datos.get("numero_recibo","—")),font=f_label,fill=azul)
+    d.text((ancho-margen,y),"Emisión: "+str(datos.get("fecha_emision","—")),font=f_small,fill=azul,anchor="ra")
+    y+=40
+    # Tarjeta de apartamento, inquilino y periodo.
+    card=(margen,y,ancho-margen,y+144)
+    d.rounded_rectangle(card,radius=18,fill=claro)
+    yy=y+20
+    for lab,val in [("APARTAMENTO",datos.get("apartamento_texto","—")),("INQUILINO",datos.get("inquilino_nombre","—")),("PERIODO / CONCEPTO",datos.get("periodo","—"))]:
+        d.text((margen+24,yy),lab,font=f_label,fill=azul)
+        d.text((margen+245,yy),str(val)[:45],font=f_val,fill=azul)
+        yy+=42
+    y+=174
+    d.line((margen,y,ancho-margen,y),fill=gris,width=2); y+=24
+    def fila(lab,val,small=False):
+        nonlocal y
+        d.text((margen+18,y),str(lab).upper() if small else str(lab),font=f_label if not small else f_small,fill=gris_texto if small else azul)
+        d.text((margen+300,y),str(val)[:55],font=f_val,fill=azul)
+        y+=34 if not small else 29
+    fila(datos.get("etiqueta_fecha_pago","FECHA DE PAGO"),datos.get("fecha_pago","—"),True)
+    fila(datos.get("etiqueta_metodo_pago","MÉTODO DE PAGO"),datos.get("metodo_pago","—"),True)
+    fila("RECIBIDO POR",datos.get("recibido_por","—"),True)
+    if datos.get("detalle"):
+        for lab,val in datos["detalle"]:
+            fila(lab,val,True)
+    d.line((margen,y,ancho-margen,y),fill=gris,width=2); y+=24
+    fila(datos.get("etiqueta_monto_esperado","Monto esperado:"),_fmt_bs(datos.get("monto_esperado",0)))
+    fila(datos.get("etiqueta_total_pagado","Total pagado a la fecha:"),_fmt_bs(datos.get("total_pagado_periodo",0)))
+    saldo=float(datos.get("saldo_pendiente",0) or 0)
+    fila("Estado:","PAGADO COMPLETO" if saldo<=0.009 else f"Saldo pendiente: {_fmt_bs(saldo)}")
+    y+=8
+    # Tarjeta monto recibido.
+    h=104
+    d.rounded_rectangle((margen,y,ancho-margen,y+h),radius=18,fill=claro,outline=azul,width=3)
+    d.ellipse((margen+18,y+17,margen+88,y+87),fill=azul)
+    d.text((margen+53,y+52),"Bs",font=f_label,fill=dorado,anchor="mm")
+    d.text((margen+112,y+22),str(datos.get("etiqueta_monto_abono","MONTO RECIBIDO")).upper(),font=f_label,fill=azul)
+    d.text((margen+112,y+52),_fmt_bs(datos.get("monto_pagado",0)),font=f_amount,fill=azul)
+    y+=h+20
+    d.rounded_rectangle((margen,y,ancho-margen,y+82),radius=14,fill=claro)
+    d.text((margen+18,y+16),"Monto esperado:",font=f_small,fill=azul)
+    d.text((ancho-margen-18,y+16),_fmt_bs(datos.get("monto_esperado",0)),font=f_label,fill=azul,anchor="ra")
+    d.line((margen+18,y+42,ancho-margen-18,y+42),fill=gris,width=1)
+    d.text((margen+18,y+53),"Estado:",font=f_small,fill=azul)
+    d.text((ancho-margen-18,y+53),"PAGADO COMPLETO" if saldo<=0.009 else f"SALDO: {_fmt_bs(saldo)}",font=f_label,fill=azul,anchor="ra")
+    y+=110
     if datos.get("observacion"):
-        draw.text((margen, y), f'Observación: {datos["observacion"]}', font=f_chico_i, fill="#555555")
-        y += 30
-
-    y += 10
-    draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
-    y += 18
-    draw.text((margen, y), f'Recibido por: {datos["recibido_por"]}', font=f_chico, fill="black")
-    y += 34
-
-    buffer = io.BytesIO()
-    img.crop((0, 0, ancho, min(y + 20, alto_max))).save(buffer, format="PNG")
+        d.text((margen+18,y),f'Observación: {str(datos["observacion"])[:100]}',font=f_small,fill=gris_texto); y+=30
+    d.line((margen,y,ancho-margen,y),fill=dorado,width=3); y+=18
+    d.text((ancho//2,y),f'REGISTRADO POR: {datos.get("recibido_por","—")}',font=f_label,fill=azul,anchor="mt"); y+=28
+    d.text((ancho//2,y),"¡Gracias por su pago!",font=_fuente(16,cursiva=True),fill=azul,anchor="mt"); y+=40
+    buffer=io.BytesIO()
+    img.crop((0,0,ancho,min(y,alto))).save(buffer,format="PNG",optimize=True)
     buffer.seek(0)
     return buffer.getvalue()
 
 
-# ============================================================
-# REPORTE DE DEUDA REAL PARA EL INQUILINO (PDF y PNG, mismo diseño que el recibo)
-# ============================================================
-# El cálculo está en moras.deuda_real_inquilino(); aquí solo se maqueta.
-
-MAX_FILAS_REPORTE = 12   # filas por tabla; las deudas siempre se muestran completas
-
-
-@lru_cache(maxsize=1)
 def _logo_liviano_bytes():
     """Carga el logo horizontal institucional y lo reduce para incrustarlo en PDF."""
     ruta = LOGO_PATH if os.path.exists(LOGO_PATH) else LOGO_FALLBACK_PATH
@@ -514,6 +574,9 @@ def _fmt_bs2(monto):
 
 def _fmt_fecha(f):
     return f.strftime("%d/%m/%Y") if f else "—"
+
+
+MAX_FILAS_REPORTE = 12  # filas por tabla; las deudas siempre se muestran completas
 
 
 def _recortar_filas(filas, maximo=MAX_FILAS_REPORTE):
@@ -634,8 +697,9 @@ class _EncabezadoEstadoCuenta(Flowable):
         # Filete dorado inferior y marco azul exterior.
         c.setFillColor(gold)
         c.rect(0, 0, w, 1.5 * mm, stroke=0, fill=1)
-        # Sin marco exterior: el encabezado queda limpio, como el diseño de referencia.
-        # Se conserva únicamente el filete dorado inferior.
+        c.setStrokeColor(navy)
+        c.setLineWidth(1.25)
+        c.rect(0.6, 0.6, w - 1.2, h - 1.2, stroke=1, fill=0)
         c.restoreState()
 
 
@@ -812,8 +876,9 @@ def generar_reporte_inquilino_png(datos: dict) -> bytes:
               fill="white", anchor="mm")
     draw.text((cx, header_top + 82), "RESUMEN DE CUENTA DEL INQUILINO", font=_fuente(9),
               fill="white", anchor="mm")
-    # Línea dorada inferior continua; sin recuadro exterior alrededor del encabezado.
+    # Línea dorada inferior y marco azul marino completo.
     draw.rectangle((x0, header_top + header_h - 4, x1, header_top + header_h), fill=_DORADO)
+    draw.rectangle((x0, header_top, x1, header_top + header_h), outline=_AZUL, width=4)
     y += header_h + 23
 
     draw.text((margen, y), f'Fecha de corte: {datos["fecha_corte"]}', font=f_chico, fill="black")
