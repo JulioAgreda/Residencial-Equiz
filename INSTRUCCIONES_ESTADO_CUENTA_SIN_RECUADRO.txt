@@ -1,0 +1,16 @@
+EQUISE — ENCABEZADO SIN RECUADRO EXTERIOR
+
+Cambio:
+- Se elimina el marco azul exterior que rodeaba todo el encabezado.
+- Se conserva el panel blanco del logo, el panel azul marino del título, la diagonal dorada y la línea dorada inferior.
+- No se modifica contenido ni cálculos del estado de cuenta.
+- Se conserva construir_datos_recibo_cuenta_cobrar() y el resto del módulo de recibos.
+
+Instalación:
+1. Respaldar recibo.py y assets actuales.
+2. Reemplazar recibo.py en la raíz del repositorio.
+3. Confirmar assets/logo_equise_horizontal.png.
+4. Hacer commit/push a la rama utilizada por Streamlit Cloud.
+5. Reiniciar la aplicación y generar un nuevo estado de cuenta.
+
+No se modifica app.py, db.py ni Supabase. No requiere migración SQL.

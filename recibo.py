@@ -21,7 +21,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.lib.utils import ImageReader
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage, Flowable
 from PIL import Image, ImageDraw, ImageFont
 
 # El servidor (Streamlit Cloud) corre en UTC, no en la hora de Bolivia (UTC-4).
@@ -563,6 +563,82 @@ def construir_datos_reporte_inquilino(apartamento, deuda, emitido_por=None):
     }
 
 
+class _EncabezadoEstadoCuenta(Flowable):
+    """Encabezado institucional con marco azul, logo blanco y banda azul/dorada diagonal."""
+    def __init__(self, logo_bytes, height=30 * mm):
+        super().__init__()
+        self.logo_bytes = logo_bytes
+        self.height = height
+        self.width = 0
+
+    def wrap(self, availWidth, availHeight):
+        self.width = availWidth
+        return self.width, self.height
+
+    def draw(self):
+        c = self.canv
+        w, h = self.width, self.height
+        navy = colors.HexColor(_AZUL)
+        gold = colors.HexColor(_DORADO)
+        # Panel blanco completo y marco institucional exterior.
+        c.saveState()
+        c.setFillColor(colors.white)
+        c.rect(0, 0, w, h, stroke=0, fill=1)
+
+        # Corte diagonal dorado y panel azul marino, como el diseño aprobado.
+        split = w * 0.575
+        band = 2.3 * mm
+        slant = 7.0 * mm
+        p = c.beginPath()
+        p.moveTo(split - slant, 0)
+        p.lineTo(split - slant + band, 0)
+        p.lineTo(split + slant + band, h)
+        p.lineTo(split + slant, h)
+        p.close()
+        c.setFillColor(gold)
+        c.drawPath(p, stroke=0, fill=1)
+
+        p = c.beginPath()
+        p.moveTo(split - slant + band, 0)
+        p.lineTo(w, 0)
+        p.lineTo(w, h)
+        p.lineTo(split + slant + band, h)
+        p.close()
+        c.setFillColor(navy)
+        c.drawPath(p, stroke=0, fill=1)
+
+        # Logo horizontal centrado en su panel blanco y ajustado sin deformación.
+        if self.logo_bytes:
+            try:
+                from PIL import Image as PILImage
+                logo_img = PILImage.open(io.BytesIO(self.logo_bytes))
+                iw, ih = logo_img.size
+                max_w, max_h = split - 16 * mm, h - 5 * mm
+                scale = min(max_w / iw, max_h / ih)
+                dw, dh = iw * scale, ih * scale
+                x = (split - dw) / 2
+                y = (h - dh) / 2
+                c.drawImage(ImageReader(io.BytesIO(self.logo_bytes)), x, y,
+                            width=dw, height=dh, mask='auto')
+            except Exception:
+                pass
+
+        # Texto blanco centrado dentro de la zona azul, sin invadir el logo.
+        right_center = (split + w) / 2 + 1.5 * mm
+        c.setFillColor(colors.white)
+        c.setFont('Helvetica-Bold', 12.5)
+        c.drawCentredString(right_center, h * 0.59, 'ESTADO DE CUENTA')
+        c.setFont('Helvetica', 6.7)
+        c.drawCentredString(right_center, h * 0.35, 'RESUMEN DE CUENTA DEL INQUILINO')
+
+        # Filete dorado inferior y marco azul exterior.
+        c.setFillColor(gold)
+        c.rect(0, 0, w, 1.5 * mm, stroke=0, fill=1)
+        # Sin marco exterior: el encabezado queda limpio, como el diseño de referencia.
+        # Se conserva únicamente el filete dorado inferior.
+        c.restoreState()
+
+
 def generar_reporte_inquilino_pdf(datos: dict) -> bytes:
     from reportlab.platypus import HRFlowable, KeepTogether
     from reportlab.lib.styles import ParagraphStyle
@@ -585,30 +661,9 @@ def generar_reporte_inquilino_pdf(datos: dict) -> bytes:
                                  spaceBefore=8 if n_total <= 19 else 3, spaceAfter=4 if n_total <= 19 else 2)
     story = []
 
-    # ---------- Encabezado institucional aprobado: logo horizontal + bloque azul y línea dorada ----------
-    logo = ""
-    ruta_logo = LOGO_PATH if os.path.exists(LOGO_PATH) else LOGO_FALLBACK_PATH
-    if os.path.exists(ruta_logo):
-        try:
-            logo = RLImage(io.BytesIO(_logo_liviano_bytes()), width=55 * mm, height=18.3 * mm)
-        except Exception:
-            logo = ""
-    bloque_titulo = Table([[Paragraph("ESTADO DE CUENTA", st_titulo),
-                            Paragraph("RESUMEN DE CUENTA DEL INQUILINO", st_sub)]],
-                          colWidths=[ancho_util - 59 * mm])
-    bloque_titulo.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(_AZUL)),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 10), ("RIGHTPADDING", (0, 0), (-1, -1), 7),
-        ("TOPPADDING", (0, 0), (-1, -1), 8), ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-    ]))
-    cab = Table([[logo, bloque_titulo]], colWidths=[59 * mm, ancho_util - 59 * mm], rowHeights=[22 * mm])
-    cab.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0), ("LINEBELOW", (0, 0), (-1, -1), 2, colors.HexColor(_DORADO)),
-    ]))
-    story += [cab, Spacer(1, 7)]
+    # ---------- Encabezado institucional aprobado: marco azul + logo + corte diagonal dorado ----------
+    logo_bytes = _logo_liviano_bytes() if os.path.exists(LOGO_PATH) or os.path.exists(LOGO_FALLBACK_PATH) else None
+    story += [_EncabezadoEstadoCuenta(logo_bytes, height=30 * mm), Spacer(1, 7)]
 
     fechas = Table([[Paragraph(f'Fecha de corte: {datos["fecha_corte"]}', st_chico),
                      Paragraph(f'<para align="right">Emitido: {datos["fecha_emision"]}</para>', st_chico)]],
@@ -721,20 +776,45 @@ def generar_reporte_inquilino_png(datos: dict) -> bytes:
     def derecha(texto, fuente, x_der, yy, color="black"):
         draw.text((x_der - ancho_texto(texto, fuente), yy), texto, font=fuente, fill=color)
 
-    # ---------- Encabezado institucional aprobado ----------
-    draw.rectangle((margen, y, ancho-margen, y+142), fill=_AZUL)
+    # ---------- Encabezado institucional aprobado: marco, logo y panel azul diagonal ----------
+    header_top = y
+    header_h = 142
+    x0, x1 = margen, ancho - margen
+    header_w = x1 - x0
+    split = x0 + int(header_w * 0.575)
+    slant = 18
+    band = 8
+    # Fondo blanco y panel azul a la derecha.
+    draw.rectangle((x0, header_top, x1, header_top + header_h), fill="white")
+    draw.polygon([(split - slant + band, header_top + header_h),
+                  (x1, header_top + header_h), (x1, header_top),
+                  (split + slant + band, header_top)], fill=_AZUL)
+    # Banda diagonal dorada entre ambos paneles.
+    draw.polygon([(split - slant, header_top + header_h),
+                  (split - slant + band, header_top + header_h),
+                  (split + slant + band, header_top),
+                  (split + slant, header_top)], fill=_DORADO)
+    # Logo horizontal con proporción original, centrado en el panel blanco.
     ruta_logo = LOGO_PATH if os.path.exists(LOGO_PATH) else LOGO_FALLBACK_PATH
     if os.path.exists(ruta_logo):
         try:
             logo = Image.open(ruta_logo).convert("RGBA")
-            logo.thumbnail((400, 132), Image.Resampling.LANCZOS)
-            img.paste(logo, (margen+12, y+5), logo)
+            max_w, max_h = split - x0 - 22, header_h - 14
+            logo.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
+            lx = x0 + (split - x0 - logo.width) // 2
+            ly = header_top + (header_h - logo.height) // 2
+            img.paste(logo, (lx, ly), logo)
         except Exception:
-            draw.text((margen+15, y+40), "EQUISE", font=f_titulo, fill=_DORADO)
-    draw.text((ancho-margen-18, y+45), "ESTADO DE CUENTA", font=_fuente(19, negrita=True), fill="white", anchor="ra")
-    draw.text((ancho-margen-18, y+82), "RESUMEN DE CUENTA DEL INQUILINO", font=_fuente(10), fill="white", anchor="ra")
-    draw.rectangle((margen, y+138, ancho-margen, y+144), fill=_DORADO)
-    y += 165
+            draw.text((x0 + 18, header_top + 45), "EQUISE", font=f_titulo, fill=_DORADO)
+    # Título y subtítulo blancos, centrados dentro de la zona azul.
+    cx = int((split + x1) / 2) + 8
+    draw.text((cx, header_top + 48), "ESTADO DE CUENTA", font=_fuente(19, negrita=True),
+              fill="white", anchor="mm")
+    draw.text((cx, header_top + 82), "RESUMEN DE CUENTA DEL INQUILINO", font=_fuente(9),
+              fill="white", anchor="mm")
+    # Línea dorada inferior continua; sin recuadro exterior alrededor del encabezado.
+    draw.rectangle((x0, header_top + header_h - 4, x1, header_top + header_h), fill=_DORADO)
+    y += header_h + 23
 
     draw.text((margen, y), f'Fecha de corte: {datos["fecha_corte"]}', font=f_chico, fill="black")
     derecha(f'Emitido: {datos["fecha_emision"]}', f_chico, ancho - margen, y)
