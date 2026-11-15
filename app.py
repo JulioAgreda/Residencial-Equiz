@@ -2345,6 +2345,14 @@ elif pagina == "🏠 Apartamentos":
                 contrato_observaciones = st.text_area("Observaciones del contrato",
                                                        value=apt.get("contrato_observaciones") or "")
 
+                # Valores predeterminados para evitar variables no definidas
+                # cuando el contrato no es de tipo Anticrético.
+                monto_anticretico = 0.0
+                moneda_anticretico = "BOB (Bs)"
+                anticretico_fecha_entrega = None
+                anticretico_fecha_devolucion = None
+                anticretico_condiciones = None
+
                 if tipo_contrato == "Anticrético":
                     st.markdown("**💰 Datos específicos del anticrético**")
                     st.caption("Registra el capital entregado y la fecha en que corresponde devolverlo según el contrato.")
