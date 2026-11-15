@@ -99,6 +99,9 @@ def construir_datos_recibo(pago, periodo, apartamento, total_pagado_periodo, rec
     return {
         "numero_recibo": f'REC-{int(pago["id"]):06d}',
         "fecha_emision": datetime.now(_ZONA_BOLIVIA).strftime("%d/%m/%Y %H:%M"),
+        # Este constructor corresponde exclusivamente a recibos de alquiler.
+        # Los recibos de electricidad/agua y CXC asignan su propio título.
+        "titulo": "Recibo de Pago de Alquiler",
         "apartamento_texto": formatear_apartamento(apartamento),
         "inquilino_nombre": (periodo or {}).get("inquilino_nombre") or (apartamento or {}).get("inquilino_nombre") or "—",
         "periodo": f'{(periodo or {}).get("mes", "")} {(periodo or {}).get("anio", "")}'.strip(),
@@ -278,7 +281,8 @@ def _lineas_titulo_encabezado(datos):
         return ["COBRO DE", "CUENTA"]
     titulo = titulo.replace("Recibo de Pago de ", "").replace("Recibo de pago de ", "")
     titulo = titulo.replace("Recibo de cobro de ", "").replace("Recibo de Cobro de ", "")
-    titulo = titulo.replace("Recibo de Pago", "PAGO").replace("Recibo de pago", "ALQUILER")
+    if titulo.strip().lower() == "alquiler":
+        titulo = "ALQUILER"
     titulo = titulo.strip().upper() or "PAGO"
     palabras = titulo.split()
     lineas, actual = [], ""
