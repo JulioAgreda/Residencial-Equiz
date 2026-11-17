@@ -9,6 +9,7 @@ Reglas:
   * Alquiler: se usa la "deuda real" (ver deuda_real_inquilino): meses con saldo pendiente cuyo
     día de pago ya pasó, MÁS los meses sin ningún registro entre el primer mes registrado (o la
     fecha de ingreso) y hoy. No aplica a contratos de anticrético.
+   * Anticrético: no genera alquiler mensual, pero sí calcula los saldos de electricidad y agua.
     Día de pago: campo «Día de Pago» de la ficha; si no hay, el día de la fecha de ingreso; si
     tampoco, el 1.
   * Electricidad y agua: toda factura registrada con saldo pendiente es deuda (la lectura ya se
@@ -180,105 +181,110 @@ def contar_ilegibles(periodos):
     return sum(1 for p in (periodos or []) if _clave_periodo(p) is None)
 
 
-def deuda_real_inquilino(apt, periodos_alquiler, periodos_electricidad, hoy=None):
+def deuda_real_inquilino(apt, periodos_alquiler, periodos_electricidad, hoy=None, periodos_agua=None):
     """Estado de cuenta del inquilino actual de UN apartamento.
 
-    periodos_*: periodos abiertos de ese apartamento, cada uno con sus abonos embebidos
-    ('pagos' / 'pagos_electricidad', con 'monto' y 'fecha').
-
-    Solo aplica a apartamentos Ocupados cuyo contrato no sea Anticrético (el anticrético no
-    paga alquiler mensual); un tipo de contrato vacío se trata como alquiler.
+    Los contratos anticréticos no generan alquiler mensual, pero sí pueden
+    generar obligaciones por electricidad y agua. Los periodos recibidos deben
+    ser abiertos y traer sus abonos embebidos.
     """
     hoy = hoy or date.today()
     resultado = {"aplica": True, "motivo": None, "fecha_corte": hoy, "deuda_total": 0.0}
 
     if apt.get("estado") != "Ocupado":
         return {**resultado, "aplica": False, "motivo": "El apartamento está desocupado."}
-    if (apt.get("tipo_contrato") or "").strip().lower() in ("anticrético", "anticretico"):
-        return {**resultado, "aplica": False,
-                "motivo": "Contrato de anticrético: no genera alquiler mensual."}
+
+    es_anticretico = (apt.get("tipo_contrato") or "").strip().lower() in ("anticrético", "anticretico")
 
     # ---------------- Alquiler ----------------
-    registrados = {}
-    for p in periodos_alquiler or []:
-        k = _clave_periodo(p)
-        if k:
-            registrados.setdefault(k, []).append(p)
-
-    mes_actual = (hoy.year, hoy.month)
-    if registrados:
-        inicio, completa_desde_ingreso = min(registrados), False
+    if es_anticretico:
+        alquiler = {
+            "filas": [], "deuda": 0.0, "meses_atrasados": 0, "por_vencer": 0.0,
+            "pagado_total": 0.0, "ultimo_pago": None, "dias_desde_ultimo_pago": None,
+            "desde_ingreso_sin_registros": False,
+        }
     else:
-        ingreso = _a_fecha(apt.get("fecha_ingreso"))
-        inicio = (ingreso.year, ingreso.month) if ingreso else mes_actual
-        completa_desde_ingreso = ingreso is not None
+        registrados = {}
+        for p in periodos_alquiler or []:
+            k = _clave_periodo(p)
+            if k:
+                registrados.setdefault(k, []).append(p)
 
-    monto_ficha = float(apt.get("monto_alquiler") or 0)
-    filas_alq, deuda_alq, atrasados, por_vencer = [], 0.0, 0, 0.0
+        mes_actual = (hoy.year, hoy.month)
+        if registrados:
+            inicio, completa_desde_ingreso = min(registrados), False
+        else:
+            ingreso = _a_fecha(apt.get("fecha_ingreso"))
+            inicio = (ingreso.year, ingreso.month) if ingreso else mes_actual
+            completa_desde_ingreso = ingreso is not None
 
-    for clave in _meses_entre(inicio, max(mes_actual, max(registrados) if registrados else mes_actual)):
-        anio, mes_num = clave
-        etiqueta = f"{MESES[mes_num - 1]} {anio}"
-        vencido = hoy > _vencimiento(apt, anio, mes_num)
-        if clave in registrados:
-            esperado = sum(float(p.get("monto_esperado") or 0) for p in registrados[clave])
-            pagado = sum(_pagado(p, "pagos") for p in registrados[clave])
+        monto_ficha = float(apt.get("monto_alquiler") or 0)
+        filas_alq, deuda_alq, atrasados, por_vencer = [], 0.0, 0, 0.0
+
+        for clave in _meses_entre(inicio, max(mes_actual, max(registrados) if registrados else mes_actual)):
+            anio, mes_num = clave
+            etiqueta = f"{MESES[mes_num - 1]} {anio}"
+            vencido = hoy > _vencimiento(apt, anio, mes_num)
+            if clave in registrados:
+                esperado = sum(float(p.get("monto_esperado") or 0) for p in registrados[clave])
+                pagado = sum(_pagado(p, "pagos") for p in registrados[clave])
+                saldo = round(esperado - pagado, 2)
+                estado = _estado_por_saldo(esperado, pagado)
+                if saldo > _TOLERANCIA and not vencido:
+                    estado = ESTADO_POR_VENCER
+            else:
+                if monto_ficha <= _TOLERANCIA:
+                    continue
+                esperado, pagado, saldo = monto_ficha, 0.0, monto_ficha
+                estado = ESTADO_SIN_PAGO if vencido else ESTADO_POR_VENCER
+            if saldo <= _TOLERANCIA:
+                saldo = 0.0
+            elif vencido:
+                deuda_alq += saldo
+                atrasados += 1
+            else:
+                por_vencer += saldo
+            filas_alq.append({"periodo": etiqueta, "esperado": round(esperado, 2),
+                              "pagado": round(pagado, 2), "saldo": round(saldo, 2), "estado": estado})
+
+        ultimo_alq = _ultimo_pago([p for ps in registrados.values() for p in ps], "pagos")
+        alquiler = {
+            "filas": filas_alq, "deuda": round(deuda_alq, 2), "meses_atrasados": atrasados,
+            "por_vencer": round(por_vencer, 2),
+            "pagado_total": round(sum(f["pagado"] for f in filas_alq), 2),
+            "ultimo_pago": ultimo_alq,
+            "dias_desde_ultimo_pago": (hoy - ultimo_alq["fecha"]).days if ultimo_alq else None,
+            "desde_ingreso_sin_registros": completa_desde_ingreso,
+        }
+    resultado["alquiler"] = alquiler
+
+    def calcular_servicio(periodos, campo_pagos):
+        validos = [(k, p) for p in (periodos or []) if (k := _clave_periodo(p))]
+        filas, deuda = [], 0.0
+        for clave, periodo in sorted(validos, key=lambda t: t[0]):
+            esperado = float(periodo.get("monto_esperado") or 0)
+            pagado = _pagado(periodo, campo_pagos)
             saldo = round(esperado - pagado, 2)
             estado = _estado_por_saldo(esperado, pagado)
-            if saldo > _TOLERANCIA and not vencido:
-                estado = ESTADO_POR_VENCER
-        else:
-            if monto_ficha <= _TOLERANCIA:
-                continue
-            esperado, pagado, saldo = monto_ficha, 0.0, monto_ficha
-            estado = ESTADO_SIN_PAGO if vencido else ESTADO_POR_VENCER
-        if saldo <= _TOLERANCIA:
-            saldo = 0.0
-        elif vencido:
-            deuda_alq += saldo
-            atrasados += 1
-        else:
-            por_vencer += saldo
-        filas_alq.append({"periodo": etiqueta, "esperado": round(esperado, 2),
-                          "pagado": round(pagado, 2), "saldo": round(saldo, 2), "estado": estado})
+            if saldo <= _TOLERANCIA:
+                saldo = 0.0
+            else:
+                deuda += saldo
+            filas.append({"periodo": f"{MESES[clave[1] - 1]} {clave[0]}",
+                          "esperado": round(esperado, 2), "pagado": round(pagado, 2),
+                          "saldo": round(saldo, 2), "estado": estado})
+        ultimo = _ultimo_pago([p for _k, p in validos], campo_pagos)
+        return {
+            "filas": filas, "deuda": round(deuda, 2),
+            "pagado_total": round(sum(f["pagado"] for f in filas), 2),
+            "ultimo_pago": ultimo,
+            "dias_desde_ultimo_pago": (hoy - ultimo["fecha"]).days if ultimo else None,
+        }
 
-    ultimo_alq = _ultimo_pago([p for ps in registrados.values() for p in ps], "pagos")
-    resultado["alquiler"] = {
-        "filas": filas_alq,
-        "deuda": round(deuda_alq, 2),
-        "meses_atrasados": atrasados,
-        "por_vencer": round(por_vencer, 2),
-        "pagado_total": round(sum(f["pagado"] for f in filas_alq), 2),
-        "ultimo_pago": ultimo_alq,
-        "dias_desde_ultimo_pago": (hoy - ultimo_alq["fecha"]).days if ultimo_alq else None,
-        "desde_ingreso_sin_registros": completa_desde_ingreso,
-    }
-
-    # ---------------- Electricidad ----------------
-    # La factura existe desde que se registra la lectura, así que todo saldo pendiente es deuda.
-    # No se pueden inventar meses sin lectura (no hay consumo que cobrar).
-    elec_validos = [(k, p) for p in (periodos_electricidad or []) if (k := _clave_periodo(p))]
-    filas_elec, deuda_elec = [], 0.0
-    for clave, p in sorted(elec_validos, key=lambda t: t[0]):
-        esperado = float(p.get("monto_esperado") or 0)
-        pagado = _pagado(p, "pagos_electricidad")
-        saldo = round(esperado - pagado, 2)
-        estado = _estado_por_saldo(esperado, pagado)
-        if saldo <= _TOLERANCIA:
-            saldo = 0.0
-        else:
-            deuda_elec += saldo
-        filas_elec.append({"periodo": f"{MESES[clave[1] - 1]} {clave[0]}", "esperado": round(esperado, 2),
-                           "pagado": round(pagado, 2), "saldo": round(saldo, 2), "estado": estado})
-
-    ultimo_elec = _ultimo_pago([p for _k, p in elec_validos], "pagos_electricidad")
-    resultado["electricidad"] = {
-        "filas": filas_elec,
-        "deuda": round(deuda_elec, 2),
-        "pagado_total": round(sum(f["pagado"] for f in filas_elec), 2),
-        "ultimo_pago": ultimo_elec,
-        "dias_desde_ultimo_pago": (hoy - ultimo_elec["fecha"]).days if ultimo_elec else None,
-    }
-
-    resultado["deuda_total"] = round(resultado["alquiler"]["deuda"] + resultado["electricidad"]["deuda"], 2)
+    resultado["electricidad"] = calcular_servicio(periodos_electricidad, "pagos_electricidad")
+    resultado["agua"] = calcular_servicio(periodos_agua, "pagos_agua")
+    resultado["deuda_total"] = round(
+        resultado["alquiler"]["deuda"] + resultado["electricidad"]["deuda"] + resultado["agua"]["deuda"], 2
+    )
     return resultado
+

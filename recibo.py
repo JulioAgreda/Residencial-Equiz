@@ -604,16 +604,22 @@ def _resumen_ultimo_pago(bloque):
 
 def construir_datos_reporte_inquilino(apartamento, deuda, emitido_por=None):
     """'deuda' es el resultado de moras.deuda_real_inquilino() (con aplica=True)."""
-    alq, elec = deuda["alquiler"], deuda["electricidad"]
+    alq, elec, agua = deuda["alquiler"], deuda["electricidad"], deuda.get("agua", {
+        "filas": [], "deuda": 0.0, "ultimo_pago": None
+    })
     filas_alq, omit_alq = _recortar_filas(alq["filas"])
     filas_elec, omit_elec = _recortar_filas(elec["filas"])
+    filas_agua, omit_agua = _recortar_filas(agua["filas"])
     notas = []
     if alq["desde_ingreso_sin_registros"]:
         notas.append("No hay pagos de alquiler registrados: la deuda se calcula desde la fecha de ingreso.")
     if alq["por_vencer"] > 0.009:
         notas.append(f'Alquiler por vencer (aún no incluido en la deuda): {_fmt_bs2(alq["por_vencer"])}.')
-    if omit_alq or omit_elec:
+    if omit_alq or omit_elec or omit_agua:
         notas.append("Se omiten meses anteriores ya pagados para abreviar el reporte.")
+    es_anticretico = str((apartamento or {}).get("tipo_contrato") or "").strip().lower() in ("anticrético", "anticretico")
+    if es_anticretico:
+        notas.append("Contrato anticrético: no corresponde alquiler mensual; el estado de cuenta refleja los servicios básicos.")
     return {
         "apartamento_texto": formatear_apartamento(apartamento),
         "inquilino_nombre": (apartamento or {}).get("inquilino_nombre") or "—",
@@ -621,9 +627,10 @@ def construir_datos_reporte_inquilino(apartamento, deuda, emitido_por=None):
         "fecha_corte": _fmt_fecha(deuda["fecha_corte"]),
         "ultimo_pago_alquiler": _resumen_ultimo_pago(alq),
         "ultimo_pago_electricidad": _resumen_ultimo_pago(elec),
-        "filas_alquiler": filas_alq, "filas_electricidad": filas_elec,
+        "ultimo_pago_agua": _resumen_ultimo_pago(agua),
+        "filas_alquiler": filas_alq, "filas_electricidad": filas_elec, "filas_agua": filas_agua,
         "meses_atrasados": alq["meses_atrasados"],
-        "deuda_alquiler": alq["deuda"], "deuda_electricidad": elec["deuda"],
+        "deuda_alquiler": alq["deuda"], "deuda_electricidad": elec["deuda"], "deuda_agua": agua["deuda"],
         "deuda_total": deuda["deuda_total"],
         "notas": notas,
         "emitido_por": emitido_por or "—",
@@ -717,7 +724,7 @@ def generar_reporte_inquilino_pdf(datos: dict) -> bytes:
                              title=f'Estado de cuenta - {datos["apartamento_texto"]}')
     ancho_util = letter[0] - 36 * mm
     # Con muchas filas se compacta el espaciado para que el reporte siga cabiendo en una hoja
-    n_total = len(datos["filas_alquiler"]) + len(datos["filas_electricidad"])
+    n_total = len(datos["filas_alquiler"]) + len(datos["filas_electricidad"]) + len(datos.get("filas_agua", []))
     pad_fila, tam_fila = (3, 8.5) if n_total <= 14 else ((1.8, 8) if n_total <= 19 else (1.0, 7.5))
     base = getSampleStyleSheet()["Normal"]
     st_titulo = ParagraphStyle("t", parent=base, fontName="Helvetica-Bold", fontSize=14, leading=17, textColor=colors.white)
@@ -752,6 +759,7 @@ def generar_reporte_inquilino_pdf(datos: dict) -> bytes:
         ("Inquilino:", datos["inquilino_nombre"]),
         ("Último pago de alquiler:", datos["ultimo_pago_alquiler"]),
         ("Último pago de electricidad:", datos["ultimo_pago_electricidad"]),
+        ("Último pago de agua:", datos.get("ultimo_pago_agua", "Sin pagos")),
     ]))
     story += [Spacer(1, 4), HRFlowable(width="100%", thickness=0.6, color=colors.HexColor("#cccccc"))]
 
@@ -818,7 +826,7 @@ def generar_reporte_inquilino_pdf(datos: dict) -> bytes:
 
 def generar_reporte_inquilino_png(datos: dict) -> bytes:
     ancho = 820
-    n_filas = len(datos["filas_alquiler"]) + len(datos["filas_electricidad"])
+    n_filas = len(datos["filas_alquiler"]) + len(datos["filas_electricidad"]) + len(datos.get("filas_agua", []))
     alto_max = 760 + n_filas * 34 + len(datos["notas"]) * 26
     img = Image.new("RGB", (ancho, alto_max), "white")
     draw = ImageDraw.Draw(img)
@@ -898,6 +906,7 @@ def generar_reporte_inquilino_png(datos: dict) -> bytes:
     y = fila("Inquilino:", datos["inquilino_nombre"], y)
     y = fila("Último pago de alquiler:", datos["ultimo_pago_alquiler"], y)
     y = fila("Último pago de electricidad:", datos["ultimo_pago_electricidad"], y)
+    y = fila("Último pago de agua:", datos.get("ultimo_pago_agua", "Sin pagos"), y)
     y += 6
     draw.line([(margen, y), (ancho - margen, y)], fill="#cccccc", width=2)
     y += 20
@@ -942,6 +951,8 @@ def generar_reporte_inquilino_png(datos: dict) -> bytes:
           f'Deuda de alquiler: {_fmt_bs2(datos["deuda_alquiler"])}')
     tabla("Electricidad", datos["filas_electricidad"],
           f'Deuda de electricidad: {_fmt_bs2(datos["deuda_electricidad"])}')
+    tabla("Agua", datos.get("filas_agua", []),
+          f'Deuda de agua: {_fmt_bs2(datos.get("deuda_agua", 0))}')
     y += 4
 
     # ---------- Caja resaltada con la deuda total ----------

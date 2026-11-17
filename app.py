@@ -885,7 +885,7 @@ def _cuadre_pdf_cache(q, emitido_por):
 
 # Incrementar esta versión cuando cambie el diseño del Estado de Cuenta.
 # Forma parte de la clave de caché para evitar que se reutilicen documentos antiguos.
-REPORTE_DISENO_VERSION = "equise-estado-cuenta-2026-11-07-v3"
+REPORTE_DISENO_VERSION = "equise-estado-cuenta-2026-11-17-v4"
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -2753,7 +2753,7 @@ elif pagina == "🏠 Apartamentos":
         tg1, tg2 = st.tabs(["➕ Registrar garantía recibida", "📋 Garantías y liquidaciones"])
         with tg1:
             if not ocupados_g:
-                st.info("No hay apartamentos ocupados con contrato de alquiler.")
+                st.info("No hay apartamentos ocupados con registros o contratos vigentes para consultar.")
             else:
                 apt_g_idx = st.selectbox("Apartamento e inquilino", range(len(ocupados_g)),
                     format_func=lambda i: f'{ocupados_g[i]["codigo"]} — {ocupados_g[i]["inquilino_nombre"]}',
@@ -3849,43 +3849,54 @@ elif pagina == "📑 Estado de cuenta":
     st.title("📑 Estado de cuenta")
     st.subheader("Estado de cuenta por apartamento")
     st.caption(
-        "Reporte para entregar al inquilino con sus pagos realizados y su deuda real de alquiler y "
-        "electricidad, calculada a la fecha de hoy. Aplica a apartamentos ocupados con contrato de alquiler. Solo cuenta al "
-        "inquilino actual: los inquilinos que ya salieron aparecen aparte, al final."
+        "Reporte para entregar al ocupante con sus pagos y saldos pendientes de alquiler, electricidad y agua, "
+        "calculados a la fecha de corte. En contratos anticréticos no se genera alquiler mensual; se controlan "
+        "los consumos de electricidad y agua. Solo cuenta al ocupante actual; los exinquilinos se consultan aparte."
     )
 
     hoy_rep = recibo.hoy_bolivia()
     nombre_emisor = usuario_actual.get("nombre") or usuario_actual.get("username")
     apartamentos = cargar_apartamentos()
-    alq_por_apt, elec_por_apt = {}, {}
-    for p in cargar_periodos_abiertos("alquiler"):
+    alq_por_apt, elec_por_apt, agua_por_apt = {}, {}, {}
+    periodos_alq_rep = cargar_periodos_abiertos("alquiler")
+    periodos_elec_rep = cargar_periodos_abiertos("electricidad")
+    periodos_agua_rep = cargar_periodos_abiertos("agua")
+    for p in periodos_alq_rep:
         alq_por_apt.setdefault(p["apartamento_id"], []).append(p)
-    for p in cargar_periodos_abiertos("electricidad"):
+    for p in periodos_elec_rep:
         elec_por_apt.setdefault(p["apartamento_id"], []).append(p)
+    for p in periodos_agua_rep:
+        agua_por_apt.setdefault(p["apartamento_id"], []).append(p)
 
-    n_ilegibles = (moras.contar_ilegibles(cargar_periodos_abiertos("alquiler"))
-                   + moras.contar_ilegibles(cargar_periodos_abiertos("electricidad")))
+    n_ilegibles = (moras.contar_ilegibles(periodos_alq_rep)
+                   + moras.contar_ilegibles(periodos_elec_rep)
+                   + moras.contar_ilegibles(periodos_agua_rep))
     if n_ilegibles:
         st.warning(AVISO_PERIODOS_ILEGIBLES.format(n=n_ilegibles))
 
     estados_cuenta, no_aplican = [], []
     for apt in apartamentos:
-        d = moras.deuda_real_inquilino(apt, alq_por_apt.get(apt["id"], []), elec_por_apt.get(apt["id"], []), hoy_rep)
+        d = moras.deuda_real_inquilino(
+            apt, alq_por_apt.get(apt["id"], []), elec_por_apt.get(apt["id"], []),
+            hoy_rep, periodos_agua=agua_por_apt.get(apt["id"], [])
+        )
         if d["aplica"]:
             estados_cuenta.append((apt, d))
         else:
             no_aplican.append((apt, d["motivo"]))
 
     if not estados_cuenta:
-        st.info("No hay apartamentos ocupados con contrato de alquiler.")
+        st.info("No hay apartamentos ocupados con registros o contratos vigentes para consultar.")
     else:
         # ---------- Resumen de todos los apartamentos ----------
         total_alq = sum(d["alquiler"]["deuda"] for _a, d in estados_cuenta)
         total_elec = sum(d["electricidad"]["deuda"] for _a, d in estados_cuenta)
-        r1, r2, r3 = st.columns(3)
+        total_agua = sum(d["agua"]["deuda"] for _a, d in estados_cuenta)
+        r1, r2, r3, r4 = st.columns(4)
         r1.metric("💵 Deuda de alquiler", fmt_money(total_alq))
         r2.metric("⚡ Deuda de electricidad", fmt_money(total_elec))
-        r3.metric("Deuda total", fmt_money(total_alq + total_elec))
+        r3.metric("💧 Deuda de agua", fmt_money(total_agua))
+        r4.metric("Deuda total", fmt_money(total_alq + total_elec + total_agua))
 
         filas_resumen = []
         for apt, d in estados_cuenta:
@@ -3896,6 +3907,7 @@ elif pagina == "📑 Estado de cuenta":
                 "Meses atrasados": d["alquiler"]["meses_atrasados"],
                 "Deuda alquiler": d["alquiler"]["deuda"],
                 "Deuda electricidad": d["electricidad"]["deuda"],
+                "Deuda agua": d["agua"]["deuda"],
                 "Deuda total": d["deuda_total"],
                 "Último pago de alquiler": up["fecha"].strftime("%d/%m/%Y") if up else "Sin pagos",
             })
@@ -3908,6 +3920,7 @@ elif pagina == "📑 Estado de cuenta":
                     "Meses atrasados": st.column_config.NumberColumn(format="%d"),
                     "Deuda alquiler": st.column_config.NumberColumn(format="Bs %.2f"),
                     "Deuda electricidad": st.column_config.NumberColumn(format="Bs %.2f"),
+                    "Deuda agua": st.column_config.NumberColumn(format="Bs %.2f"),
                     "Deuda total": st.column_config.NumberColumn(format="Bs %.2f"),
                 },
             )
@@ -5730,13 +5743,15 @@ elif pagina == "🤝 Compromisos de pago":
             # Contexto: deuda actual, con la misma regla del Dashboard y del estado de cuenta
             alq_c = [p for p in cargar_periodos_abiertos("alquiler") if p["apartamento_id"] == apt_c["id"]]
             elec_c = [p for p in cargar_periodos_abiertos("electricidad") if p["apartamento_id"] == apt_c["id"]]
-            d_c = moras.deuda_real_inquilino(apt_c, alq_c, elec_c, hoy_c)
+            agua_c = [p for p in cargar_periodos_abiertos("agua") if p["apartamento_id"] == apt_c["id"]]
+            d_c = moras.deuda_real_inquilino(apt_c, alq_c, elec_c, hoy_c, periodos_agua=agua_c)
             if d_c["aplica"]:
                 m_atr = d_c["alquiler"]["meses_atrasados"]
                 st.info(
                     f'Deuda actual — alquiler: {fmt_money(d_c["alquiler"]["deuda"])} '
                     f'({m_atr} mes{"es" if m_atr != 1 else ""} atrasado{"s" if m_atr != 1 else ""}) · '
                     f'electricidad: {fmt_money(d_c["electricidad"]["deuda"])} · '
+                    f'agua: {fmt_money(d_c["agua"]["deuda"])} · '
                     f'**total: {fmt_money(d_c["deuda_total"])}**')
             else:
                 st.caption(d_c["motivo"])
