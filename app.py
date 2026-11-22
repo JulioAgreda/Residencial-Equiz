@@ -1429,7 +1429,11 @@ else:
                           "🤝 Compromisos de pago", "🚪 Ex inquilinos", "💰 Finanzas"]
 
 opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "📦 Inventario", "🗒️ Reuniones"]
-opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería", "🏦 Conciliación bancaria"]
+if es_admin:
+    opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería", "🏦 Conciliación bancaria"]
+else:
+    # Reportes operativos para el Cobrador; reportes administrativos reservados.
+    opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres"]
 
 # La navegación financiera queda integrada dentro de Finanzas; ya no existe
 # un segundo bloque lateral de Egresos/Ventas.
@@ -4028,6 +4032,9 @@ elif pagina == "📑 Estado de cuenta":
                        "ve a «🚪 Ex inquilinos».")
 
 elif pagina == "📊 Actividad por usuario":
+    if not es_admin:
+        st.error("No tienes permiso para acceder a este reporte.")
+        st.stop()
     st.title("📊 Reporte de actividad por usuario")
     st.caption(
         "Pagos, compras y ventas registrados por cada usuario (campo «Encargado») entre dos fechas. "
@@ -4114,6 +4121,9 @@ elif pagina == "📊 Actividad por usuario":
 # PÁGINA: CUADRE DE TESORERÍA (libro de movimientos y cuadre de fin de mes)
 # ==================================================================
 elif pagina == "💰 Cuadre de tesorería":
+    if not es_admin:
+        st.error("No tienes permiso para acceder a este reporte.")
+        st.stop()
     st.title("💰 Cuadre de tesorería")
     st.caption(
         "Todos los pagos, compras (egresos) y ventas (ingresos) del periodo, con los totales para cuadrar la caja. "
