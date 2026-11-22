@@ -476,6 +476,16 @@ if not check_login():
 
 usuario_actual = st.session_state["usuario"]
 es_admin = usuario_actual.get("rol") == "Administrador"
+
+def _usuario_autorizado_reportes_ampliados(usuario):
+    """Admin y Estefani, Vivian o Dussan pueden ver los reportes ampliados."""
+    if usuario.get("rol") == "Administrador":
+        return True
+    valores = [str(usuario.get("nombre") or ""), str(usuario.get("username") or "")]
+    texto = " ".join(valores).casefold()
+    return any(nombre in texto for nombre in ("estefani", "vivian", "dussan"))
+
+puede_ver_reportes_ampliados = _usuario_autorizado_reportes_ampliados(usuario_actual)
 # Solo el Administrador y el usuario Viovip pueden modificar el Estado de Compras, Pagos y Ventas
 puede_editar_estado = estados.puede_modificar(usuario_actual, es_admin)
 
@@ -1413,7 +1423,7 @@ def pagina_consumo(servicio):
 # ------------------------------------------------------------------
 # Sidebar / navegación
 # ------------------------------------------------------------------
-st.sidebar.title("🏢 Residencial EQUIZ")
+st.sidebar.title("🏢 Residencial EQUISE")
 st.sidebar.caption(f'👤 {usuario_actual.get("nombre") or usuario_actual.get("username")} · {usuario_actual.get("rol")}')
 _permitidos_barra = ids_apartamentos_permitidos()
 if _permitidos_barra is not None:
@@ -1429,7 +1439,10 @@ else:
                           "🤝 Compromisos de pago", "🚪 Ex inquilinos", "💰 Finanzas"]
 
 opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "📦 Inventario", "🗒️ Reuniones"]
-opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería", "🏦 Conciliación bancaria"]
+if puede_ver_reportes_ampliados:
+    opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería", "🏦 Conciliación bancaria"]
+else:
+    opciones_reportes = ["(ninguno)", "📑 Estado de cuenta"]
 
 # La navegación financiera queda integrada dentro de Finanzas; ya no existe
 # un segundo bloque lateral de Egresos/Ventas.
@@ -2123,8 +2136,8 @@ if pagina == "📊 Dashboard":
     c6.metric(f"Recaudado en {mes_sel} {anio_sel}", fmt_money(total_recaudado))
 
     st.divider()
-    st.subheader("📈 Cobro de alquiler — últimos 12 meses")
-    meses_grafica = ultimos_n_meses(12)
+    st.subheader("📈 Cobro de alquiler — últimos 6 meses")
+    meses_grafica = ultimos_n_meses(6)
     valores_grafica = []
     etiquetas_grafica = []
     for (anio_g, mes_num_g) in meses_grafica:
@@ -4028,6 +4041,9 @@ elif pagina == "📑 Estado de cuenta":
                        "ve a «🚪 Ex inquilinos».")
 
 elif pagina == "📊 Actividad por usuario":
+    if not puede_ver_reportes_ampliados:
+        st.error("No tienes autorización para acceder a este reporte.")
+        st.stop()
     st.title("📊 Reporte de actividad por usuario")
     st.caption(
         "Pagos, compras y ventas registrados por cada usuario (campo «Encargado») entre dos fechas. "
@@ -4114,6 +4130,9 @@ elif pagina == "📊 Actividad por usuario":
 # PÁGINA: CUADRE DE TESORERÍA (libro de movimientos y cuadre de fin de mes)
 # ==================================================================
 elif pagina == "💰 Cuadre de tesorería":
+    if not puede_ver_reportes_ampliados:
+        st.error("No tienes autorización para acceder a este reporte.")
+        st.stop()
     st.title("💰 Cuadre de tesorería")
     st.caption(
         "Todos los pagos, compras (egresos) y ventas (ingresos) del periodo, con los totales para cuadrar la caja. "
@@ -4263,6 +4282,9 @@ elif pagina == "💰 Cuadre de tesorería":
 # PÁGINA: RENDICIÓN DE ALQUILERES (qué se cobró, qué se pagó y qué se debe, por mes o rango de fechas)
 # ==================================================================
 elif pagina == "📋 Rendición de alquileres":
+    if not puede_ver_reportes_ampliados:
+        st.error("No tienes autorización para acceder a este reporte.")
+        st.stop()
     st.title("📋 Rendición de alquileres")
     st.caption(
         "El dinero que ingresó en el periodo: cada pago cuenta en la fecha en que se recibió, sin importar a qué mes corresponda "
@@ -4744,6 +4766,9 @@ elif pagina == "📦 Inventario":
 # PÁGINA: CONCILIACIÓN BANCARIA (extracto del banco vs. registros del sistema)
 # ==================================================================
 elif pagina == "🏦 Conciliación bancaria":
+    if not puede_ver_reportes_ampliados:
+        st.error("No tienes autorización para acceder a este reporte.")
+        st.stop()
     st.title("🏦 Conciliación bancaria")
     st.caption(
         "Compara el extracto de tu cuenta bancaria con lo registrado en el sistema: qué cobros y pagos coinciden y cuáles no, y por qué "
