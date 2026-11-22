@@ -1429,11 +1429,7 @@ else:
                           "🤝 Compromisos de pago", "🚪 Ex inquilinos", "💰 Finanzas"]
 
 opciones_administracion = ["(ninguno)", "✅ Pendientes", "🔌 Servicios Básicos", "📦 Inventario", "🗒️ Reuniones"]
-if es_admin:
-    opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería", "🏦 Conciliación bancaria"]
-else:
-    # Reportes operativos para el Cobrador; reportes administrativos reservados.
-    opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres"]
+opciones_reportes = ["(ninguno)", "📑 Estado de cuenta", "📋 Rendición de alquileres", "📊 Actividad por usuario", "💰 Cuadre de tesorería", "🏦 Conciliación bancaria"]
 
 # La navegación financiera queda integrada dentro de Finanzas; ya no existe
 # un segundo bloque lateral de Egresos/Ventas.
@@ -1477,7 +1473,7 @@ else:
     pagina = pagina_principal
 
 # Selector interno de Finanzas: Préstamos, Egresos e Ingresos.
-if es_admin and pagina_principal == "💰 Finanzas" and pagina == "💰 Finanzas":
+if pagina_principal == "💰 Finanzas" and pagina == "💰 Finanzas":
     seccion_finanzas = st.radio(
         "Operaciones financieras",
         ["🤝 Préstamos", "💸 Egresos", "💰 Ingresos"],
@@ -4032,9 +4028,6 @@ elif pagina == "📑 Estado de cuenta":
                        "ve a «🚪 Ex inquilinos».")
 
 elif pagina == "📊 Actividad por usuario":
-    if not es_admin:
-        st.error("No tienes permiso para acceder a este reporte.")
-        st.stop()
     st.title("📊 Reporte de actividad por usuario")
     st.caption(
         "Pagos, compras y ventas registrados por cada usuario (campo «Encargado») entre dos fechas. "
@@ -4121,9 +4114,6 @@ elif pagina == "📊 Actividad por usuario":
 # PÁGINA: CUADRE DE TESORERÍA (libro de movimientos y cuadre de fin de mes)
 # ==================================================================
 elif pagina == "💰 Cuadre de tesorería":
-    if not es_admin:
-        st.error("No tienes permiso para acceder a este reporte.")
-        st.stop()
     st.title("💰 Cuadre de tesorería")
     st.caption(
         "Todos los pagos, compras (egresos) y ventas (ingresos) del periodo, con los totales para cuadrar la caja. "
@@ -6578,9 +6568,6 @@ elif pagina == "👥 Usuarios":
 elif pagina == "💸 Egresos":
     st.title("💸 Egresos")
     st.caption("Un solo formulario para compras de bienes y pagos de servicios u obligaciones operativas.")
-    if not es_admin:
-        st.error("No tienes permiso para registrar egresos.")
-        st.stop()
     nombre_encargado = usuario_actual.get("nombre") or usuario_actual.get("username")
     tab_reg, tab_hist = st.tabs(["➕ Registrar egreso", "📜 Historial consolidado"])
     with tab_reg:
