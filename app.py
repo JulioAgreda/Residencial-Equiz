@@ -25,6 +25,7 @@ import inventario_reportes
 import moras
 import servicios_basicos
 import recibo
+import anticretico_docs
 # Las fechas operativas deben usar recibo.hoy_bolivia() (UTC-4), no date.today() del servidor.
 import rendicion
 import reportes
@@ -2655,7 +2656,7 @@ elif pagina == "🏠 Apartamentos":
                         "entregas": entregas_ac,
                     }
                     st.download_button("📄 Descargar estado de cuenta consolidado (PDF)",
-                        data=recibo.generar_estado_cuenta_anticretico_pdf(datos_estado_ac),
+                        data=anticretico_docs.generar_estado_cuenta_anticretico_pdf(datos_estado_ac),
                         file_name=f"estado_cuenta_anticretico_{apt.get('codigo') or apt['id']}.pdf",
                         mime="application/pdf", key=f"estado_cuenta_ac_{apt['id']}")
                     acumulado_por_id_ac = {}
@@ -2690,7 +2691,7 @@ elif pagina == "🏠 Apartamentos":
                                 "observacion": x.get("observacion"),
                                 "estado_recibo": estado_x,
                             }
-                            st.download_button("Descargar recibo PDF", data=recibo.generar_recibo_anticretico_pdf(datos_pdf_ac), file_name=f"{x.get('numero_recibo') or 'recibo_anticretico'}.pdf", mime="application/pdf", key=f"pdf_entrega_ac_{x['id']}")
+                            st.download_button("Descargar recibo PDF", data=anticretico_docs.generar_recibo_anticretico_pdf(datos_pdf_ac), file_name=f"{x.get('numero_recibo') or 'recibo_anticretico'}.pdf", mime="application/pdf", key=f"pdf_entrega_ac_{x['id']}")
                             if estado_x == "vigente" and es_admin:
                                 with st.form(f"anular_entrega_ac_{x['id']}"):
                                     motivo_anulacion_x = st.text_input("Motivo de anulación", key=f"motivo_anular_ac_{x['id']}")
