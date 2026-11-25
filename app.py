@@ -2280,11 +2280,26 @@ elif pagina == "🏠 Apartamentos":
                     codigo = st.text_input("Código", value=apt["codigo"])
                     piso = st.selectbox("Piso", PISOS, index=PISOS.index(apt["piso"]) if apt["piso"] in PISOS else 0)
                     estado = apt.get("estado") or "Desocupado"
-                    st.text_input("Estado de ocupación", value=estado, disabled=True,
-                                  help="La ocupación solo cambia mediante el procedimiento de salida o ingreso del inquilino.")
-                    inquilino_nombre = apt.get("inquilino_nombre") or ""
-                    st.text_input("Inquilino registrado", value=inquilino_nombre, disabled=True,
-                                  help="Para cambiar de inquilino debe archivarse primero al ocupante anterior.")
+                    inquilino_nombre_actual = apt.get("inquilino_nombre") or ""
+                    # En unidades desocupadas, habilitar el registro del nuevo ocupante.
+                    # En unidades ocupadas, la ficha permanece protegida; las salidas se
+                    # registran por el procedimiento de archivo del inquilino.
+                    if estado == "Desocupado":
+                        estado = st.selectbox(
+                            "Estado de ocupación", ["Desocupado", "Ocupado"],
+                            index=0, key=f"estado_edit_{apt['id']}",
+                            help="Para registrar un nuevo inquilino, cambia a Ocupado y completa su nombre y fecha de ingreso."
+                        )
+                        inquilino_nombre = st.text_input(
+                            "Inquilino registrado", value=inquilino_nombre_actual,
+                            key=f"inquilino_edit_{apt['id']}"
+                        )
+                    else:
+                        st.text_input("Estado de ocupación", value=estado, disabled=True,
+                                      help="La ocupación solo cambia mediante el procedimiento de salida del inquilino.")
+                        inquilino_nombre = inquilino_nombre_actual
+                        st.text_input("Inquilino registrado", value=inquilino_nombre, disabled=True,
+                                      help="Para cambiar de inquilino debe archivarse primero al ocupante anterior.")
                     celular = st.text_input("Celular", value=apt.get("celular") or "")
                     cedula_identidad = st.text_input("Cédula de identidad", value=apt.get("cedula_identidad") or "")
                     nacionalidad = st.text_input("Nacionalidad", value=apt.get("nacionalidad") or "")
@@ -2405,6 +2420,9 @@ elif pagina == "🏠 Apartamentos":
                 guardar = st.form_submit_button("💾 Guardar cambios", use_container_width=True)
 
                 if guardar:
+                    if estado == "Ocupado" and not (inquilino_nombre or "").strip():
+                        st.error("Para marcar el apartamento como Ocupado debes registrar el nombre del nuevo inquilino.")
+                        st.stop()
                     payload = {
                         "codigo": codigo.strip().upper(),
                         "piso": piso,
